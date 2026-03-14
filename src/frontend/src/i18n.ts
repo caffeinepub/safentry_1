@@ -136,6 +136,15 @@ const tr = {
   rating: "Değerlendirme",
   submit: "Gönder",
   noData: "Veri yok",
+  // New keys
+  searchVisitors: "Ziyaretçi Ara...",
+  resetCode: "Kodu Sıfırla",
+  codeReset: "Yeni Kod",
+  blacklistedPerson: "Bu kişi kara listede! Giriş yapamaz.",
+  departureTime: "Çıkış Zamanı",
+  searchPlaceholder: "Ad, kimlik no veya ev sahibi...",
+  resetCodeConfirm: "Personelin kodu sıfırlanacak. Emin misiniz?",
+  newCodeGenerated: "Yeni kod üretildi",
 };
 
 const en: typeof tr = {
@@ -251,6 +260,15 @@ const en: typeof tr = {
   rating: "Rating",
   submit: "Submit",
   noData: "No data",
+  // New keys
+  searchVisitors: "Search visitors...",
+  resetCode: "Reset Code",
+  codeReset: "New Code",
+  blacklistedPerson: "This person is blacklisted! Entry not allowed.",
+  departureTime: "Departure Time",
+  searchPlaceholder: "Name, ID or host...",
+  resetCodeConfirm: "Staff code will be reset. Are you sure?",
+  newCodeGenerated: "New code generated",
 };
 
 const translations: Record<Lang, typeof tr> = {

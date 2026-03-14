@@ -41,6 +41,8 @@ export interface Visitor {
   badgeQr: string;
   notes: string;
   rating?: number;
+  exitRating?: number;
+  exitComment?: string;
   createdAt: number;
 }
 
@@ -56,6 +58,21 @@ export interface Announcement {
   id: string;
   companyId: string;
   message: string;
+  createdBy: string;
+  createdAt: number;
+}
+
+export interface Appointment {
+  id: string;
+  companyId: string;
+  visitorName: string;
+  visitorId: string;
+  hostName: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  purpose: string;
+  notes?: string;
+  status: "pending" | "approved" | "cancelled";
   createdBy: string;
   createdAt: number;
 }

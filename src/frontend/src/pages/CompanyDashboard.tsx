@@ -24,6 +24,7 @@ import {
   refreshSession,
   removeFromBlacklist,
   removeStaff as removeStaffStore,
+  resetStaffCode,
   saveAnnouncement,
   saveCompany,
   saveInviteCode,
@@ -46,10 +47,10 @@ import {
 } from "../utils";
 
 const LABEL_COLORS: Record<string, string> = {
-  normal: "#3b82f6",
+  normal: "#0ea5e9",
   vip: "#f59e0b",
   attention: "#f97316",
-  restricted: "#ef4444",
+  restricted: "#a855f7",
 };
 const AVAIL_COLORS: Record<string, string> = {
   available: "#22c55e",
@@ -101,6 +102,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [visitorFilter, setVisitorFilter] = useState<
     "all" | "active" | "departed"
   >("all");
+  const [visitorSearch, setVisitorSearch] = useState("");
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
@@ -109,6 +111,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   );
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
+  const [confirmMsg, setConfirmMsg] = useState("");
   const [newStaffCode, setNewStaffCode] = useState("");
   const [blIdNumber, setBlIdNumber] = useState("");
   const [blReason, setBlReason] = useState("");
@@ -117,6 +120,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [profileForm, setProfileForm] = useState<Partial<Company>>(
     company ?? {},
   );
+  const [resetCodeResult, setResetCodeResult] = useState<{
+    name: string;
+    code: string;
+  } | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [exportDateFrom, setExportDateFrom] = useState("");
+  const [exportDateTo, setExportDateTo] = useState("");
+
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
@@ -136,6 +147,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   };
 
   const checkout = (v: Visitor) => {
+    setConfirmMsg("");
     setConfirmAction(() => () => {
       saveVisitor({ ...v, status: "departed", departureTime: Date.now() });
       reload();
@@ -156,8 +168,20 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   };
 
   const doRemoveStaff = (staffId: string) => {
+    setConfirmMsg("");
     setConfirmAction(() => () => {
       removeStaffStore(staffId);
+      reload();
+      setConfirmOpen(false);
+    });
+    setConfirmOpen(true);
+  };
+
+  const doResetStaffCode = (s: Staff) => {
+    setConfirmMsg(t(lang, "resetCodeConfirm"));
+    setConfirmAction(() => () => {
+      const newCode = resetStaffCode(s.staffId);
+      setResetCodeResult({ name: s.name, code: newCode });
       reload();
       setConfirmOpen(false);
     });
@@ -203,9 +227,82 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     alert("Profil güncellendi.");
   };
 
-  const filtered = visitors.filter((v) =>
-    visitorFilter === "all" ? true : v.status === visitorFilter,
-  );
+  const copyCompanyCode = () => {
+    navigator.clipboard.writeText(company.companyId).then(() => {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
+    });
+  };
+
+  const exportCsv = () => {
+    const from = exportDateFrom ? new Date(exportDateFrom).getTime() : 0;
+    const to = exportDateTo
+      ? new Date(`${exportDateTo}T23:59:59`).getTime()
+      : Date.now();
+    const rows = visitors.filter((v) => {
+      const t2 = v.arrivalTime;
+      return t2 >= from && t2 <= to;
+    });
+    const headers = [
+      "Tarih",
+      "Giris Saati",
+      "Cikis Saati",
+      "Ad Soyad",
+      "TC/Pasaport",
+      "Telefon",
+      "Sirket",
+      "Plaka",
+      "Amac",
+      "Degerlendirme",
+    ];
+    const lines = [
+      headers.join(","),
+      ...rows.map((v) =>
+        [
+          new Date(v.arrivalTime).toLocaleDateString("tr-TR"),
+          new Date(v.arrivalTime).toLocaleTimeString("tr-TR"),
+          v.departureTime
+            ? new Date(v.departureTime).toLocaleTimeString("tr-TR")
+            : "",
+          `"${v.name}"`,
+          v.idNumber,
+          v.phone,
+          `"${v.visitReason || ""}"`,
+          v.vehiclePlate || "",
+          `"${v.visitType}"`,
+          v.exitRating !== undefined ? String(v.exitRating) : "",
+        ].join(","),
+      ),
+    ];
+    const blob = new Blob([lines.join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `safentry-ziyaretciler-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  // Filter visitors by status AND search text
+  const filtered = visitors
+    .filter((v) =>
+      visitorFilter === "all" ? true : v.status === visitorFilter,
+    )
+    .filter((v) => {
+      if (!visitorSearch.trim()) return true;
+      const q = visitorSearch.toLowerCase();
+      const hostName =
+        staffList.find((s) => s.staffId === v.hostStaffId)?.name ?? "";
+      return (
+        v.name.toLowerCase().includes(q) ||
+        v.idNumber.toLowerCase().includes(q) ||
+        v.hostStaffId.toLowerCase().includes(q) ||
+        hostName.toLowerCase().includes(q)
+      );
+    });
+
   const activeNow = visitors.filter((v) => v.status === "active");
   const today = visitors.filter(
     (v) => new Date(v.arrivalTime).toDateString() === new Date().toDateString(),
@@ -227,6 +324,26 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   ];
 
   const chartData = getLast7DaysData(visitors);
+
+  const statusBadge = (v: Visitor) => {
+    if (v.status === "active")
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+          🟢 {t(lang, "active")}
+        </span>
+      );
+    if (v.status === "departed")
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-500/20 text-slate-400 border border-slate-500/30">
+          ● {t(lang, "departed")}
+        </span>
+      );
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+        ⏳ {t(lang, "preregistered")}
+      </span>
+    );
+  };
 
   return (
     <div className="min-h-screen" style={{ background: "#0a0f1e" }}>
@@ -255,6 +372,30 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </button>
         </div>
       </div>
+
+      {/* Reset code result banner */}
+      {resetCodeResult && (
+        <div
+          data-ocid="staff.success_state"
+          className="mx-6 mt-4 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-sm flex items-center justify-between"
+        >
+          <span>
+            ✅ {resetCodeResult.name} — {t(lang, "newCodeGenerated")}:{" "}
+            <span className="font-mono font-bold">{resetCodeResult.code}</span>
+          </span>
+          <button
+            type="button"
+            className="text-emerald-400 hover:text-white ml-4"
+            onClick={() => setResetCodeResult(null)}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Confirm message override for reset code */}
+      {confirmMsg && confirmOpen && <div className="hidden">{confirmMsg}</div>}
+
       {/* Tabs */}
       <div className="flex overflow-x-auto gap-1 px-6 pt-4 border-b border-white/10">
         {TABS.map((tb) => (
@@ -273,35 +414,100 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </button>
         ))}
       </div>
+
       <div className="p-6">
         {/* VISITORS TAB */}
         {tab === "visitors" && (
           <div>
-            <div className="flex gap-2 mb-4">
-              {(["all", "active", "departed"] as const).map((f) => (
-                <button
-                  type="button"
-                  key={f}
-                  data-ocid={`visitors.${f}.tab`}
-                  onClick={() => setVisitorFilter(f)}
-                  className={`px-4 py-2 rounded-lg text-sm ${
-                    visitorFilter === f
-                      ? "text-white font-semibold"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                  style={
-                    visitorFilter === f
-                      ? {
-                          background:
-                            "linear-gradient(135deg, #0ea5e9, #0284c7)",
-                        }
-                      : { background: "rgba(255,255,255,0.05)" }
-                  }
-                >
-                  {t(lang, f)}
-                </button>
-              ))}
+            {/* Filter + search bar */}
+            <div className="flex flex-wrap gap-3 mb-4 items-center">
+              <div className="flex gap-2">
+                {(["all", "active", "departed"] as const).map((f) => (
+                  <button
+                    type="button"
+                    key={f}
+                    data-ocid={`visitors.${f}.tab`}
+                    onClick={() => setVisitorFilter(f)}
+                    className={`px-4 py-2 rounded-lg text-sm transition-all ${
+                      visitorFilter === f
+                        ? "text-white font-semibold"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                    style={
+                      visitorFilter === f
+                        ? {
+                            background:
+                              "linear-gradient(135deg, #0ea5e9, #0284c7)",
+                          }
+                        : { background: "rgba(255,255,255,0.05)" }
+                    }
+                  >
+                    {t(lang, f)}
+                  </button>
+                ))}
+              </div>
+              <input
+                data-ocid="visitors.search_input"
+                value={visitorSearch}
+                onChange={(e) => setVisitorSearch(e.target.value)}
+                placeholder={t(lang, "searchPlaceholder")}
+                className="flex-1 min-w-[200px] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-500 focus:outline-none focus:border-[#0ea5e9] text-sm"
+              />
+              {visitorSearch && (
+                <span className="text-slate-400 text-sm">
+                  {filtered.length} sonuç
+                </span>
+              )}
             </div>
+
+            {/* CSV Export */}
+            <div
+              className="flex flex-wrap gap-3 mb-4 items-center p-4 rounded-2xl border border-white/10"
+              style={{ background: "rgba(255,255,255,0.02)" }}
+            >
+              <span className="text-slate-300 text-sm font-medium">
+                📊 CSV Dışa Aktar:
+              </span>
+              <input
+                data-ocid="export.date_from.input"
+                type="date"
+                value={exportDateFrom}
+                onChange={(e) => setExportDateFrom(e.target.value)}
+                className="px-3 py-1.5 rounded-lg text-sm text-white bg-white/10 border border-white/20 focus:outline-none"
+              />
+              <span className="text-slate-500 text-sm">—</span>
+              <input
+                data-ocid="export.date_to.input"
+                type="date"
+                value={exportDateTo}
+                onChange={(e) => setExportDateTo(e.target.value)}
+                className="px-3 py-1.5 rounded-lg text-sm text-white bg-white/10 border border-white/20 focus:outline-none"
+              />
+              <button
+                type="button"
+                data-ocid="export.submit_button"
+                onClick={exportCsv}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
+                style={{
+                  background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                }}
+              >
+                ⬇ İndir (
+                {exportDateFrom || exportDateTo
+                  ? visitors.filter((v) => {
+                      const fr = exportDateFrom
+                        ? new Date(exportDateFrom).getTime()
+                        : 0;
+                      const to2 = exportDateTo
+                        ? new Date(`${exportDateTo}T23:59:59`).getTime()
+                        : Date.now();
+                      return v.arrivalTime >= fr && v.arrivalTime <= to2;
+                    }).length
+                  : visitors.length}{" "}
+                kayıt)
+              </button>
+            </div>
+
             {filtered.length === 0 ? (
               <div
                 data-ocid="visitors.empty_state"
@@ -318,8 +524,13 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                       <th className="text-left py-3 px-2">Tel</th>
                       <th className="text-left py-3 px-2">Host</th>
                       <th className="text-left py-3 px-2">Giriş</th>
+                      <th className="text-left py-3 px-2">
+                        {t(lang, "departureTime")}
+                      </th>
                       <th className="text-left py-3 px-2">Süre</th>
                       <th className="text-left py-3 px-2">Etiket</th>
+                      <th className="text-left py-3 px-2">Plaka</th>
+                      <th className="text-left py-3 px-2">Puan</th>
                       <th className="text-left py-3 px-2">Durum</th>
                       <th className="text-left py-3 px-2" />
                     </tr>
@@ -332,7 +543,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                         <tr
                           key={v.visitorId}
                           data-ocid={`visitors.row.${i + 1}`}
-                          className={`border-b border-white/5 ${
+                          className={`border-b border-white/5 transition-colors hover:bg-white/5 ${
                             over4h ? "bg-amber-500/10" : ""
                           }`}
                         >
@@ -355,34 +566,43 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                             {formatDateTime(v.arrivalTime)}
                           </td>
                           <td className="py-3 px-2 text-slate-300">
+                            {v.departureTime ? (
+                              formatDateTime(v.departureTime)
+                            ) : (
+                              <span className="text-slate-600">—</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-2 text-slate-300">
                             {durationLabel(v.arrivalTime, v.departureTime)}
                           </td>
                           <td className="py-3 px-2">
                             <span
-                              className="px-2 py-0.5 rounded-full text-white text-xs"
+                              className="px-2 py-0.5 rounded-full text-white text-xs font-semibold"
                               style={{ background: LABEL_COLORS[v.label] }}
                             >
                               {v.label.toUpperCase()}
                             </span>
                           </td>
-                          <td className="py-3 px-2">
-                            <span
-                              className={`text-xs ${
-                                v.status === "active"
-                                  ? "text-green-400"
-                                  : "text-slate-400"
-                              }`}
-                            >
-                              {v.status === "active" ? "🟢 Aktif" : "● Çıktı"}
-                            </span>
+                          <td className="py-3 px-2 text-slate-400 font-mono text-xs">
+                            {v.vehiclePlate || (
+                              <span className="text-slate-700">—</span>
+                            )}
                           </td>
+                          <td className="py-3 px-2 text-amber-400 text-xs">
+                            {v.exitRating ? (
+                              "★".repeat(v.exitRating)
+                            ) : (
+                              <span className="text-slate-700">—</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-2">{statusBadge(v)}</td>
                           <td className="py-3 px-2">
                             {v.status === "active" && (
                               <button
                                 type="button"
                                 data-ocid={`visitor.checkout_button.${i + 1}`}
                                 onClick={() => checkout(v)}
-                                className="px-3 py-1 rounded-lg text-xs font-medium text-white"
+                                className="px-3 py-1 rounded-lg text-xs font-medium text-white transition-all hover:opacity-80"
                                 style={{
                                   background: "rgba(239,68,68,0.2)",
                                   border: "1px solid rgba(239,68,68,0.4)",
@@ -458,7 +678,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   <div
                     key={s.staffId}
                     data-ocid={`staff.item.${i + 1}`}
-                    className="flex items-center justify-between p-4 rounded-xl border border-white/10"
+                    className="flex items-center justify-between p-4 rounded-xl border border-white/10 hover:border-white/20 transition-colors"
                     style={{ background: "rgba(255,255,255,0.03)" }}
                   >
                     <div>
@@ -484,6 +704,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                             ? t(lang, "inMeeting")
                             : t(lang, "outside")}
                       </span>
+                      <button
+                        type="button"
+                        data-ocid={`staff.reset_code_button.${i + 1}`}
+                        onClick={() => doResetStaffCode(s)}
+                        className="px-2 py-1 rounded-lg text-xs font-medium text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-400/50 transition-colors"
+                      >
+                        {t(lang, "resetCode")}
+                      </button>
                       <button
                         type="button"
                         data-ocid={`staff.delete_button.${i + 1}`}
@@ -552,6 +780,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                       type="button"
                       data-ocid={`blacklist.delete_button.${i + 1}`}
                       onClick={() => {
+                        setConfirmMsg("");
                         setConfirmAction(() => () => {
                           removeFromBlacklist(session.companyId, bl.idNumber);
                           reload();
@@ -589,6 +818,20 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   label: t(lang, "avgDuration"),
                   value: avgDur > 0 ? `${Math.round(avgDur / 60000)} dk` : "-",
                   cls: "stat-card-amber",
+                },
+                {
+                  label: "Ort. Ziyaret Puanı",
+                  value: (() => {
+                    const rated = visitors.filter(
+                      (v) => v.exitRating !== undefined && v.exitRating > 0,
+                    );
+                    if (!rated.length) return "-";
+                    const avg2 =
+                      rated.reduce((s, v2) => s + (v2.exitRating ?? 0), 0) /
+                      rated.length;
+                    return `${"★".repeat(Math.round(avg2))} ${avg2.toFixed(1)}`;
+                  })(),
+                  cls: "stat-card-teal",
                 },
               ].map((card) => (
                 <div
@@ -789,6 +1032,87 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* PROFILE TAB */}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
+            {/* Company Code — read-only */}
+            <div data-ocid="profile.company_code.panel">
+              <p className="text-slate-300 text-sm mb-1 block">Şirket Kodu</p>
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex-1 px-4 py-3 rounded-xl font-mono text-[#0ea5e9] text-sm tracking-widest select-all"
+                  style={{
+                    background: "rgba(14,165,233,0.06)",
+                    border: "1px solid rgba(14,165,233,0.25)",
+                    letterSpacing: "0.15em",
+                  }}
+                >
+                  {company.companyId}
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.company_code.button"
+                  onClick={copyCompanyCode}
+                  title="Kopyala"
+                  className="flex items-center gap-1 px-3 py-3 rounded-xl text-xs font-medium transition-all"
+                  style={{
+                    background: codeCopied
+                      ? "rgba(34,197,94,0.15)"
+                      : "rgba(255,255,255,0.08)",
+                    border: codeCopied
+                      ? "1px solid rgba(34,197,94,0.4)"
+                      : "1px solid rgba(255,255,255,0.15)",
+                    color: codeCopied ? "#4ade80" : "#94a3b8",
+                  }}
+                >
+                  {codeCopied ? (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                        aria-label="Kopyalandı"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      Kopyalandı
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        role="img"
+                        aria-label="Kopyala"
+                      >
+                        <rect
+                          x="9"
+                          y="9"
+                          width="13"
+                          height="13"
+                          rx="2"
+                          ry="2"
+                        />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                      Kopyala
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
             {(
               [
                 ["companyName", "name"],

@@ -1,5 +1,6 @@
 import type {
   Announcement,
+  Appointment,
   BlacklistEntry,
   Company,
   Session,
@@ -45,6 +46,15 @@ export function findStaffById(staffId: string): Staff | null {
 export function removeStaff(staffId: string) {
   const list = getAllStaff().filter((s) => s.staffId !== staffId);
   localStorage.setItem("safentry_staff", JSON.stringify(list));
+}
+export function resetStaffCode(staffId: string): string {
+  const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+  const s = findStaffById(staffId);
+  if (!s) return newCode;
+  const list = getAllStaff().filter((x) => x.staffId !== staffId);
+  const updated: Staff = { ...s, staffId: newCode };
+  localStorage.setItem("safentry_staff", JSON.stringify([...list, updated]));
+  return newCode;
 }
 
 export function getVisitors(companyId: string): Visitor[] {
@@ -135,6 +145,30 @@ export function saveAnnouncement(a: Announcement) {
   localStorage.setItem(
     `safentry_ann_${a.companyId}`,
     JSON.stringify([a, ...list].slice(0, 50)),
+  );
+}
+
+export function getAppointments(companyId: string): Appointment[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_appointments_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveAppointment(a: Appointment) {
+  const list = getAppointments(a.companyId).filter((x) => x.id !== a.id);
+  localStorage.setItem(
+    `safentry_appointments_${a.companyId}`,
+    JSON.stringify([...list, a]),
+  );
+}
+export function deleteAppointment(companyId: string, id: string) {
+  const list = getAppointments(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_appointments_${companyId}`,
+    JSON.stringify(list),
   );
 }
 
