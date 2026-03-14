@@ -8,8 +8,15 @@ export interface Company {
   logoUrl?: string;
   workingHours?: string;
   maxConcurrentVisitors: number;
+  maxCapacity?: number;
   dataRetentionDays: number;
   createdAt: number;
+  customCategories?: string[];
+  customFields?: { id: string; label: string; required: boolean }[];
+  autoCheckoutHours?: number;
+  workingHoursStart?: number;
+  workingHoursEnd?: number;
+  kioskWelcomeMessage?: string;
 }
 
 export interface Staff {
@@ -40,10 +47,15 @@ export interface Visitor {
   status: "active" | "departed" | "preregistered";
   badgeQr: string;
   notes: string;
+  category?: string;
   rating?: number;
   exitRating?: number;
   exitComment?: string;
   createdAt: number;
+  customFieldValues?: Record<string, string>;
+  shiftType?: "morning" | "afternoon" | "night";
+  visitorPhoto?: string;
+  specialNeeds?: string;
 }
 
 export interface BlacklistEntry {
@@ -75,6 +87,20 @@ export interface Appointment {
   status: "pending" | "approved" | "cancelled";
   createdBy: string;
   createdAt: number;
+  inviteCode?: string;
+  backupContact?: string;
+  recurrence?: "none" | "weekly" | "monthly";
+  recurrenceEndDate?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  actorName: string;
+  actorId: string;
+  action: string;
+  details: string;
+  companyId: string;
 }
 
 export interface Session {
@@ -94,4 +120,5 @@ export type AppScreen =
   | "staff-login"
   | "company-dashboard"
   | "staff-dashboard"
+  | "kiosk"
   | "verify";

@@ -145,6 +145,21 @@ const tr = {
   searchPlaceholder: "Ad, kimlik no veya ev sahibi...",
   resetCodeConfirm: "Personelin kodu sıfırlanacak. Emin misiniz?",
   newCodeGenerated: "Yeni kod üretildi",
+  idVerification: "Kimlik Doğrulama",
+  idVerifyQuestion: "Ziyaretçinin kimliğini kontrol ettiniz mi?",
+  yesProceed: "Evet, Devam Et",
+  noCancel: "Hayır, İptal",
+  recurrence: "Tekrar",
+  recurrenceNone: "Yok",
+  recurrenceWeekly: "Haftalık",
+  recurrenceMonthly: "Aylık",
+  recurrenceEndDate: "Bitiş Tarihi",
+  backupContact: "Yedek İletişim",
+  kioskPending: "Kiosk Onayı Bekleyen",
+  kioskWaiting: "Bilgileriniz alındı, güvenlik onayı bekleniyor...",
+  kioskApprove: "Onayla",
+  kioskReject: "Reddet",
+  kioskPendingVisitors: "Kiosk Onayları",
 };
 
 const en: typeof tr = {
@@ -269,6 +284,22 @@ const en: typeof tr = {
   searchPlaceholder: "Name, ID or host...",
   resetCodeConfirm: "Staff code will be reset. Are you sure?",
   newCodeGenerated: "New code generated",
+  idVerification: "ID Verification",
+  idVerifyQuestion: "Did you verify the visitor's ID?",
+  yesProceed: "Yes, Proceed",
+  noCancel: "No, Cancel",
+  recurrence: "Recurrence",
+  recurrenceNone: "None",
+  recurrenceWeekly: "Weekly",
+  recurrenceMonthly: "Monthly",
+  recurrenceEndDate: "End Date",
+  backupContact: "Backup Contact",
+  kioskPending: "Pending Kiosk Approval",
+  kioskWaiting:
+    "Your information has been received, awaiting security confirmation...",
+  kioskApprove: "Approve",
+  kioskReject: "Reject",
+  kioskPendingVisitors: "Kiosk Approvals",
 };
 
 const translations: Record<Lang, typeof tr> = {

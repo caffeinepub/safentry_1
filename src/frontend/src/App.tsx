@@ -6,6 +6,7 @@ import type { AppScreen } from "./types";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import CompanyLogin from "./pages/CompanyLogin";
 import CompanyRegister from "./pages/CompanyRegister";
+import KioskMode from "./pages/KioskMode";
 import LanguageSelect from "./pages/LanguageSelect";
 import StaffDashboard from "./pages/StaffDashboard";
 import StaffLogin from "./pages/StaffLogin";
@@ -27,8 +28,15 @@ export default function App() {
   };
 
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
+  const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
 
-  const navigate = useCallback((s: AppScreen) => setScreen(s), []);
+  const navigate = useCallback(
+    (s: AppScreen, state?: { companyId?: string }) => {
+      if (s === "kiosk" && state?.companyId) setKioskCompanyId(state.companyId);
+      setScreen(s);
+    },
+    [],
+  );
 
   // Session timeout check
   useEffect(() => {
@@ -69,6 +77,8 @@ export default function App() {
     return <CompanyDashboard onNavigate={navigate} onRefresh={refresh} />;
   if (screen === "staff-dashboard")
     return <StaffDashboard onNavigate={navigate} onRefresh={refresh} />;
+  if (screen === "kiosk")
+    return <KioskMode companyId={kioskCompanyId ?? ""} onNavigate={navigate} />;
   if (screen === "verify") return <Verify onNavigate={navigate} />;
   return null;
 }

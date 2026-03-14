@@ -8,9 +8,9 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { addAuditLog, getAuditLogs } from "../auditLog";
 import ConfirmModal from "../components/ConfirmModal";
 import LangSwitcher from "../components/LangSwitcher";
-import QRCode from "../components/QRCode";
 import { getLang, t } from "../i18n";
 import {
   addToBlacklist,
@@ -33,18 +33,13 @@ import {
 } from "../store";
 import type {
   AppScreen,
+  AuditLog,
   BlacklistEntry,
   Company,
   Staff,
   Visitor,
 } from "../types";
-import {
-  durationLabel,
-  formatDateTime,
-  generateId,
-  generateStaffId,
-  hoursSince,
-} from "../utils";
+import { durationLabel, formatDateTime, generateId } from "../utils";
 
 const LABEL_COLORS: Record<string, string> = {
   normal: "#0ea5e9",
@@ -56,6 +51,15 @@ const AVAIL_COLORS: Record<string, string> = {
   available: "#22c55e",
   in_meeting: "#f59e0b",
   outside: "#94a3b8",
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  Misafir: "#0ea5e9",
+  Müteahhit: "#f97316",
+  Teslimat: "#22c55e",
+  Mülakat: "#a855f7",
+  Tedarikçi: "#f59e0b",
+  Diğer: "#64748b",
 };
 
 interface Props {
@@ -70,6 +74,7 @@ type Tab =
   | "statistics"
   | "evacuation"
   | "announcements"
+  | "auditlog"
   | "profile";
 
 function getLast7DaysData(visitors: Visitor[]) {
@@ -109,9 +114,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [announcements, setAnnouncements] = useState(
     getAnnouncements(session.companyId),
   );
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditActionFilter, setAuditActionFilter] = useState("");
+  const [auditDateFilter, setAuditDateFilter] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
-  const [confirmMsg, setConfirmMsg] = useState("");
+  const [_confirmMsg, setConfirmMsg] = useState("");
   const [newStaffCode, setNewStaffCode] = useState("");
   const [blIdNumber, setBlIdNumber] = useState("");
   const [blReason, setBlReason] = useState("");
@@ -128,10 +136,21 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
 
+  // Visitor history dialog
+  const [historyVisitor, setHistoryVisitor] = useState<Visitor | null>(null);
+
+  // Category management
+  const [newCategoryInput, setNewCategoryInput] = useState("");
+
+  // Custom field management
+  const [newFieldLabel, setNewFieldLabel] = useState("");
+  const [newFieldRequired, setNewFieldRequired] = useState(false);
+
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
     setBlacklist(getBlacklist(session.companyId));
+    setAuditLogs(getAuditLogs(session.companyId));
     refreshSession();
   }, [session.companyId]);
 
@@ -141,19 +160,41 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     return () => clearInterval(timer);
   }, [reload]);
 
+  // Auto-checkout effect
+  useEffect(() => {
+    const latestCompany = findCompanyById(session.companyId);
+    const autoHours = latestCompany?.autoCheckoutHours ?? 0;
+    if (!autoHours) return;
+    const interval = setInterval(
+      () => {
+        const now = Date.now();
+        const activeVis = getVisitors(session.companyId).filter(
+          (v) => v.status === "active",
+        );
+        let changed = false;
+        for (const v of activeVis) {
+          if (now - v.arrivalTime > autoHours * 3600000) {
+            saveVisitor({ ...v, status: "departed", departureTime: now });
+            addAuditLog(
+              session.companyId,
+              "Sistem",
+              "auto",
+              "auto_checkout",
+              `${v.name} otomatik çıkış kaydedildi`,
+            );
+            changed = true;
+          }
+        }
+        if (changed) reload();
+      },
+      5 * 60 * 1000,
+    );
+    return () => clearInterval(interval);
+  }, [session.companyId, reload]);
+
   const logout = () => {
     clearSession();
     onNavigate("welcome");
-  };
-
-  const checkout = (v: Visitor) => {
-    setConfirmMsg("");
-    setConfirmAction(() => () => {
-      saveVisitor({ ...v, status: "departed", departureTime: Date.now() });
-      reload();
-      setConfirmOpen(false);
-    });
-    setConfirmOpen(true);
   };
 
   const addStaff = () => {
@@ -163,14 +204,28 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     const s = all.find((x) => x.staffId === newStaffCode);
     if (!s) return alert("Personel bulunamadı");
     saveStaff({ ...s, companyId: session.companyId });
+    addAuditLog(
+      session.companyId,
+      "Yönetici",
+      session.companyId,
+      "staff_added",
+      `${s.name} şirkete eklendi`,
+    );
     setNewStaffCode("");
     reload();
   };
 
-  const doRemoveStaff = (staffId: string) => {
+  const doRemoveStaff = (s: Staff) => {
     setConfirmMsg("");
     setConfirmAction(() => () => {
-      removeStaffStore(staffId);
+      removeStaffStore(s.staffId);
+      addAuditLog(
+        session.companyId,
+        "Yönetici",
+        session.companyId,
+        "staff_removed",
+        `${s.name} şirketten çıkarıldı`,
+      );
       reload();
       setConfirmOpen(false);
     });
@@ -203,8 +258,27 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       addedBy: session.staffId ?? "company",
       addedAt: Date.now(),
     });
+    addAuditLog(
+      session.companyId,
+      "Yönetici",
+      session.companyId,
+      "blacklist_add",
+      `${blIdNumber} kara listeye eklendi${blReason ? `: ${blReason}` : ""}`,
+    );
     setBlIdNumber("");
     setBlReason("");
+    reload();
+  };
+
+  const doRemoveBl = (idNumber: string) => {
+    removeFromBlacklist(session.companyId, idNumber);
+    addAuditLog(
+      session.companyId,
+      "Yönetici",
+      session.companyId,
+      "blacklist_remove",
+      `${idNumber} kara listeden çıkarıldı`,
+    );
     reload();
   };
 
@@ -250,6 +324,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       "Ad Soyad",
       "TC/Pasaport",
       "Telefon",
+      "Kategori",
       "Sirket",
       "Plaka",
       "Amac",
@@ -267,6 +342,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           `"${v.name}"`,
           v.idNumber,
           v.phone,
+          v.category ?? "",
           `"${v.visitReason || ""}"`,
           v.vehiclePlate || "",
           `"${v.visitType}"`,
@@ -283,6 +359,69 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     a.download = `safentry-ziyaretciler-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  // Category management helpers
+  const getCurrentCategories = (): string[] => {
+    const fresh = findCompanyById(session.companyId);
+    return fresh?.customCategories?.length
+      ? fresh.customCategories
+      : ["Misafir", "Müteahhit", "Teslimat", "Mülakat", "Tedarikçi", "Diğer"];
+  };
+
+  const addCategory = () => {
+    if (!newCategoryInput.trim()) return;
+    const cats = getCurrentCategories();
+    if (cats.includes(newCategoryInput.trim())) return;
+    const fresh = findCompanyById(session.companyId);
+    if (fresh) {
+      saveCompany({
+        ...fresh,
+        customCategories: [...cats, newCategoryInput.trim()],
+      });
+    }
+    setNewCategoryInput("");
+    reload();
+  };
+
+  const removeCategory = (cat: string) => {
+    const cats = getCurrentCategories().filter((c) => c !== cat);
+    const fresh = findCompanyById(session.companyId);
+    if (fresh) {
+      saveCompany({ ...fresh, customCategories: cats });
+    }
+    reload();
+  };
+
+  const addCustomField = () => {
+    if (!newFieldLabel.trim()) return;
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    const fields = fresh.customFields ?? [];
+    saveCompany({
+      ...fresh,
+      customFields: [
+        ...fields,
+        {
+          id: generateId(),
+          label: newFieldLabel.trim(),
+          required: newFieldRequired,
+        },
+      ],
+    });
+    setNewFieldLabel("");
+    setNewFieldRequired(false);
+    reload();
+  };
+
+  const removeCustomField = (id: string) => {
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    saveCompany({
+      ...fresh,
+      customFields: (fresh.customFields ?? []).filter((f) => f.id !== id),
+    });
+    reload();
   };
 
   // Filter visitors by status AND search text
@@ -313,6 +452,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       .reduce((acc, v) => acc + (v.departureTime! - v.arrivalTime), 0) /
     (today.filter((v) => v.departureTime).length || 1);
 
+  const maxCap = company?.maxCapacity ?? company?.maxConcurrentVisitors ?? 0;
+  const capacityExceeded = maxCap > 0 && activeNow.length >= maxCap;
+
   const TABS: { key: Tab; label: string }[] = [
     { key: "visitors", label: t(lang, "visitors") },
     { key: "staff", label: t(lang, "staffList") },
@@ -320,10 +462,86 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "statistics", label: t(lang, "statistics") },
     { key: "evacuation", label: t(lang, "evacuation") },
     { key: "announcements", label: t(lang, "announcements") },
+    { key: "auditlog", label: "📋 Denetim Logu" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
   const chartData = getLast7DaysData(visitors);
+
+  // Category breakdown for stats
+  const categoryData = (() => {
+    const counts: Record<string, number> = {};
+    for (const v of visitors) {
+      const cat = v.category || "Diğer";
+      counts[cat] = (counts[cat] ?? 0) + 1;
+    }
+    return Object.entries(counts).map(([category, count]) => ({
+      category,
+      count,
+    }));
+  })();
+
+  // Hour breakdown for stats
+  const hourData = (() => {
+    const counts: number[] = new Array(24).fill(0);
+    for (const v of visitors) {
+      const h = new Date(v.arrivalTime).getHours();
+      counts[h]++;
+    }
+    return counts.map((count, hour) => ({
+      hour: `${String(hour).padStart(2, "0")}:00`,
+      count,
+    }));
+  })();
+
+  // Avg duration by category
+  const avgDurByCat = (() => {
+    const catData: Record<string, { total: number; count: number }> = {};
+    for (const v of visitors.filter((v) => v.departureTime)) {
+      const cat = v.category || "Diğer";
+      if (!catData[cat]) catData[cat] = { total: 0, count: 0 };
+      catData[cat].total += (v.departureTime! - v.arrivalTime) / 60000;
+      catData[cat].count++;
+    }
+    return Object.entries(catData).map(([category, d]) => ({
+      category,
+      minutes: Math.round(d.total / d.count),
+    }));
+  })();
+
+  // Shift distribution
+  const shiftCounts = {
+    morning: visitors.filter((v) => v.shiftType === "morning").length,
+    afternoon: visitors.filter((v) => v.shiftType === "afternoon").length,
+    night: visitors.filter((v) => v.shiftType === "night").length,
+  };
+
+  // Staff performance data
+  const staffPerformance = staffList.map((s) => {
+    const registered = visitors.filter((v) => v.registeredBy === s.staffId);
+    const departed = registered.filter((v) => v.departureTime);
+    const avgDurMins = departed.length
+      ? Math.round(
+          departed.reduce(
+            (acc, v) => acc + (v.departureTime! - v.arrivalTime) / 60000,
+            0,
+          ) / departed.length,
+        )
+      : 0;
+    const catCounts: Record<string, number> = {};
+    for (const v of registered) {
+      const cat = v.category || "Diğer";
+      catCounts[cat] = (catCounts[cat] ?? 0) + 1;
+    }
+    const topCat =
+      Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    return {
+      name: s.name,
+      total: registered.length,
+      avgDurMins,
+      topCat,
+    };
+  });
 
   const statusBadge = (v: Visitor) => {
     if (v.status === "active")
@@ -345,6 +563,58 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     );
   };
 
+  // Audit log filters
+  const filteredAuditLogs = auditLogs.filter((log) => {
+    if (auditActionFilter && !log.action.includes(auditActionFilter))
+      return false;
+    if (auditDateFilter) {
+      const logDate = log.timestamp.slice(0, 10);
+      if (logDate !== auditDateFilter) return false;
+    }
+    return true;
+  });
+
+  const ACTION_OPTIONS = [
+    { value: "", label: "Tüm İşlemler" },
+    { value: "visitor_registered", label: "Ziyaretçi Kayıt" },
+    { value: "visitor_checkout", label: "Ziyaretçi Çıkış" },
+    { value: "blacklist_add", label: "Kara Liste Ekleme" },
+    { value: "blacklist_remove", label: "Kara Liste Silme" },
+    { value: "staff_added", label: "Personel Ekleme" },
+    { value: "staff_removed", label: "Personel Çıkarma" },
+    { value: "bulk_import", label: "Toplu CSV Aktarım" },
+    { value: "auto_checkout", label: "Otomatik Çıkış" },
+  ];
+
+  const actionLabel = (action: string) => {
+    return ACTION_OPTIONS.find((o) => o.value === action)?.label ?? action;
+  };
+
+  const actionColor = (action: string) => {
+    if (
+      action.includes("registered") ||
+      action.includes("added") ||
+      action.includes("import")
+    )
+      return "#22c55e";
+    if (
+      action.includes("checkout") ||
+      action.includes("removed") ||
+      action.includes("remove")
+    )
+      return "#ef4444";
+    return "#0ea5e9";
+  };
+
+  // Current categories from company
+  const currentCategories = findCompanyById(session.companyId)?.customCategories
+    ?.length
+    ? findCompanyById(session.companyId)!.customCategories!
+    : ["Misafir", "Müteahhit", "Teslimat", "Mülakat", "Tedarikçi", "Diğer"];
+
+  const currentCustomFields =
+    findCompanyById(session.companyId)?.customFields ?? [];
+
   return (
     <div className="min-h-screen" style={{ background: "#0a0f1e" }}>
       <ConfirmModal
@@ -352,13 +622,158 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         onConfirm={confirmAction}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      {/* Visitor History Dialog */}
+      {historyVisitor && (
+        <div
+          data-ocid="visitor_history.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-2xl p-6 rounded-2xl max-h-[85vh] overflow-y-auto"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(14,165,233,0.3)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-white font-bold text-lg">
+                  {historyVisitor.name}
+                </h3>
+                <p className="text-slate-400 text-sm font-mono">
+                  {historyVisitor.idNumber}
+                </p>
+              </div>
+              <button
+                type="button"
+                data-ocid="visitor_history.close_button"
+                onClick={() => setHistoryVisitor(null)}
+                className="text-slate-400 hover:text-white text-xl"
+              >
+                ✕
+              </button>
+            </div>
+
+            {(() => {
+              const history = visitors
+                .filter((v) => v.idNumber === historyVisitor.idNumber)
+                .sort((a, b) => b.arrivalTime - a.arrivalTime);
+              return history.length === 0 ? (
+                <div
+                  data-ocid="visitor_history.empty_state"
+                  className="text-center py-8 text-slate-500"
+                >
+                  Geçmiş ziyaret bulunamadı.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-slate-400 text-sm mb-3">
+                    Toplam {history.length} ziyaret kaydı
+                  </p>
+                  {history.map((v, i) => (
+                    <div
+                      key={v.visitorId}
+                      data-ocid={`visitor_history.item.${i + 1}`}
+                      className="p-4 rounded-xl"
+                      style={{
+                        background:
+                          v.status === "active"
+                            ? "rgba(34,197,94,0.07)"
+                            : "rgba(255,255,255,0.04)",
+                        border:
+                          v.status === "active"
+                            ? "1px solid rgba(34,197,94,0.25)"
+                            : "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-white text-sm font-medium">
+                              {formatDateTime(v.arrivalTime)}
+                            </span>
+                            {v.category && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs text-white"
+                                style={{ background: "rgba(14,165,233,0.3)" }}
+                              >
+                                {v.category}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-slate-400 text-xs">
+                            Host:{" "}
+                            {staffList.find((s) => s.staffId === v.hostStaffId)
+                              ?.name ??
+                              (v.hostStaffId || "—")}
+                          </div>
+                          {v.visitReason && (
+                            <div className="text-slate-500 text-xs mt-0.5">
+                              {v.visitReason}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          {v.departureTime && (
+                            <div className="text-slate-400 text-xs">
+                              Süre:{" "}
+                              {durationLabel(v.arrivalTime, v.departureTime)}
+                            </div>
+                          )}
+                          {v.exitRating && (
+                            <div className="text-amber-400 text-xs">
+                              {"\u2605".repeat(v.exitRating)}
+                              {"\u2606".repeat(5 - v.exitRating)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Reset code result notification */}
+      {resetCodeResult && (
+        <div
+          className="fixed top-4 right-4 z-50 p-4 rounded-2xl shadow-2xl max-w-sm"
+          style={{
+            background: "#0f1729",
+            border: "1.5px solid rgba(34,197,94,0.4)",
+          }}
+        >
+          <p className="text-emerald-400 font-semibold text-sm mb-1">
+            ✅ Kod Sıfırlandı!
+          </p>
+          <p className="text-slate-300 text-sm">{resetCodeResult.name}</p>
+          <p className="text-white font-mono text-lg tracking-widest">
+            {resetCodeResult.code}
+          </p>
+          <button
+            type="button"
+            onClick={() => setResetCodeResult(null)}
+            className="mt-2 text-slate-500 text-xs hover:text-slate-300"
+          >
+            Kapat
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div>
           <div className="text-xl font-bold text-white">
             <span style={{ color: "#0ea5e9" }}>Safe</span>ntry
           </div>
-          <div className="text-xs text-slate-400">{company?.name}</div>
+          <div className="text-xs text-slate-400">
+            {company?.name} — Yönetici Paneli
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <LangSwitcher onChange={onRefresh} />
@@ -373,44 +788,45 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         </div>
       </div>
 
-      {/* Reset code result banner */}
-      {resetCodeResult && (
-        <div
-          data-ocid="staff.success_state"
-          className="mx-6 mt-4 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 text-sm flex items-center justify-between"
-        >
-          <span>
-            ✅ {resetCodeResult.name} — {t(lang, "newCodeGenerated")}:{" "}
-            <span className="font-mono font-bold">{resetCodeResult.code}</span>
-          </span>
-          <button
-            type="button"
-            className="text-emerald-400 hover:text-white ml-4"
-            onClick={() => setResetCodeResult(null)}
+      {/* Summary banner */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-6 pt-4">
+        {[
+          { label: "Aktif", value: activeNow.length, color: "#22c55e" },
+          { label: "Bugün", value: today.length, color: "#0ea5e9" },
+          { label: "Toplam", value: visitors.length, color: "#f59e0b" },
+          { label: "Personel", value: staffList.length, color: "#a855f7" },
+        ].map((s) => (
+          <div
+            key={s.label}
+            className="px-4 py-2 rounded-xl flex items-center gap-3"
+            style={{
+              background: `${s.color}12`,
+              border: `1px solid ${s.color}30`,
+            }}
           >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Confirm message override for reset code */}
-      {confirmMsg && confirmOpen && <div className="hidden">{confirmMsg}</div>}
+            <span className="text-2xl font-bold" style={{ color: s.color }}>
+              {s.value}
+            </span>
+            <span className="text-slate-400 text-sm">{s.label}</span>
+          </div>
+        ))}
+      </div>
 
       {/* Tabs */}
       <div className="flex overflow-x-auto gap-1 px-6 pt-4 border-b border-white/10">
-        {TABS.map((tb) => (
+        {TABS.map(({ key, label }) => (
           <button
             type="button"
-            key={tb.key}
-            data-ocid={`company_dashboard.${tb.key}.tab`}
-            onClick={() => setTab(tb.key)}
+            key={key}
+            data-ocid={`company_dashboard.${key}.tab`}
+            onClick={() => setTab(key)}
             className={`px-4 py-2 text-sm font-medium rounded-t-lg whitespace-nowrap transition-all ${
-              tab === tb.key
-                ? "text-white border-b-2 border-[#0ea5e9]"
+              tab === key
+                ? "text-white border-b-2 border-[#f59e0b]"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            {tb.label}
+            {label}
           </button>
         ))}
       </div>
@@ -419,93 +835,95 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* VISITORS TAB */}
         {tab === "visitors" && (
           <div>
-            {/* Filter + search bar */}
-            <div className="flex flex-wrap gap-3 mb-4 items-center">
-              <div className="flex gap-2">
-                {(["all", "active", "departed"] as const).map((f) => (
-                  <button
-                    type="button"
-                    key={f}
-                    data-ocid={`visitors.${f}.tab`}
-                    onClick={() => setVisitorFilter(f)}
-                    className={`px-4 py-2 rounded-lg text-sm transition-all ${
-                      visitorFilter === f
-                        ? "text-white font-semibold"
-                        : "text-slate-400 hover:text-white"
-                    }`}
-                    style={
-                      visitorFilter === f
-                        ? {
-                            background:
-                              "linear-gradient(135deg, #0ea5e9, #0284c7)",
-                          }
-                        : { background: "rgba(255,255,255,0.05)" }
-                    }
-                  >
-                    {t(lang, f)}
-                  </button>
-                ))}
+            {/* Capacity Warning */}
+            {capacityExceeded && (
+              <div
+                data-ocid="visitors.capacity.error_state"
+                className="mb-4 p-4 rounded-xl border border-red-500/50 bg-red-900/20 flex items-center gap-3"
+              >
+                <span className="text-2xl">🚨</span>
+                <div>
+                  <p className="text-red-400 font-semibold text-sm">
+                    Kapasite Sınırına Ulaşıldı!
+                  </p>
+                  <p className="text-red-300/70 text-xs mt-0.5">
+                    Binada {activeNow.length} ziyaretçi var — maksimum kapasite{" "}
+                    {maxCap} kişi.
+                  </p>
+                </div>
               </div>
+            )}
+
+            {/* Filters + search */}
+            <div className="flex flex-wrap gap-3 mb-5 items-center">
+              {(["all", "active", "departed"] as const).map((f) => (
+                <button
+                  type="button"
+                  key={f}
+                  data-ocid={`visitors.${f}.tab`}
+                  onClick={() => setVisitorFilter(f)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    visitorFilter === f
+                      ? "text-white"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                  style={
+                    visitorFilter === f
+                      ? {
+                          background: "rgba(14,165,233,0.25)",
+                          border: "1px solid rgba(14,165,233,0.5)",
+                        }
+                      : {
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                        }
+                  }
+                >
+                  {f === "all"
+                    ? t(lang, "all")
+                    : f === "active"
+                      ? t(lang, "active")
+                      : t(lang, "departed")}
+                </button>
+              ))}
               <input
                 data-ocid="visitors.search_input"
                 value={visitorSearch}
                 onChange={(e) => setVisitorSearch(e.target.value)}
-                placeholder={t(lang, "searchPlaceholder")}
-                className="flex-1 min-w-[200px] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white placeholder-slate-500 focus:outline-none focus:border-[#0ea5e9] text-sm"
+                placeholder={t(lang, "search")}
+                className="flex-1 min-w-[200px] px-4 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
               />
-              {visitorSearch && (
-                <span className="text-slate-400 text-sm">
-                  {filtered.length} sonuç
-                </span>
-              )}
-            </div>
 
-            {/* CSV Export */}
-            <div
-              className="flex flex-wrap gap-3 mb-4 items-center p-4 rounded-2xl border border-white/10"
-              style={{ background: "rgba(255,255,255,0.02)" }}
-            >
-              <span className="text-slate-300 text-sm font-medium">
-                📊 CSV Dışa Aktar:
-              </span>
-              <input
-                data-ocid="export.date_from.input"
-                type="date"
-                value={exportDateFrom}
-                onChange={(e) => setExportDateFrom(e.target.value)}
-                className="px-3 py-1.5 rounded-lg text-sm text-white bg-white/10 border border-white/20 focus:outline-none"
-              />
-              <span className="text-slate-500 text-sm">—</span>
-              <input
-                data-ocid="export.date_to.input"
-                type="date"
-                value={exportDateTo}
-                onChange={(e) => setExportDateTo(e.target.value)}
-                className="px-3 py-1.5 rounded-lg text-sm text-white bg-white/10 border border-white/20 focus:outline-none"
-              />
-              <button
-                type="button"
-                data-ocid="export.submit_button"
-                onClick={exportCsv}
-                className="px-4 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90"
-                style={{
-                  background: "linear-gradient(135deg,#22c55e,#16a34a)",
-                }}
-              >
-                ⬇ İndir (
-                {exportDateFrom || exportDateTo
-                  ? visitors.filter((v) => {
-                      const fr = exportDateFrom
-                        ? new Date(exportDateFrom).getTime()
-                        : 0;
-                      const to2 = exportDateTo
-                        ? new Date(`${exportDateTo}T23:59:59`).getTime()
-                        : Date.now();
-                      return v.arrivalTime >= fr && v.arrivalTime <= to2;
-                    }).length
-                  : visitors.length}{" "}
-                kayıt)
-              </button>
+              {/* CSV Export */}
+              <div className="flex gap-2 items-center">
+                <input
+                  data-ocid="visitors.export_from.input"
+                  type="date"
+                  value={exportDateFrom}
+                  onChange={(e) => setExportDateFrom(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                />
+                <span className="text-slate-500 text-sm">—</span>
+                <input
+                  data-ocid="visitors.export_to.input"
+                  type="date"
+                  value={exportDateTo}
+                  onChange={(e) => setExportDateTo(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                />
+                <button
+                  type="button"
+                  data-ocid="visitors.export.button"
+                  onClick={exportCsv}
+                  className="px-4 py-1.5 rounded-xl text-white text-sm font-medium whitespace-nowrap"
+                  style={{
+                    background: "rgba(34,197,94,0.15)",
+                    border: "1px solid rgba(34,197,94,0.35)",
+                  }}
+                >
+                  CSV İndir
+                </button>
+              </div>
             </div>
 
             {filtered.length === 0 ? (
@@ -513,110 +931,61 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 data-ocid="visitors.empty_state"
                 className="text-center py-16 text-slate-500"
               >
-                {t(lang, "noVisitors")}
+                {t(lang, "noData")}
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm" data-ocid="visitor.table">
-                  <thead>
-                    <tr className="text-slate-400 border-b border-white/10">
-                      <th className="text-left py-3 px-2">Ad</th>
-                      <th className="text-left py-3 px-2">Tel</th>
-                      <th className="text-left py-3 px-2">Host</th>
-                      <th className="text-left py-3 px-2">Giriş</th>
-                      <th className="text-left py-3 px-2">
-                        {t(lang, "departureTime")}
-                      </th>
-                      <th className="text-left py-3 px-2">Süre</th>
-                      <th className="text-left py-3 px-2">Etiket</th>
-                      <th className="text-left py-3 px-2">Plaka</th>
-                      <th className="text-left py-3 px-2">Puan</th>
-                      <th className="text-left py-3 px-2">Durum</th>
-                      <th className="text-left py-3 px-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((v, i) => {
-                      const over4h =
-                        v.status === "active" && hoursSince(v.arrivalTime) >= 4;
-                      return (
-                        <tr
-                          key={v.visitorId}
-                          data-ocid={`visitors.row.${i + 1}`}
-                          className={`border-b border-white/5 transition-colors hover:bg-white/5 ${
-                            over4h ? "bg-amber-500/10" : ""
-                          }`}
+              <div className="space-y-2">
+                {filtered
+                  .slice()
+                  .sort((a, b) => b.arrivalTime - a.arrivalTime)
+                  .map((v, i) => (
+                    <div
+                      key={v.visitorId}
+                      data-ocid={`visitors.item.${i + 1}`}
+                      className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/8 transition-colors cursor-pointer"
+                      onClick={() => setHistoryVisitor(v)}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && setHistoryVisitor(v)
+                      }
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-xs shrink-0"
+                          style={{ background: LABEL_COLORS[v.label] }}
                         >
-                          <td className="py-3 px-2 text-white font-medium">
-                            {v.name}
-                            {over4h && (
-                              <span className="ml-2 text-xs text-amber-400">
-                                ⚠️ {t(lang, "fourHourWarning")}
+                          {v.name[0]?.toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-white font-medium text-sm">
+                              {v.name}
+                            </span>
+                            {statusBadge(v)}
+                            {v.category && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs text-white"
+                                style={{ background: "rgba(14,165,233,0.3)" }}
+                              >
+                                {v.category}
                               </span>
                             )}
-                          </td>
-                          <td className="py-3 px-2 text-slate-300">
-                            {v.phone}
-                          </td>
-                          <td className="py-3 px-2 text-slate-300">
+                          </div>
+                          <div className="text-slate-400 text-xs truncate">
+                            {formatDateTime(v.arrivalTime)} &bull;{" "}
                             {staffList.find((s) => s.staffId === v.hostStaffId)
                               ?.name ?? v.hostStaffId}
-                          </td>
-                          <td className="py-3 px-2 text-slate-300">
-                            {formatDateTime(v.arrivalTime)}
-                          </td>
-                          <td className="py-3 px-2 text-slate-300">
-                            {v.departureTime ? (
-                              formatDateTime(v.departureTime)
-                            ) : (
-                              <span className="text-slate-600">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-2 text-slate-300">
-                            {durationLabel(v.arrivalTime, v.departureTime)}
-                          </td>
-                          <td className="py-3 px-2">
-                            <span
-                              className="px-2 py-0.5 rounded-full text-white text-xs font-semibold"
-                              style={{ background: LABEL_COLORS[v.label] }}
-                            >
-                              {v.label.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-2 text-slate-400 font-mono text-xs">
-                            {v.vehiclePlate || (
-                              <span className="text-slate-700">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-2 text-amber-400 text-xs">
-                            {v.exitRating ? (
-                              "★".repeat(v.exitRating)
-                            ) : (
-                              <span className="text-slate-700">—</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-2">{statusBadge(v)}</td>
-                          <td className="py-3 px-2">
-                            {v.status === "active" && (
-                              <button
-                                type="button"
-                                data-ocid={`visitor.checkout_button.${i + 1}`}
-                                onClick={() => checkout(v)}
-                                className="px-3 py-1 rounded-lg text-xs font-medium text-white transition-all hover:opacity-80"
-                                style={{
-                                  background: "rgba(239,68,68,0.2)",
-                                  border: "1px solid rgba(239,68,68,0.4)",
-                                }}
-                              >
-                                {t(lang, "checkout")}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-slate-500 text-xs shrink-0 ml-4">
+                        {v.departureTime
+                          ? durationLabel(v.arrivalTime, v.departureTime)
+                          : v.status === "active"
+                            ? durationLabel(v.arrivalTime)
+                            : ""}
+                      </div>
+                    </div>
+                  ))}
               </div>
             )}
           </div>
@@ -624,53 +993,58 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
         {/* STAFF TAB */}
         {tab === "staff" && (
-          <div className="space-y-6">
-            <div className="flex gap-3">
+          <div>
+            {/* Add staff by code */}
+            <div className="flex gap-3 mb-6">
               <input
-                data-ocid="staff.add_code.input"
+                data-ocid="staff.code.input"
                 value={newStaffCode}
                 onChange={(e) => setNewStaffCode(e.target.value)}
-                placeholder={t(lang, "staffId")}
+                placeholder={"Personel Kodu"}
                 className="flex-1 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9] font-mono"
               />
               <button
                 type="button"
-                data-ocid="staff.add_button"
+                data-ocid="staff.add.button"
                 onClick={addStaff}
-                className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                className="px-5 py-2 rounded-xl text-white text-sm font-medium"
                 style={{
                   background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
                 }}
               >
-                {t(lang, "addStaff")}
+                {t(lang, "add")}
               </button>
+            </div>
+
+            {/* Invite code */}
+            <div
+              className="flex flex-wrap items-center gap-3 p-4 rounded-2xl border border-white/10 mb-6"
+              style={{ background: "rgba(255,255,255,0.02)" }}
+            >
               <button
                 type="button"
                 data-ocid="staff.invite.button"
                 onClick={genInvite}
-                className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                className="px-4 py-2 rounded-xl text-sm text-white font-medium"
                 style={{
-                  background: "rgba(255,255,255,0.1)",
-                  border: "1px solid rgba(255,255,255,0.2)",
+                  background: "linear-gradient(135deg,#a855f7,#9333ea)",
                 }}
               >
                 {t(lang, "generateInviteCode")}
               </button>
-            </div>
-            {inviteCode && (
-              <div className="p-3 rounded-xl bg-[#0ea5e9]/10 border border-[#0ea5e9]/30 text-white">
-                Davet Kodu:{" "}
-                <span className="font-mono font-bold text-[#0ea5e9]">
+              {inviteCode && (
+                <span className="font-mono text-purple-400 text-sm border border-purple-500/30 px-3 py-1 rounded-lg">
                   {inviteCode}
                 </span>
-              </div>
-            )}
+              )}
+            </div>
+
             {staffList.length === 0 ? (
               <div
                 data-ocid="staff.empty_state"
                 className="text-center py-16 text-slate-500"
               >
-                {t(lang, "noStaff")}
+                {t(lang, "noData")}
               </div>
             ) : (
               <div className="space-y-3">
@@ -678,45 +1052,49 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   <div
                     key={s.staffId}
                     data-ocid={`staff.item.${i + 1}`}
-                    className="flex items-center justify-between p-4 rounded-xl border border-white/10 hover:border-white/20 transition-colors"
-                    style={{ background: "rgba(255,255,255,0.03)" }}
+                    className="flex items-center justify-between p-4 rounded-xl border border-white/10 bg-white/5"
                   >
-                    <div>
-                      <div className="text-white font-medium">{s.name}</div>
-                      <div className="text-slate-400 text-xs font-mono">
-                        {s.staffId} &bull; {s.role}
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm"
+                        style={{
+                          background:
+                            AVAIL_COLORS[s.availabilityStatus] ?? "#0ea5e9",
+                        }}
+                      >
+                        {s.name[0]?.toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="text-white font-medium text-sm">
+                          {s.name}
+                        </div>
+                        <div className="text-slate-400 text-xs font-mono">
+                          {s.staffId} &bull; {s.role}
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="w-2 h-2 rounded-full"
-                        style={{
-                          background: AVAIL_COLORS[s.availabilityStatus],
-                        }}
-                      />
-                      <span
-                        className="text-xs"
-                        style={{ color: AVAIL_COLORS[s.availabilityStatus] }}
-                      >
-                        {s.availabilityStatus === "available"
-                          ? t(lang, "available")
-                          : s.availabilityStatus === "in_meeting"
-                            ? t(lang, "inMeeting")
-                            : t(lang, "outside")}
-                      </span>
+                    <div className="flex gap-2">
                       <button
                         type="button"
-                        data-ocid={`staff.reset_code_button.${i + 1}`}
+                        data-ocid={`staff.reset_code.button.${i + 1}`}
                         onClick={() => doResetStaffCode(s)}
-                        className="px-2 py-1 rounded-lg text-xs font-medium text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-400/50 transition-colors"
+                        className="px-3 py-1.5 rounded-lg text-xs text-amber-400 transition-all"
+                        style={{
+                          background: "rgba(245,158,11,0.1)",
+                          border: "1px solid rgba(245,158,11,0.3)",
+                        }}
                       >
                         {t(lang, "resetCode")}
                       </button>
                       <button
                         type="button"
                         data-ocid={`staff.delete_button.${i + 1}`}
-                        onClick={() => doRemoveStaff(s.staffId)}
-                        className="text-red-400 hover:text-red-300 text-xs"
+                        onClick={() => doRemoveStaff(s)}
+                        className="px-3 py-1.5 rounded-lg text-xs text-red-400 transition-all"
+                        style={{
+                          background: "rgba(239,68,68,0.1)",
+                          border: "1px solid rgba(239,68,68,0.3)",
+                        }}
                       >
                         {t(lang, "remove")}
                       </button>
@@ -730,65 +1108,72 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
         {/* BLACKLIST TAB */}
         {tab === "blacklist" && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <div className="flex flex-wrap gap-3 mb-6">
               <input
                 data-ocid="blacklist.idnumber.input"
                 value={blIdNumber}
                 onChange={(e) => setBlIdNumber(e.target.value)}
                 placeholder={t(lang, "idNumber")}
-                className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-red-500 font-mono"
+                className="flex-1 min-w-[160px] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-red-500 font-mono"
               />
               <input
                 data-ocid="blacklist.reason.input"
                 value={blReason}
                 onChange={(e) => setBlReason(e.target.value)}
                 placeholder={t(lang, "reason")}
-                className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
+                className="flex-1 min-w-[200px] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
               />
               <button
                 type="button"
-                data-ocid="blacklist.add_button"
+                data-ocid="blacklist.add.button"
                 onClick={doAddBl}
-                className="px-4 py-2 rounded-xl text-white text-sm font-medium bg-red-600 hover:bg-red-700"
+                className="px-5 py-2 rounded-xl text-white text-sm font-medium"
+                style={{
+                  background: "linear-gradient(135deg,#ef4444,#dc2626)",
+                }}
               >
                 {t(lang, "addToBlacklist")}
               </button>
             </div>
+
             {blacklist.length === 0 ? (
               <div
                 data-ocid="blacklist.empty_state"
                 className="text-center py-16 text-slate-500"
               >
-                Kara liste boş.
+                {t(lang, "noData")}
               </div>
             ) : (
-              <div className="space-y-2">
-                {blacklist.map((bl, i) => (
+              <div className="space-y-3">
+                {blacklist.map((b, i) => (
                   <div
-                    key={bl.idNumber}
+                    key={b.idNumber}
                     data-ocid={`blacklist.item.${i + 1}`}
-                    className="flex items-center justify-between p-4 rounded-xl bg-red-900/20 border border-red-900/40"
+                    className="flex items-center justify-between p-4 rounded-xl border border-red-500/20 bg-red-900/10"
                   >
                     <div>
-                      <div className="text-white font-mono">{bl.idNumber}</div>
-                      <div className="text-slate-400 text-xs">
-                        {bl.reason} &bull; {formatDateTime(bl.addedAt)}
+                      <div className="text-white font-mono font-medium">
+                        {b.idNumber}
+                      </div>
+                      {b.reason && (
+                        <div className="text-slate-400 text-xs mt-0.5">
+                          {b.reason}
+                        </div>
+                      )}
+                      <div className="text-slate-500 text-xs">
+                        {formatDateTime(b.addedAt)}
                       </div>
                     </div>
                     <button
                       type="button"
                       data-ocid={`blacklist.delete_button.${i + 1}`}
-                      onClick={() => {
-                        setConfirmMsg("");
-                        setConfirmAction(() => () => {
-                          removeFromBlacklist(session.companyId, bl.idNumber);
-                          reload();
-                          setConfirmOpen(false);
-                        });
-                        setConfirmOpen(true);
+                      onClick={() => doRemoveBl(b.idNumber)}
+                      className="px-3 py-1.5 rounded-lg text-xs text-red-400 transition-all hover:opacity-80"
+                      style={{
+                        background: "rgba(239,68,68,0.15)",
+                        border: "1px solid rgba(239,68,68,0.35)",
                       }}
-                      className="text-red-400 hover:text-red-300 text-xs"
                     >
                       {t(lang, "remove")}
                     </button>
@@ -802,136 +1187,412 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* STATISTICS TAB */}
         {tab === "statistics" && (
           <div className="space-y-6">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            {/* Summary stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 {
-                  label: t(lang, "totalToday"),
+                  label: "Bugün",
                   value: today.length,
-                  cls: "stat-card-teal",
+                  color: "#0ea5e9",
+                  bg: "rgba(14,165,233,0.15)",
                 },
                 {
-                  label: t(lang, "activeNow"),
+                  label: "Aktif",
                   value: activeNow.length,
-                  cls: "stat-card-green",
+                  color: "#22c55e",
+                  bg: "rgba(34,197,94,0.15)",
                 },
                 {
-                  label: t(lang, "avgDuration"),
-                  value: avgDur > 0 ? `${Math.round(avgDur / 60000)} dk` : "-",
-                  cls: "stat-card-amber",
+                  label: "Toplam",
+                  value: visitors.length,
+                  color: "#f59e0b",
+                  bg: "rgba(245,158,11,0.15)",
                 },
                 {
-                  label: "Ort. Ziyaret Puanı",
-                  value: (() => {
-                    const rated = visitors.filter(
-                      (v) => v.exitRating !== undefined && v.exitRating > 0,
-                    );
-                    if (!rated.length) return "-";
-                    const avg2 =
-                      rated.reduce((s, v2) => s + (v2.exitRating ?? 0), 0) /
-                      rated.length;
-                    return `${"★".repeat(Math.round(avg2))} ${avg2.toFixed(1)}`;
-                  })(),
-                  cls: "stat-card-teal",
+                  label: "Ort. Süre",
+                  value:
+                    Math.round(avgDur / 60000) < 60
+                      ? `${Math.round(avgDur / 60000)}d`
+                      : `${Math.floor(avgDur / 3600000)}s`,
+                  color: "#a855f7",
+                  bg: "rgba(168,85,247,0.15)",
                 },
-              ].map((card) => (
+              ].map((s) => (
                 <div
-                  key={card.label}
-                  className={`p-6 rounded-2xl text-white ${card.cls}`}
+                  key={s.label}
+                  className="p-5 rounded-2xl text-center"
+                  style={{
+                    background: s.bg,
+                    border: `1.5px solid ${s.color}40`,
+                  }}
                 >
-                  <div className="text-3xl font-bold">{card.value}</div>
-                  <div className="text-sm opacity-80 mt-1">{card.label}</div>
+                  <div
+                    className="text-3xl font-bold"
+                    style={{ color: s.color }}
+                  >
+                    {s.value}
+                  </div>
+                  <div className="text-slate-400 text-xs mt-1">{s.label}</div>
                 </div>
               ))}
             </div>
 
-            {/* 7-day bar chart */}
+            {/* Shift distribution */}
+            <div className="grid grid-cols-3 gap-4">
+              {[
+                {
+                  label: "☀️ Sabah",
+                  value: shiftCounts.morning,
+                  color: "#f59e0b",
+                },
+                {
+                  label: "🌅 Öğleden Sonra",
+                  value: shiftCounts.afternoon,
+                  color: "#0ea5e9",
+                },
+                {
+                  label: "🌙 Gece",
+                  value: shiftCounts.night,
+                  color: "#a855f7",
+                },
+              ].map((s) => (
+                <div
+                  key={s.label}
+                  className="p-4 rounded-2xl text-center"
+                  style={{
+                    background: `${s.color}12`,
+                    border: `1.5px solid ${s.color}35`,
+                  }}
+                >
+                  <div
+                    className="text-2xl font-bold"
+                    style={{ color: s.color }}
+                  >
+                    {s.value}
+                  </div>
+                  <div className="text-slate-400 text-xs mt-1">{s.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 7-day chart */}
             <div
-              className="p-6 rounded-2xl border border-white/10"
-              style={{ background: "rgba(255,255,255,0.03)" }}
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
             >
-              <h3 className="text-white font-semibold mb-4">
-                Son 7 Gün Ziyaretçi Sayısı
-              </h3>
+              <p className="text-slate-300 text-sm font-semibold mb-4">
+                Son 7 Gün
+              </p>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={chartData} barSize={28}>
+                <BarChart data={chartData}>
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke="rgba(255,255,255,0.05)"
                   />
                   <XAxis
                     dataKey="date"
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
                   />
-                  <YAxis
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
                   <Tooltip
                     contentStyle={{
-                      background: "#0f172a",
+                      background: "#1e293b",
                       border: "1px solid rgba(255,255,255,0.1)",
-                      borderRadius: "8px",
-                      color: "#f1f5f9",
                     }}
-                    cursor={{ fill: "rgba(14,165,233,0.05)" }}
+                    labelStyle={{ color: "white" }}
+                    itemStyle={{ color: "#0ea5e9" }}
                   />
                   <Bar dataKey="count" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
 
+            {/* Category breakdown chart */}
+            {categoryData.length > 0 && (
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 text-sm font-semibold mb-4">
+                  Kategoriye Göre Ziyaretçi
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={categoryData}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.05)"
+                    />
+                    <XAxis
+                      dataKey="category"
+                      tick={{ fill: "#94a3b8", fontSize: 11 }}
+                    />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#1e293b",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                      labelStyle={{ color: "white" }}
+                      itemStyle={{ color: "#f59e0b" }}
+                    />
+                    <Bar dataKey="count" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Hour distribution chart */}
             <div
-              className="p-6 rounded-2xl border border-white/10"
-              style={{ background: "rgba(255,255,255,0.03)" }}
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
             >
-              <h3 className="text-white font-semibold mb-4">Ziyaret Tipleri</h3>
-              {["business", "personal", "delivery", "maintenance", "other"].map(
-                (type) => {
-                  const count = visitors.filter(
-                    (v) => v.visitType === type,
-                  ).length;
-                  const pct = visitors.length
-                    ? (count / visitors.length) * 100
-                    : 0;
-                  return (
-                    <div key={type} className="mb-3">
-                      <div className="flex justify-between text-sm mb-1">
-                        <span className="text-slate-300 capitalize">
-                          {type}
-                        </span>
-                        <span className="text-white font-medium">{count}</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-white/10">
-                        <div
-                          className="h-2 rounded-full"
-                          style={{
-                            width: `${pct}%`,
-                            background:
-                              "linear-gradient(90deg,#0ea5e9,#0284c7)",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  );
-                },
-              )}
+              <p className="text-slate-300 text-sm font-semibold mb-4">
+                Saate Göre Ziyaretçi Dağılımı
+              </p>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={hourData}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                  />
+                  <XAxis
+                    dataKey="hour"
+                    tick={{ fill: "#94a3b8", fontSize: 10 }}
+                    interval={3}
+                  />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#1e293b",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                    labelStyle={{ color: "white" }}
+                    itemStyle={{ color: "#22c55e" }}
+                  />
+                  <Bar dataKey="count" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
+
+            {/* Avg duration by category */}
+            {avgDurByCat.length > 0 && (
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 text-sm font-semibold mb-4">
+                  Ortalama Kalış Süresi (Kategoriye Göre, dakika)
+                </p>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={avgDurByCat}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="rgba(255,255,255,0.05)"
+                    />
+                    <XAxis
+                      dataKey="category"
+                      tick={{ fill: "#94a3b8", fontSize: 11 }}
+                    />
+                    <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#1e293b",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                      labelStyle={{ color: "white" }}
+                      itemStyle={{ color: "#a855f7" }}
+                    />
+                    <Bar
+                      dataKey="minutes"
+                      fill="#a855f7"
+                      radius={[3, 3, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Visit type breakdown */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 text-sm font-semibold mb-4">
+                Ziyaret Tiplerine Göre
+              </p>
+              {Object.entries(
+                visitors.reduce(
+                  (acc, v) => {
+                    acc[v.visitType] = (acc[v.visitType] ?? 0) + 1;
+                    return acc;
+                  },
+                  {} as Record<string, number>,
+                ),
+              ).map(([type, count]) => {
+                const pct = Math.round((count / visitors.length) * 100);
+                return (
+                  <div key={type} className="mb-3">
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="text-slate-300 capitalize">{type}</span>
+                      <span className="text-white font-medium">{count}</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/10">
+                      <div
+                        className="h-2 rounded-full"
+                        style={{
+                          width: `${pct}%`,
+                          background: "linear-gradient(90deg,#0ea5e9,#0284c7)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Staff performance table */}
+            {staffPerformance.length > 0 && (
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 text-sm font-semibold mb-4">
+                  Personel Performansı
+                </p>
+                <div
+                  data-ocid="stats.performance_table"
+                  className="overflow-auto rounded-xl border border-white/10"
+                >
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr
+                        className="border-b border-white/10"
+                        style={{ background: "rgba(255,255,255,0.04)" }}
+                      >
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Personel
+                        </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Toplam Kayıt
+                        </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Ort. Kalış (dk)
+                        </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          En Çok Kategori
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {staffPerformance
+                        .sort((a, b) => b.total - a.total)
+                        .map((s, i) => (
+                          <tr
+                            key={s.name}
+                            data-ocid={`stats.performance_row.${i + 1}`}
+                            className="border-b border-white/5"
+                          >
+                            <td className="p-3 text-white font-medium">
+                              {s.name}
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className="px-2 py-0.5 rounded-full text-xs font-bold"
+                                style={{
+                                  background: "rgba(14,165,233,0.2)",
+                                  color: "#0ea5e9",
+                                }}
+                              >
+                                {s.total}
+                              </span>
+                            </td>
+                            <td className="p-3 text-slate-300 text-sm">
+                              {s.avgDurMins > 0 ? `${s.avgDurMins}dk` : "—"}
+                            </td>
+                            <td className="p-3">
+                              {s.topCat !== "—" ? (
+                                <span
+                                  className="px-2 py-0.5 rounded text-xs text-white"
+                                  style={{
+                                    background:
+                                      CATEGORY_COLORS[s.topCat] ?? "#64748b",
+                                  }}
+                                >
+                                  {s.topCat}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500 text-xs">
+                                  —
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         {/* EVACUATION TAB */}
         {tab === "evacuation" && (
-          <div>
+          <div id="evacuation-print-section">
+            {/* Print Header - only visible when printing */}
+            <div className="hidden print:block mb-6 border-b border-gray-400 pb-4">
+              <h1 className="text-2xl font-bold text-black">
+                {company?.name ?? "Şirket"} — Tahliye Listesi
+              </h1>
+              <p className="text-gray-600 text-sm mt-1">
+                {new Date().toLocaleString("tr-TR")} &bull; Binada:{" "}
+                {activeNow.length} kişi
+              </p>
+            </div>
+            {/* Capacity Warning */}
+            {capacityExceeded && (
+              <div
+                data-ocid="evacuation.capacity.error_state"
+                className="mb-4 p-4 rounded-xl border border-red-500/50 bg-red-900/20 flex items-center gap-3"
+              >
+                <span className="text-2xl">🚨</span>
+                <div>
+                  <p className="text-red-400 font-semibold text-sm">
+                    Kapasite Sınırına Ulaşıldı!
+                  </p>
+                  <p className="text-red-300/70 text-xs mt-0.5">
+                    Binada {activeNow.length} ziyaretçi var — maksimum kapasite{" "}
+                    {maxCap} kişi.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-white font-bold text-lg">
                 {t(lang, "evacuation")} ({activeNow.length})
               </h2>
               <button
                 type="button"
-                data-ocid="evacuation.print.button"
+                data-ocid="evacuation.print_button"
                 onClick={() => window.print()}
                 className="px-4 py-2 rounded-xl text-white text-sm"
                 style={{
@@ -1029,10 +1690,111 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         )}
 
+        {/* AUDIT LOG TAB */}
+        {tab === "auditlog" && (
+          <div>
+            <div className="flex flex-wrap gap-3 mb-5 items-center">
+              <select
+                data-ocid="auditlog.action.select"
+                value={auditActionFilter}
+                onChange={(e) => setAuditActionFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-[#0f1729] border border-white/20 text-white text-sm focus:outline-none"
+              >
+                {ACTION_OPTIONS.map((o) => (
+                  <option
+                    key={o.value}
+                    value={o.value}
+                    className="bg-[#0f1729]"
+                  >
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <input
+                data-ocid="auditlog.date.input"
+                type="date"
+                value={auditDateFilter}
+                onChange={(e) => setAuditDateFilter(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+              />
+              {(auditActionFilter || auditDateFilter) && (
+                <button
+                  type="button"
+                  data-ocid="auditlog.clear.button"
+                  onClick={() => {
+                    setAuditActionFilter("");
+                    setAuditDateFilter("");
+                  }}
+                  className="px-3 py-2 rounded-xl text-slate-400 text-sm hover:text-white"
+                  style={{ background: "rgba(255,255,255,0.05)" }}
+                >
+                  Temizle
+                </button>
+              )}
+              <span className="text-slate-500 text-sm ml-auto">
+                {filteredAuditLogs.length} kayıt
+              </span>
+            </div>
+
+            {filteredAuditLogs.length === 0 ? (
+              <div
+                data-ocid="auditlog.empty_state"
+                className="text-center py-16 text-slate-500"
+              >
+                Denetim logu bulunamadı.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredAuditLogs.map((log, i) => (
+                  <div
+                    key={log.id}
+                    data-ocid={`auditlog.item.${i + 1}`}
+                    className="flex items-start gap-4 p-4 rounded-xl border border-white/8 hover:border-white/15 transition-colors"
+                    style={{ background: "rgba(255,255,255,0.03)" }}
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full mt-2 shrink-0"
+                      style={{ background: actionColor(log.action) }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                          style={{
+                            background: `${actionColor(log.action)}22`,
+                            color: actionColor(log.action),
+                            border: `1px solid ${actionColor(log.action)}44`,
+                          }}
+                        >
+                          {actionLabel(log.action)}
+                        </span>
+                        <span className="text-slate-400 text-xs">
+                          {log.actorName}
+                        </span>
+                      </div>
+                      <p className="text-slate-300 text-sm mt-1">
+                        {log.details}
+                      </p>
+                    </div>
+                    <div className="text-slate-600 text-xs shrink-0 whitespace-nowrap">
+                      {new Date(log.timestamp).toLocaleString("tr-TR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* PROFILE TAB */}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
-            {/* Company Code — read-only */}
+            {/* Company Code */}
             <div data-ocid="profile.company_code.panel">
               <p className="text-slate-300 text-sm mb-1 block">Şirket Kodu</p>
               <div className="flex items-center gap-2">
@@ -1062,53 +1824,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     color: codeCopied ? "#4ade80" : "#94a3b8",
                   }}
                 >
-                  {codeCopied ? (
-                    <>
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        role="img"
-                        aria-label="Kopyalandı"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      Kopyalandı
-                    </>
-                  ) : (
-                    <>
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        role="img"
-                        aria-label="Kopyala"
-                      >
-                        <rect
-                          x="9"
-                          y="9"
-                          width="13"
-                          height="13"
-                          rx="2"
-                          ry="2"
-                        />
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                      </svg>
-                      Kopyala
-                    </>
-                  )}
+                  {codeCopied ? "✓ Kopyalandı" : "Kopyala"}
                 </button>
               </div>
             </div>
@@ -1136,6 +1852,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 />
               </div>
             ))}
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-slate-300 text-sm mb-1 block">
@@ -1149,6 +1866,24 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     setProfileForm((f) => ({
                       ...f,
                       maxConcurrentVisitors: +e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1 block">
+                  Maks. Kapasite
+                </p>
+                <input
+                  data-ocid="profile.maxcapacity.input"
+                  type="number"
+                  placeholder="0 = sınırsız"
+                  value={profileForm.maxCapacity ?? 0}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      maxCapacity: +e.target.value,
                     }))
                   }
                   className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
@@ -1171,7 +1906,93 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
                 />
               </div>
+              {/* Working hours */}
+              <div>
+                <p className="text-slate-300 text-sm mb-1 block">
+                  Mesai Başlangıcı
+                </p>
+                <input
+                  data-ocid="profile.work_start_input"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={profileForm.workingHoursStart ?? 8}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      workingHoursStart: +e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1 block">
+                  Mesai Bitişi
+                </p>
+                <input
+                  data-ocid="profile.work_end_input"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={profileForm.workingHoursEnd ?? 18}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      workingHoursEnd: +e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+              </div>
+              {/* Auto-checkout */}
+              <div className="col-span-2">
+                <p className="text-slate-300 text-sm mb-1 block">
+                  Otomatik Çıkış (saat, 0=kapalı)
+                </p>
+                <input
+                  data-ocid="profile.auto_checkout_input"
+                  type="number"
+                  min={0}
+                  placeholder="0 = kapalı"
+                  value={profileForm.autoCheckoutHours ?? 0}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      autoCheckoutHours: +e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  Girilen saatten fazla süredir aktif olan ziyaretçiler otomatik
+                  çıkış yapılır.
+                </p>
+              </div>
             </div>
+
+            {/* Kiosk Welcome Message */}
+            <div>
+              <p className="text-slate-300 text-sm mb-1 block">
+                Kiosk Karşılama Mesajı
+              </p>
+              <input
+                data-ocid="profile.kiosk_message.input"
+                placeholder="Hoş geldiniz! Lütfen ziyaret formunu doldurun."
+                value={profileForm.kioskWelcomeMessage ?? ""}
+                onChange={(e) =>
+                  setProfileForm((f) => ({
+                    ...f,
+                    kioskWelcomeMessage: e.target.value,
+                  }))
+                }
+                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+              />
+              <p className="text-slate-500 text-xs mt-1">
+                Kiosk giriş ekranında gösterilecek karşılama mesajı
+              </p>
+            </div>
+
             <button
               type="button"
               data-ocid="profile.save.button"
@@ -1181,9 +2002,168 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             >
               {t(lang, "updateProfile")}
             </button>
+
+            {/* Category Management */}
+            <div
+              className="mt-6 p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">
+                Ziyaret Kategorileri
+              </h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {currentCategories.map((cat, i) => (
+                  <div
+                    key={cat}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-white"
+                    style={{
+                      background:
+                        CATEGORY_COLORS[cat] ?? "rgba(100,116,139,0.3)",
+                      border: `1px solid ${CATEGORY_COLORS[cat] ?? "#64748b"}60`,
+                    }}
+                  >
+                    {cat}
+                    <button
+                      type="button"
+                      data-ocid={`profile.category_delete_button.${i + 1}`}
+                      onClick={() => removeCategory(cat)}
+                      className="text-white/60 hover:text-white text-xs ml-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  data-ocid="profile.category_input"
+                  value={newCategoryInput}
+                  onChange={(e) => setNewCategoryInput(e.target.value)}
+                  placeholder="Yeni kategori..."
+                  onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                  className="flex-1 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <button
+                  type="button"
+                  data-ocid="profile.category_add_button"
+                  onClick={addCategory}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "rgba(14,165,233,0.2)",
+                    border: "1px solid rgba(14,165,233,0.4)",
+                  }}
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Form Fields */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">
+                Özel Form Alanları
+              </h3>
+              {currentCustomFields.length === 0 ? (
+                <p className="text-slate-500 text-sm mb-4">
+                  Henüz özel alan tanımlanmamış.
+                </p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {currentCustomFields.map((cf, i) => (
+                    <div
+                      key={cf.id}
+                      className="flex items-center justify-between p-3 rounded-xl"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <div>
+                        <span className="text-white text-sm">{cf.label}</span>
+                        {cf.required && (
+                          <span className="ml-2 text-red-400 text-xs">
+                            Zorunlu
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        data-ocid={`profile.custom_field_delete_button.${i + 1}`}
+                        onClick={() => removeCustomField(cf.id)}
+                        className="text-red-400 hover:text-red-300 text-sm px-2 py-1 rounded"
+                        style={{ background: "rgba(239,68,68,0.1)" }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                  <p className="text-slate-400 text-xs mb-1">Alan Adı</p>
+                  <input
+                    data-ocid="profile.custom_field_input"
+                    value={newFieldLabel}
+                    onChange={(e) => setNewFieldLabel(e.target.value)}
+                    placeholder="Örn: Firma Adı"
+                    className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div className="flex items-center gap-2 pb-2">
+                  <input
+                    type="checkbox"
+                    id="field_required"
+                    checked={newFieldRequired}
+                    onChange={(e) => setNewFieldRequired(e.target.checked)}
+                    className="w-4 h-4 accent-[#0ea5e9]"
+                  />
+                  <label
+                    htmlFor="field_required"
+                    className="text-slate-400 text-xs"
+                  >
+                    Zorunlu
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.custom_field_add_button"
+                  onClick={addCustomField}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "rgba(168,85,247,0.2)",
+                    border: "1px solid rgba(168,85,247,0.4)",
+                  }}
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Footer */}
+      <footer className="text-center py-6 text-slate-600 text-xs border-t border-white/5">
+        © {new Date().getFullYear()}. Built with love using{" "}
+        <a
+          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-slate-500 hover:text-slate-300 transition-colors"
+        >
+          caffeine.ai
+        </a>
+      </footer>
     </div>
   );
 }

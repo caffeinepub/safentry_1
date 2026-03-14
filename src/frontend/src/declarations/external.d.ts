@@ -18,3 +18,36 @@ declare module "jspdf" {
 declare module "qrcode" {
   export function toDataURL(text: string, options?: Record<string, unknown>): Promise<string>;
 }
+
+declare module "camera/useCamera" {
+  export interface CameraHook {
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    canvasRef: React.RefObject<HTMLCanvasElement | null>;
+    startCamera: () => Promise<void>;
+    stopCamera: () => void;
+    capturePhoto: () => Promise<string | null>;
+    isActive: boolean;
+    isLoading: boolean;
+    error: string | null;
+    isSupported: boolean;
+  }
+  export function useCamera(): CameraHook;
+}
+
+declare module "qr-code/useQRScanner" {
+  export interface QRResult {
+    data: string;
+  }
+  export interface QRScannerHook {
+    videoRef: React.RefObject<HTMLVideoElement | null>;
+    canvasRef: React.RefObject<HTMLCanvasElement | null>;
+    startScanning: () => void;
+    stopScanning: () => void;
+    qrResults: QRResult[];
+    isScanning: boolean;
+    canStartScanning: boolean;
+    error: string | null;
+    isSupported: boolean;
+  }
+  export function useQRScanner(): QRScannerHook;
+}

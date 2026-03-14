@@ -146,3 +146,54 @@ body {
     display: none;
   }
 }
+
+@media print {
+  /* Override dark background for evacuation list printing */
+  body,
+  html {
+    background: white !important;
+    color: black !important;
+  }
+  /* Hide everything except the evacuation print section */
+  body > * {
+    display: none !important;
+  }
+  /* Show only the main app container */
+  #root {
+    display: block !important;
+  }
+  /* Hide nav, sidebar, header, tabs, no-print elements */
+  nav,
+  aside,
+  header,
+  .no-print,
+  [data-ocid="nav.tab"],
+  [data-ocid^="nav."] {
+    display: none !important;
+  }
+  /* Show evacuation section clearly */
+  #evacuation-print-section {
+    display: block !important;
+    padding: 20px;
+    color: black;
+    background: white;
+  }
+  #evacuation-print-section .print\:block {
+    display: block !important;
+  }
+  #evacuation-print-section .rounded-xl,
+  #evacuation-print-section .rounded-2xl {
+    border: 1px solid #ccc !important;
+    background: white !important;
+    color: black !important;
+  }
+  #evacuation-print-section .text-white,
+  #evacuation-print-section .text-slate-400,
+  #evacuation-print-section .text-slate-500 {
+    color: black !important;
+  }
+  /* Hide buttons in print */
+  #evacuation-print-section button {
+    display: none !important;
+  }
+}

@@ -26,6 +26,23 @@ export function findCompanyById(id: string): Company | null {
   return getCompanies().find((c) => c.companyId === id) ?? null;
 }
 
+const DEFAULT_CATEGORIES = [
+  "Misafir",
+  "Müteahhit",
+  "Teslimat",
+  "Mülakat",
+  "Tedarikçi",
+  "Diğer",
+];
+
+export function getCustomCategories(companyId: string): string[] {
+  const company = findCompanyById(companyId);
+  if (company?.customCategories && company.customCategories.length > 0) {
+    return company.customCategories;
+  }
+  return DEFAULT_CATEGORIES;
+}
+
 export function getAllStaff(): Staff[] {
   try {
     return JSON.parse(localStorage.getItem("safentry_staff") || "[]");
