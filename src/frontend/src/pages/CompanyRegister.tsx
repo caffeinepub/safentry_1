@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getLang, t } from "../i18n";
+import { copyToClipboard } from "../lib/utils";
 import { saveCompany } from "../store";
 import type { AppScreen, Company } from "../types";
 import { generateCompanyId, generateLoginCode } from "../utils";
@@ -48,7 +49,7 @@ export default function CompanyRegister({ onNavigate }: Props) {
   };
 
   const copy = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    copyToClipboard(text);
     setCopied(key);
     setTimeout(() => setCopied(""), 2000);
   };

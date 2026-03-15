@@ -22,7 +22,7 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
   const handleLogin = () => {
     const company = findCompanyByLoginCode(code.toUpperCase());
     if (!company) {
-      setError("Ge\u00e7ersiz giri\u015f kodu.");
+      setError("Geçersiz giriş kodu.");
       return;
     }
     purgeExpiredVisitors(company.companyId);
@@ -46,7 +46,7 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
           data-ocid="company_login.back.button"
           className="text-slate-400 hover:text-white text-sm"
         >
-          \u2190 {t(lang, "backToHome")}
+          ← {t(lang, "backToHome")}
         </button>
         <LangSwitcher onChange={onRefresh} />
       </div>
@@ -66,13 +66,13 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
                 border: "1px solid rgba(14,165,233,0.3)",
               }}
             >
-              <span className="text-3xl">\uD83C\uDFE2</span>
+              <span className="text-3xl">🏢</span>
             </div>
             <h2 className="text-2xl font-bold text-white">
               {t(lang, "companyLogin")}
             </h2>
             <p className="text-slate-400 text-sm mt-1">
-              12 karakterli giri\u015f kodunuzu girin
+              12 karakterli giriş kodunuzu girin
             </p>
           </div>
           <div className="space-y-4">

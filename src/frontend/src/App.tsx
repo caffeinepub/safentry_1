@@ -1,3 +1,4 @@
+import { Toaster } from "@/components/ui/sonner";
 import { useCallback, useEffect, useState } from "react";
 import { getLang } from "./i18n";
 import InvitePage from "./pages/InvitePage";
@@ -71,7 +72,12 @@ export default function App() {
   void getLang();
 
   if (screen === "invite" && currentInviteToken)
-    return <InvitePage token={currentInviteToken} onNavigate={navigate} />;
+    return (
+      <>
+        <InvitePage token={currentInviteToken} onNavigate={navigate} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
   if (screen === "language")
     return (
       <LanguageSelect
@@ -90,9 +96,19 @@ export default function App() {
   if (screen === "staff-register")
     return <StaffRegister onNavigate={navigate} />;
   if (screen === "company-dashboard")
-    return <CompanyDashboard onNavigate={navigate} onRefresh={refresh} />;
+    return (
+      <>
+        <CompanyDashboard onNavigate={navigate} onRefresh={refresh} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
   if (screen === "staff-dashboard")
-    return <StaffDashboard onNavigate={navigate} onRefresh={refresh} />;
+    return (
+      <>
+        <StaffDashboard onNavigate={navigate} onRefresh={refresh} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
   if (screen === "kiosk")
     return <KioskMode companyId={kioskCompanyId ?? ""} onNavigate={navigate} />;
   if (screen === "verify") return <Verify onNavigate={navigate} />;

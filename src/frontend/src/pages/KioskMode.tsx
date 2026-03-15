@@ -8,6 +8,7 @@ import {
   addAlertHistory,
   findCompanyById,
   getCustomCategories,
+  getLockdown,
   getStaffByCompany,
   isBlacklisted,
   saveVisitor,
@@ -246,6 +247,43 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     );
     setScreen("waiting");
   };
+
+  // Lockdown check
+  const isLockedDown = getLockdown(companyId);
+  if (isLockedDown) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+      >
+        <button
+          type="button"
+          data-ocid="kiosk.back_button"
+          onClick={() => onNavigate("staff-dashboard")}
+          className="absolute top-6 left-6 px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          ← Personel Paneli
+        </button>
+        <div
+          className="max-w-md w-full text-center p-10 rounded-3xl"
+          style={{
+            background: "rgba(239,68,68,0.06)",
+            border: "2px solid rgba(239,68,68,0.3)",
+          }}
+        >
+          <div className="text-6xl mb-6 animate-pulse">🚨</div>
+          <h2 className="text-white font-bold text-2xl mb-3">Sistem Kapalı</h2>
+          <p className="text-slate-300 text-lg leading-relaxed">
+            Sistem geçici olarak kapalıdır. Lütfen personel ile iletişime geçin.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   // Welcome screen
   if (screen === "welcome") {
@@ -732,9 +770,8 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                   className="mt-3 text-slate-400 text-sm leading-relaxed p-3 rounded-lg"
                   style={{ background: "rgba(255,255,255,0.05)" }}
                 >
-                  Kişisel verileriniz KVKK kapsamında ziyaret kaydı amacıyla
-                  işlenmektedir. Verileriniz 90 gün sonra otomatik olarak
-                  silinecektir.
+                  {company?.categoryNda?.[form.category] ||
+                    "Kişisel verileriniz KVKK kapsamında ziyaret kaydı amacıyla işlenmektedir. Verileriniz saklama süresi dolunca otomatik olarak silinecektir."}
                 </p>
               )}
             </div>

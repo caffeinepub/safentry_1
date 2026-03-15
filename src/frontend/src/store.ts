@@ -4,6 +4,7 @@ import type {
   BlacklistEntry,
   Company,
   Invitation,
+  ScreeningQuestion,
   Session,
   Staff,
   Visitor,
@@ -54,6 +55,31 @@ const DEFAULT_FLOORS = [
   "4. Kat",
   "5. Kat",
 ];
+
+const DEFAULT_SCREENING_QUESTIONS: ScreeningQuestion[] = [
+  {
+    id: "sq_default_1",
+    text: "Ateşiniz veya hastalık belirtiniz var mı?",
+    type: "yes_no",
+    blocking: false,
+  },
+  {
+    id: "sq_default_2",
+    text: "Son 14 gün içinde yurt dışına çıktınız mı?",
+    type: "yes_no",
+    blocking: false,
+  },
+  {
+    id: "sq_default_3",
+    text: "Randevunuz var mı?",
+    type: "yes_no",
+    blocking: false,
+  },
+];
+
+export function getDefaultScreeningQuestions(): ScreeningQuestion[] {
+  return DEFAULT_SCREENING_QUESTIONS;
+}
 
 export function getCustomCategories(companyId: string): string[] {
   const company = findCompanyById(companyId);
@@ -311,4 +337,16 @@ export function addAlertHistory(entry: import("./types").AlertHistoryEntry) {
     `safentry_alerts_${entry.companyId}`,
     JSON.stringify([entry, ...list].slice(0, 500)),
   );
+}
+
+// Lockdown mode
+export function getLockdown(companyId: string): boolean {
+  return localStorage.getItem(`safentry_lockdown_${companyId}`) === "true";
+}
+export function setLockdown(companyId: string, active: boolean) {
+  if (active) {
+    localStorage.setItem(`safentry_lockdown_${companyId}`, "true");
+  } else {
+    localStorage.removeItem(`safentry_lockdown_${companyId}`);
+  }
 }

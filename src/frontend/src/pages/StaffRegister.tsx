@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getLang, t } from "../i18n";
+import { copyToClipboard } from "../lib/utils";
 import { lookupInviteCode, saveStaff } from "../store";
 import type { AppScreen, Staff } from "../types";
 import { generateStaffId } from "../utils";
@@ -44,7 +45,7 @@ export default function StaffRegister({ onNavigate }: Props) {
   };
 
   const copy = () => {
-    navigator.clipboard.writeText(result!.staffId);
+    copyToClipboard(result!.staffId);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

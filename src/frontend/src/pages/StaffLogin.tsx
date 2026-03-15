@@ -21,7 +21,7 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
   const handleLogin = () => {
     const staff = findStaffById(staffId);
     if (!staff || staff.companyId !== companyId) {
-      setError("Ge\u00e7ersiz personel kodu veya \u015firket kodu.");
+      setError("Geçersiz personel kodu veya şirket kodu.");
       return;
     }
     purgeExpiredVisitors(companyId);
@@ -52,7 +52,7 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
           data-ocid="staff_login.back.button"
           className="text-slate-400 hover:text-white text-sm"
         >
-          \u2190 {t(lang, "backToHome")}
+          ← {t(lang, "backToHome")}
         </button>
         <LangSwitcher onChange={onRefresh} />
       </div>
@@ -72,13 +72,13 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
                 border: "1px solid rgba(245,158,11,0.3)",
               }}
             >
-              <span className="text-3xl">\uD83D\uDC64</span>
+              <span className="text-3xl">👤</span>
             </div>
             <h2 className="text-2xl font-bold text-white">
               {t(lang, "staffLogin")}
             </h2>
             <p className="text-slate-400 text-sm mt-1">
-              Personel ve \u015firket kodunuzu girin
+              Personel ve şirket kodunuzu girin
             </p>
           </div>
           <div className="space-y-4">

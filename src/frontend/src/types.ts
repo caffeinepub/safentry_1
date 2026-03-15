@@ -56,6 +56,7 @@ export interface Company {
   customCategories?: string[];
   customFields?: { id: string; label: string; required: boolean }[];
   autoCheckoutHours?: number;
+  badgeValidityHours?: number;
   workingHoursStart?: number;
   workingHoursEnd?: number;
   kioskWelcomeMessage?: string;
@@ -63,6 +64,7 @@ export interface Company {
   floors?: string[];
   screeningQuestions?: ScreeningQuestion[];
   customExitQuestions?: ExitQuestion[];
+  categoryNda?: Record<string, string>;
 }
 
 export interface Staff {
@@ -112,6 +114,7 @@ export interface Visitor {
   floor?: string;
   equipment?: { type: string; id: string; assignedAt: string } | null;
   screeningAnswers?: { questionId: string; question: string; answer: string }[];
+  privateNote?: string;
 }
 
 export interface BlacklistEntry {
@@ -120,6 +123,7 @@ export interface BlacklistEntry {
   reason: string;
   addedBy: string;
   addedAt: number;
+  reasonCategory?: string;
 }
 
 export interface Announcement {

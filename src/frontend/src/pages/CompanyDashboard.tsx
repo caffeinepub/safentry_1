@@ -1,3 +1,13 @@
+import {
+  AlertTriangle,
+  Bell,
+  BookOpen,
+  ClipboardList,
+  FileText,
+  Settings,
+  ShieldOff,
+  Users,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   Bar,
@@ -8,10 +18,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { toast } from "sonner";
 import { addAuditLog, getAuditLogs } from "../auditLog";
 import ConfirmModal from "../components/ConfirmModal";
+import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
 import { getLang, t } from "../i18n";
+import { copyToClipboard } from "../lib/utils";
 import {
   addAlertHistory,
   addToBlacklist,
@@ -23,6 +36,7 @@ import {
   getBlacklist,
   getCompanyDepartments,
   getCompanyFloors,
+  getLockdown,
   getSession,
   getStaffByCompany,
   getVisitors,
@@ -36,6 +50,7 @@ import {
   saveInviteCode,
   saveStaff,
   saveVisitor,
+  setLockdown,
 } from "../store";
 import type {
   AlertHistoryEntry,
@@ -82,6 +97,7 @@ type Tab =
   | "staff"
   | "blacklist"
   | "statistics"
+  | "compliance"
   | "evacuation"
   | "announcements"
   | "auditlog"
@@ -138,11 +154,41 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [newStaffCode, setNewStaffCode] = useState("");
   const [blIdNumber, setBlIdNumber] = useState("");
   const [blReason, setBlReason] = useState("");
+  const [blReasonCategory, setBlReasonCategory] = useState("Diğer");
+  const [lockdownActive, setLockdownActive] = useState(() =>
+    getLockdown(getSession()!.companyId),
+  );
+  const [lockdownConfirm, setLockdownConfirm] = useState(false);
+  const [selectedStaffPerf, setSelectedStaffPerf] = useState<{
+    name: string;
+    total: number;
+    avgDurMins: number;
+    topCat: string;
+    staffId?: string;
+    busiestShift?: string;
+    busiestDay?: string;
+    avgRating?: string;
+    commentPct?: number;
+  } | null>(null);
+  const [storageDismissed, setStorageDismissed] = useState(
+    () => localStorage.getItem("safentry_storage_notice_dismissed") === "1",
+  );
   const [announcementMsg, setAnnouncementMsg] = useState("");
   const [inviteCode, setInviteCode] = useState("");
+  // Visitor profile modal
+  const [profileVisitor, setProfileVisitor] = useState<Visitor | null>(null);
   const [profileForm, setProfileForm] = useState<Partial<Company>>(
     company ?? {},
   );
+  // Onboarding banner
+  const onboardingDismissKey = `safentry_onboarding_dismissed_${session.companyId}`;
+  const [onboardingDismissed, setOnboardingDismissed] = useState(
+    () => !!localStorage.getItem(onboardingDismissKey),
+  );
+  const dismissOnboarding = () => {
+    localStorage.setItem(onboardingDismissKey, "1");
+    setOnboardingDismissed(true);
+  };
   const [resetCodeResult, setResetCodeResult] = useState<{
     name: string;
     code: string;
@@ -330,6 +376,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       companyId: session.companyId,
       idNumber: blIdNumber,
       reason: blReason,
+      reasonCategory: blReasonCategory,
       addedBy: session.staffId ?? "company",
       addedAt: Date.now(),
     });
@@ -342,7 +389,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     );
     setBlIdNumber("");
     setBlReason("");
+    setBlReasonCategory("Diğer");
     reload();
+    toast.success("Kara listeye eklendi");
   };
 
   const doRemoveBl = (idNumber: string) => {
@@ -355,6 +404,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       `${idNumber} kara listeden çıkarıldı`,
     );
     reload();
+    toast.success("Kara listeden çıkarıldı");
   };
 
   const postAnnouncement = () => {
@@ -373,14 +423,28 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const saveProfile = () => {
     if (!company) return;
     saveCompany({ ...company, ...profileForm });
-    alert("Profil güncellendi.");
+    toast.success("Ayarlar kaydedildi");
+  };
+
+  const toggleLockdown = () => {
+    const newState = !lockdownActive;
+    setLockdown(session.companyId, newState);
+    setLockdownActive(newState);
+    setLockdownConfirm(false);
+    toast(
+      newState
+        ? "🚨 Acil durum modu aktifleştirildi"
+        : "✅ Kilitleme kaldırıldı",
+      {
+        style: { background: newState ? "#7f1d1d" : "#14532d", color: "#fff" },
+      },
+    );
   };
 
   const copyCompanyCode = () => {
-    navigator.clipboard.writeText(company.companyId).then(() => {
-      setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 2000);
-    });
+    copyToClipboard(company.companyId);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
   };
 
   const exportCsv = () => {
@@ -731,6 +795,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "statistics", label: t(lang, "statistics") },
     { key: "evacuation", label: t(lang, "evacuation") },
     { key: "announcements", label: t(lang, "announcements") },
+    { key: "compliance", label: "🔒 Uyum Raporu" },
     { key: "auditlog", label: "📋 Denetim Logu" },
     {
       key: "alerthistory",
@@ -769,6 +834,40 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       hour: `${String(hour).padStart(2, "0")}:00`,
       count,
     }));
+  })();
+
+  // Day of week breakdown for stats
+  const dowData = (() => {
+    const DAY_LABELS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+    const counts: number[] = new Array(7).fill(0);
+    for (const v of visitors) {
+      const dow = (new Date(v.arrivalTime).getDay() + 6) % 7; // Mon=0
+      counts[dow]++;
+    }
+    return counts.map((count, i) => ({ day: DAY_LABELS[i], count }));
+  })();
+
+  // Repeat visitor analysis
+  const repeatVisitorData = (() => {
+    const visitorCounts: Record<
+      string,
+      { name: string; idNumber: string; count: number }
+    > = {};
+    for (const v of visitors) {
+      if (!visitorCounts[v.idNumber]) {
+        visitorCounts[v.idNumber] = {
+          name: v.name,
+          idNumber: v.idNumber,
+          count: 0,
+        };
+      }
+      visitorCounts[v.idNumber].count++;
+    }
+    const repeats = Object.values(visitorCounts).filter((v) => v.count > 1);
+    const top5 = repeats.sort((a, b) => b.count - a.count).slice(0, 5);
+    const repeatTotal = repeats.reduce((acc, v) => acc + v.count, 0);
+    const repeatUniqueCount = repeats.length;
+    return { top5, repeatTotal, repeatUniqueCount };
   })();
 
   // Avg duration by category
@@ -812,11 +911,53 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     }
     const topCat =
       Object.entries(catCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    // Busiest shift
+    const shiftCounts: Record<string, number> = {
+      morning: 0,
+      afternoon: 0,
+      night: 0,
+    };
+    for (const v of registered) {
+      if (v.shiftType)
+        shiftCounts[v.shiftType] = (shiftCounts[v.shiftType] ?? 0) + 1;
+    }
+    const busiestShift =
+      Object.entries(shiftCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ??
+      "morning";
+    // Busiest day of week
+    const dayCounts: Record<string, number> = {};
+    for (const v of registered) {
+      const day = new Date(v.arrivalTime).toLocaleDateString("tr-TR", {
+        weekday: "long",
+      });
+      dayCounts[day] = (dayCounts[day] ?? 0) + 1;
+    }
+    const busiestDay =
+      Object.entries(dayCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+    const ratedVisitors = registered.filter(
+      (v) => v.exitRating && v.exitRating > 0,
+    );
+    const avgRating = ratedVisitors.length
+      ? (
+          ratedVisitors.reduce((acc, v) => acc + (v.exitRating ?? 0), 0) /
+          ratedVisitors.length
+        ).toFixed(1)
+      : "—";
+    const commentedCount = registered.filter((v) => v.exitComment).length;
+    const commentPct =
+      registered.length > 0
+        ? Math.round((commentedCount / registered.length) * 100)
+        : 0;
     return {
       name: s.name,
+      staffId: s.staffId,
       total: registered.length,
       avgDurMins,
       topCat,
+      busiestShift,
+      busiestDay,
+      avgRating,
+      commentPct,
     };
   });
 
@@ -899,6 +1040,58 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         onConfirm={confirmAction}
         onCancel={() => setConfirmOpen(false)}
       />
+
+      {/* Lockdown Confirm Dialog */}
+      {lockdownConfirm && (
+        <div
+          data-ocid="lockdown.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-sm p-7 rounded-2xl text-center"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(239,68,68,0.4)",
+            }}
+          >
+            <div className="text-5xl mb-4">{lockdownActive ? "✅" : "🚨"}</div>
+            <h3 className="text-white font-bold text-lg mb-2">
+              {lockdownActive
+                ? "Kilitlemeyi Kaldır?"
+                : "Acil Durum Modunu Aktifleştir?"}
+            </h3>
+            <p className="text-slate-400 text-sm mb-6">
+              {lockdownActive
+                ? "Sistem normale döner ve ziyaretçi girişlerine izin verilir."
+                : "Tüm ziyaretçi girişleri durdurulur. Kiosk ve personel kayıt formları devre dışı kalır."}
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="lockdown.cancel_button"
+                onClick={() => setLockdownConfirm(false)}
+                className="flex-1 py-3 rounded-xl font-semibold text-slate-300 border border-white/20 hover:bg-white/5 transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                data-ocid="lockdown.confirm_button"
+                onClick={toggleLockdown}
+                className="flex-1 py-3 rounded-xl font-semibold text-white"
+                style={{
+                  background: lockdownActive
+                    ? "linear-gradient(135deg,#16a34a,#15803d)"
+                    : "linear-gradient(135deg,#dc2626,#b91c1c)",
+                }}
+              >
+                {lockdownActive ? "Evet, Kaldır" : "Evet, Aktifleştir"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Visitor History Dialog */}
       {historyVisitor && (
@@ -1042,6 +1235,50 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         </div>
       )}
 
+      {/* Lockdown Banner */}
+      {lockdownActive && (
+        <div
+          data-ocid="company_dashboard.lockdown_banner"
+          className="flex items-center gap-3 px-6 py-3 text-white font-bold text-sm"
+          style={{
+            background: "linear-gradient(90deg,#7f1d1d,#991b1b)",
+            borderBottom: "2px solid #ef4444",
+          }}
+        >
+          <span className="animate-pulse text-lg">⚠️</span>
+          ACİL DURUM MOD AKTİF — Ziyaretçi girişleri durduruldu
+        </div>
+      )}
+
+      {/* Storage Notice */}
+      {!storageDismissed && (
+        <div
+          data-ocid="company_dashboard.storage_notice"
+          className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm"
+          style={{
+            background: "rgba(245,158,11,0.12)",
+            borderBottom: "1px solid rgba(245,158,11,0.25)",
+          }}
+        >
+          <span className="text-amber-300">
+            📦 Verileriniz bu tarayıcıda yerel olarak saklanmaktadır. Farklı
+            tarayıcı veya cihazda verilerinize erişilemez.
+          </span>
+          <button
+            type="button"
+            data-ocid="company_dashboard.storage_notice.close_button"
+            onClick={() => {
+              localStorage.setItem("safentry_storage_notice_dismissed", "1");
+              setStorageDismissed(true);
+            }}
+            className="text-amber-400 hover:text-white shrink-0 text-lg leading-none"
+            aria-label="Kapat"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div>
@@ -1054,6 +1291,22 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         </div>
         <div className="flex items-center gap-3">
           <LangSwitcher onChange={onRefresh} />
+          <button
+            type="button"
+            data-ocid="company_dashboard.lockdown.button"
+            onClick={() => setLockdownConfirm(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
+            style={{
+              background: lockdownActive
+                ? "linear-gradient(135deg,#16a34a,#15803d)"
+                : "linear-gradient(135deg,#dc2626,#b91c1c)",
+              border: lockdownActive
+                ? "1px solid #22c55e"
+                : "1px solid #ef4444",
+            }}
+          >
+            {lockdownActive ? "✅ Kilidi Kaldır" : "🚨 Acil Durum"}
+          </button>
           <button
             type="button"
             data-ocid="company_dashboard.logout.button"
@@ -1109,6 +1362,83 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       </div>
 
       <div className="p-6">
+        {/* ONBOARDING BANNER */}
+        {!onboardingDismissed &&
+          visitors.length === 0 &&
+          staffList.length === 0 && (
+            <div
+              data-ocid="onboarding.banner"
+              className="mb-6 p-5 rounded-2xl relative overflow-hidden"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(20,184,166,0.15), rgba(245,158,11,0.1))",
+                border: "1px solid rgba(20,184,166,0.3)",
+              }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1">
+                  <h3 className="text-white font-bold text-base mb-1">
+                    🎉 Safentry'ye Hoş Geldiniz!
+                  </h3>
+                  <p className="text-slate-300 text-sm mb-4">
+                    Sistemi kullanmaya başlamak için aşağıdaki adımları
+                    tamamlayın:
+                  </p>
+                  <div className="space-y-2">
+                    {[
+                      { label: "Personel ekleyin", done: staffList.length > 0 },
+                      {
+                        label: "Ziyaret kategorilerini yapılandırın",
+                        done:
+                          (findCompanyById(session.companyId)?.customCategories
+                            ?.length ?? 0) > 0,
+                      },
+                      {
+                        label: "Kapasite limitini ayarlayın",
+                        done: (company?.maxCapacity ?? 0) > 0,
+                      },
+                      { label: "Kiosk modunu deneyin", done: false },
+                    ].map((item) => (
+                      <div key={item.label} className="flex items-center gap-3">
+                        <div
+                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{
+                            background: item.done
+                              ? "rgba(20,184,166,0.3)"
+                              : "rgba(255,255,255,0.08)",
+                            border: `1px solid ${item.done ? "#14b8a6" : "rgba(255,255,255,0.15)"}`,
+                          }}
+                        >
+                          {item.done && (
+                            <span className="text-teal-400 text-xs">✓</span>
+                          )}
+                        </div>
+                        <span
+                          className={`text-sm ${item.done ? "text-teal-300 line-through opacity-70" : "text-slate-200"}`}
+                        >
+                          {item.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="onboarding.close_button"
+                  onClick={dismissOnboarding}
+                  className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    color: "#94a3b8",
+                  }}
+                >
+                  Tamam, anladım
+                </button>
+              </div>
+            </div>
+          )}
+
         {/* VISITORS TAB */}
         {tab === "visitors" && (
           <div>
@@ -1389,12 +1719,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {filtered.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="visitors.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noData")}
-              </div>
+                icon={ClipboardList}
+                title="Ziyaretçi bulunamadı"
+                description="Seçilen filtreye uygun ziyaretçi kaydı yok."
+              />
             ) : (
               <div className="space-y-2">
                 {filtered
@@ -1465,6 +1795,54 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                         >
                           ✉️ Davet
                         </button>
+                        <button
+                          type="button"
+                          data-ocid={`visitor_profile.open_modal_button.${i + 1}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setProfileVisitor(v);
+                          }}
+                          className="px-2 py-1 rounded-lg text-xs font-medium whitespace-nowrap"
+                          style={{
+                            background: "rgba(168,85,247,0.15)",
+                            border: "1px solid rgba(168,85,247,0.3)",
+                            color: "#a855f7",
+                          }}
+                          title="Ziyaretçi Profili"
+                        >
+                          👤
+                        </button>
+                        {/* Badge validity warning */}
+                        {v.status === "active" &&
+                          (() => {
+                            const validHours = company?.badgeValidityHours ?? 8;
+                            const elapsed =
+                              (Date.now() - v.arrivalTime) / 3600000;
+                            const remaining = validHours - elapsed;
+                            if (remaining <= 0) {
+                              return (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs font-bold text-red-400"
+                                  style={{ background: "rgba(239,68,68,0.15)" }}
+                                >
+                                  🚫 Süre Doldu
+                                </span>
+                              );
+                            }
+                            if (remaining <= 0.5) {
+                              return (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs font-bold text-amber-400"
+                                  style={{
+                                    background: "rgba(245,158,11,0.15)",
+                                  }}
+                                >
+                                  ⚠️ Süre Yaklaşıyor
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                       </div>
                     </div>
                   ))}
@@ -1522,12 +1900,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {staffList.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="staff.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noData")}
-              </div>
+                icon={Users}
+                title="Personel bulunamadı"
+                description="Henüz personel eklenmemiş. Yeni personel ekleyerek başlayın."
+              />
             ) : (
               <div className="space-y-3">
                 {staffList.map((s, i) => (
@@ -1606,6 +1984,24 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 placeholder={t(lang, "reason")}
                 className="flex-1 min-w-[200px] px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
               />
+              <select
+                data-ocid="blacklist.reason_category.select"
+                value={blReasonCategory}
+                onChange={(e) => setBlReasonCategory(e.target.value)}
+                className="px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
+              >
+                {[
+                  "Güvenlik Tehdidi",
+                  "Yasak Kişi",
+                  "Eski Çalışan",
+                  "Hırsızlık",
+                  "Diğer",
+                ].map((cat) => (
+                  <option key={cat} value={cat} className="bg-[#0f1729]">
+                    {cat}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 data-ocid="blacklist.add.button"
@@ -1620,12 +2016,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {blacklist.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="blacklist.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noData")}
-              </div>
+                icon={ShieldOff}
+                title="Kara liste boş"
+                description="Henüz kara listeye alınmış kişi yok."
+              />
             ) : (
               <div className="space-y-3">
                 {blacklist.map((b, i) => (
@@ -1635,8 +2031,30 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     className="flex items-center justify-between p-4 rounded-xl border border-red-500/20 bg-red-900/10"
                   >
                     <div>
-                      <div className="text-white font-mono font-medium">
-                        {b.idNumber}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="text-white font-mono font-medium">
+                          {b.idNumber}
+                        </div>
+                        {b.reasonCategory && (
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                            style={{
+                              background:
+                                b.reasonCategory === "Güvenlik Tehdidi"
+                                  ? "rgba(239,68,68,0.3)"
+                                  : b.reasonCategory === "Yasak Kişi"
+                                    ? "rgba(168,85,247,0.3)"
+                                    : b.reasonCategory === "Eski Çalışan"
+                                      ? "rgba(245,158,11,0.3)"
+                                      : b.reasonCategory === "Hırsızlık"
+                                        ? "rgba(249,115,22,0.3)"
+                                        : "rgba(100,116,139,0.3)",
+                              border: "1px solid rgba(255,255,255,0.15)",
+                            }}
+                          >
+                            {b.reasonCategory}
+                          </span>
+                        )}
                       </div>
                       {b.reason && (
                         <div className="text-slate-400 text-xs mt-0.5">
@@ -1990,7 +2408,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                           <tr
                             key={s.name}
                             data-ocid={`stats.performance_row.${i + 1}`}
-                            className="border-b border-white/5"
+                            className="border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors"
+                            onClick={() => setSelectedStaffPerf(s)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ")
+                                setSelectedStaffPerf(s);
+                            }}
                           >
                             <td className="p-3 text-white font-medium">
                               {s.name}
@@ -2028,6 +2451,192 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                             </td>
                           </tr>
                         ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {/* Peak Hour Analysis */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 text-sm font-semibold mb-4">
+                📊 Yoğunluk Analizi — Saate Göre
+              </p>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={hourData}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                  />
+                  <XAxis
+                    dataKey="hour"
+                    tick={{ fill: "#94a3b8", fontSize: 10 }}
+                    interval={3}
+                  />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#1e293b",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                    labelStyle={{ color: "white" }}
+                    itemStyle={{ color: "#0ea5e9" }}
+                    cursor={{ fill: "rgba(14,165,233,0.05)" }}
+                  />
+                  <Bar
+                    dataKey="count"
+                    fill="#0ea5e9"
+                    radius={[3, 3, 0, 0]}
+                    data-ocid="stats.peak_hours.chart_point"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Peak Day Analysis */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 text-sm font-semibold mb-4">
+                📊 Yoğunluk Analizi — Güne Göre
+              </p>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={dowData}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="rgba(255,255,255,0.05)"
+                  />
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fill: "#94a3b8", fontSize: 12 }}
+                  />
+                  <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#1e293b",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                    labelStyle={{ color: "white" }}
+                    itemStyle={{ color: "#a855f7" }}
+                    cursor={{ fill: "rgba(168,85,247,0.05)" }}
+                  />
+                  <Bar
+                    dataKey="count"
+                    fill="#a855f7"
+                    radius={[3, 3, 0, 0]}
+                    data-ocid="stats.peak_days.chart_point"
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Repeat Visitors */}
+            {repeatVisitorData.repeatUniqueCount > 0 && (
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 text-sm font-semibold mb-4">
+                  🔄 Tekrar Ziyaretçiler
+                </p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div
+                    className="p-4 rounded-xl text-center"
+                    style={{
+                      background: "rgba(14,165,233,0.12)",
+                      border: "1.5px solid rgba(14,165,233,0.2)",
+                    }}
+                  >
+                    <div className="text-3xl font-bold text-sky-400">
+                      {repeatVisitorData.repeatUniqueCount}
+                    </div>
+                    <div className="text-slate-400 text-xs mt-1">
+                      Tekrar Ziyaretçi
+                    </div>
+                  </div>
+                  <div
+                    className="p-4 rounded-xl text-center"
+                    style={{
+                      background: "rgba(168,85,247,0.12)",
+                      border: "1.5px solid rgba(168,85,247,0.2)",
+                    }}
+                  >
+                    <div className="text-3xl font-bold text-purple-400">
+                      {visitors.length > 0
+                        ? Math.round(
+                            (repeatVisitorData.repeatTotal / visitors.length) *
+                              100,
+                          )
+                        : 0}
+                      %
+                    </div>
+                    <div className="text-slate-400 text-xs mt-1">
+                      Tekrar Ziyaret Oranı
+                    </div>
+                  </div>
+                </div>
+                <p className="text-slate-400 text-xs font-medium mb-2">
+                  EN SIK GELENLER
+                </p>
+                <div
+                  data-ocid="stats.repeat_visitors.table"
+                  className="overflow-auto rounded-xl border border-white/10"
+                >
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr
+                        className="border-b border-white/10"
+                        style={{ background: "rgba(255,255,255,0.04)" }}
+                      >
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Ad Soyad
+                        </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          TC/ID
+                        </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Ziyaret
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {repeatVisitorData.top5.map((v, i) => (
+                        <tr
+                          key={v.idNumber}
+                          data-ocid={`stats.repeat_visitors.row.${i + 1}`}
+                          className="border-b border-white/5"
+                        >
+                          <td className="p-3 text-white font-medium">
+                            {v.name}
+                          </td>
+                          <td className="p-3 text-slate-400 font-mono text-xs">
+                            {v.idNumber}
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-bold"
+                              style={{
+                                background: "rgba(14,165,233,0.2)",
+                                color: "#0ea5e9",
+                              }}
+                            >
+                              {v.count}x
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -2085,12 +2694,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </button>
             </div>
             {activeNow.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="evacuation.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noVisitors")}
-              </div>
+                icon={Users}
+                title="Binada kimse yok"
+                description="Şu anda aktif ziyaretçi bulunmuyor."
+              />
             ) : (
               <div className="space-y-2">
                 {activeNow.map((v, i) => (
@@ -2167,12 +2776,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </button>
             </div>
             {announcements.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="announcements.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noData")}
-              </div>
+                icon={Bell}
+                title="Duyuru bulunamadı"
+                description="Henüz duyuru oluşturulmamış."
+              />
             ) : (
               <div className="space-y-3">
                 {announcements.map((a, i) => (
@@ -2239,12 +2848,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {filteredAuditLogs.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="auditlog.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Denetim logu bulunamadı.
-              </div>
+                icon={BookOpen}
+                title="Denetim logu boş"
+                description="Henüz kayıtlı işlem yok."
+              />
             ) : (
               <div className="space-y-2">
                 {filteredAuditLogs.map((log, i) => (
@@ -2303,12 +2912,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </p>
             </div>
             {alertHistory.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="alerthistory.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Henüz uyarı kaydı yok.
-              </div>
+                icon={AlertTriangle}
+                title="Uyarı geçmişi boş"
+                description="Henüz tetiklenmiş uyarı yok."
+              />
             ) : (
               <div
                 data-ocid="alerthistory.table"
@@ -2406,12 +3015,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             </div>
             {visitors.filter((v) => v.status === "active" && v.equipment)
               .length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="equipment.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Şu an teslim edilmiş ekipman yok.
-              </div>
+                icon={Settings}
+                title="Ekipman bulunamadı"
+                description="Şu an teslim edilmiş ekipman yok."
+              />
             ) : (
               <div className="overflow-auto rounded-2xl border border-white/10">
                 <table className="w-full text-sm" data-ocid="equipment.table">
@@ -2500,6 +3109,155 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* COMPLIANCE TAB */}
+        {tab === "compliance" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-white font-bold text-lg">
+                🔒 KVKK / GDPR Uyum Raporu
+              </h2>
+              <button
+                type="button"
+                data-ocid="compliance.print.button"
+                onClick={() => window.print()}
+                className="px-4 py-2 rounded-xl text-sm font-medium text-white"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                🖨️ Yazdır / PDF
+              </button>
+            </div>
+            <div id="compliance-report" className="space-y-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  {
+                    label: "Toplam Kayıt",
+                    value: visitors.length,
+                    color: "#0ea5e9",
+                  },
+                  {
+                    label: "Aktif Kayıt",
+                    value: visitors.filter((v) => v.status === "active").length,
+                    color: "#22c55e",
+                  },
+                  {
+                    label: "Saklama Süresi",
+                    value: `${company.dataRetentionDays} gün`,
+                    color: "#f59e0b",
+                  },
+                  {
+                    label: "Sonraki Temizlik",
+                    value:
+                      visitors.length > 0 && visitors.some((v) => v.createdAt)
+                        ? new Date(
+                            Math.min(...visitors.map((v) => v.createdAt)) +
+                              company.dataRetentionDays * 86400000,
+                          ).toLocaleDateString("tr-TR")
+                        : "—",
+                    color: "#a855f7",
+                  },
+                ].map((s) => (
+                  <div
+                    key={s.label}
+                    className="p-4 rounded-2xl flex flex-col gap-1"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: `1px solid ${s.color}30`,
+                    }}
+                  >
+                    <span
+                      className="text-2xl font-bold"
+                      style={{ color: s.color }}
+                    >
+                      {s.value}
+                    </span>
+                    <span className="text-slate-400 text-sm">{s.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 font-semibold mb-3">
+                  📋 Toplanan Kişisel Veri Kategorileri
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "Ad Soyad",
+                    "TC Kimlik No",
+                    "Telefon",
+                    "Dijital İmza",
+                    "Ziyaret Nedeni",
+                    "Ön Eleme Cevapları",
+                  ].map((d) => (
+                    <span
+                      key={d}
+                      className="px-3 py-1 rounded-full text-xs text-white"
+                      style={{
+                        background: "rgba(14,165,233,0.2)",
+                        border: "1px solid rgba(14,165,233,0.3)",
+                      }}
+                    >
+                      {d}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(245,158,11,0.05)",
+                  border: "1px solid rgba(245,158,11,0.2)",
+                }}
+              >
+                <p className="text-amber-400 font-semibold mb-3">
+                  ⚖️ KVKK Uyum Beyanı
+                </p>
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  Bu sistem, 6698 sayılı Kişisel Verilerin Korunması Kanunu
+                  (KVKK) ve AB Genel Veri Koruma Yönetmeliği (GDPR) kapsamında
+                  ziyaretçi verilerini işlemektedir. Toplanan kişisel veriler;
+                  ziyaret kaydı, güvenlik takibi ve yasal yükümlülüklerin yerine
+                  getirilmesi amacıyla kullanılmaktadır. Veriler,{" "}
+                  {company.dataRetentionDays} gün sonra otomatik olarak silinmek
+                  üzere planlanmaktadır. Ziyaretçilerden açık rıza alınmakta;
+                  NDA/KVKK onayı dijital imza ile kayıt altına alınmaktadır.
+                </p>
+              </div>
+
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 font-semibold mb-3">
+                  📅 En Eski Kayıt
+                </p>
+                <p className="text-slate-400 text-sm">
+                  {visitors.length > 0
+                    ? new Date(
+                        Math.min(...visitors.map((v) => v.createdAt)),
+                      ).toLocaleDateString("tr-TR", {
+                        year: "numeric",
+                        month: "long",
+                        day: "numeric",
+                      })
+                    : "Henüz kayıt yok"}
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -2681,6 +3439,30 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   çıkış yapılır.
                 </p>
               </div>
+              {/* Badge validity */}
+              <div className="col-span-2">
+                <p className="text-slate-300 text-sm mb-1 block">
+                  Rozet Geçerlilik Süresi (saat)
+                </p>
+                <input
+                  data-ocid="badge_validity.input"
+                  type="number"
+                  min={1}
+                  max={24}
+                  value={profileForm.badgeValidityHours ?? 8}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      badgeValidityHours: +e.target.value,
+                    }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <p className="text-slate-500 text-xs mt-1">
+                  Rozet bu süreden fazla aktif olan ziyaretçiler için uyarı
+                  gösterilir.
+                </p>
+              </div>
             </div>
 
             {/* Kiosk Welcome Message */}
@@ -2705,9 +3487,60 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </p>
             </div>
 
+            {/* Category-Based NDA */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold mb-4">
+                📄 Kategori Bazlı NDA Metinleri
+              </p>
+              <p className="text-slate-400 text-xs mb-4">
+                Her kategori için özel bir gizlilik/NDA metni
+                tanımlayabilirsiniz. Boş bırakılan kategoriler varsayılan metni
+                kullanır.
+              </p>
+              <div className="space-y-3">
+                {(
+                  profileForm.customCategories ??
+                  company.customCategories ?? [
+                    "Misafir",
+                    "Müteahhit",
+                    "Teslimat",
+                    "Mülakat",
+                    "Tedarikçi",
+                    "Diğer",
+                  ]
+                ).map((cat) => (
+                  <div key={cat}>
+                    <p className="text-slate-400 text-xs mb-1">{cat}</p>
+                    <textarea
+                      data-ocid="profile.category_nda.textarea"
+                      rows={2}
+                      value={profileForm.categoryNda?.[cat] ?? ""}
+                      onChange={(e) =>
+                        setProfileForm((f) => ({
+                          ...f,
+                          categoryNda: {
+                            ...(f.categoryNda ?? {}),
+                            [cat]: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder={`${cat} kategorisi için özel NDA metni (isteğe bağlı)`}
+                      className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9] resize-none"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <button
               type="button"
-              data-ocid="profile.save.button"
+              data-ocid="badge_validity.save_button"
               onClick={saveProfile}
               className="w-full py-3 rounded-xl font-semibold text-white"
               style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
@@ -3311,6 +4144,219 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               >
                 Randevu Oluştur
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {profileVisitor && (
+        <div
+          data-ocid="visitor_profile.sheet"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+        >
+          <div
+            className="w-full max-w-lg p-6 rounded-2xl max-h-[80vh] overflow-y-auto"
+            style={{
+              background: "#1e293b",
+              border: "1.5px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-bold text-lg">
+                👤 Ziyaretçi Profili
+              </h3>
+              <button
+                type="button"
+                data-ocid="visitor_profile.close_button"
+                onClick={() => setProfileVisitor(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div
+                className="p-4 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.04)" }}
+              >
+                <div className="text-white font-semibold text-base">
+                  {profileVisitor.name}
+                </div>
+                <div className="text-slate-400 text-sm mt-1">
+                  TC/ID:{" "}
+                  <span className="font-mono text-white">
+                    {profileVisitor.idNumber}
+                  </span>
+                </div>
+                {profileVisitor.phone && (
+                  <div className="text-slate-400 text-sm">
+                    📞 {profileVisitor.phone}
+                  </div>
+                )}
+                {profileVisitor.category && (
+                  <span
+                    className="inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium text-white"
+                    style={{
+                      background:
+                        CATEGORY_COLORS[profileVisitor.category] ?? "#64748b",
+                    }}
+                  >
+                    {profileVisitor.category}
+                  </span>
+                )}
+              </div>
+              <div>
+                <p className="text-slate-400 text-xs font-medium mb-2">
+                  TÜM ZİYARETLER
+                </p>
+                <div className="space-y-2">
+                  {visitors
+                    .filter((v) => v.idNumber === profileVisitor.idNumber)
+                    .map((v, idx) => (
+                      <div
+                        key={v.visitorId}
+                        data-ocid={`visitor_profile.item.${idx + 1}`}
+                        className="p-3 rounded-lg text-sm"
+                        style={{
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-white">
+                            {formatDateTime(v.arrivalTime)}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-semibold ${v.status === "active" ? "text-emerald-400 bg-emerald-500/15" : "text-slate-400 bg-white/10"}`}
+                          >
+                            {v.status === "active" ? "Aktif" : "Ayrıldı"}
+                          </span>
+                        </div>
+                        {v.departureTime && (
+                          <div className="text-slate-500 text-xs mt-1">
+                            Çıkış: {formatDateTime(v.departureTime)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+              {profileVisitor.notes && (
+                <div
+                  className="p-3 rounded-lg text-sm"
+                  style={{
+                    background: "rgba(245,158,11,0.08)",
+                    border: "1px solid rgba(245,158,11,0.2)",
+                  }}
+                >
+                  <p className="text-amber-400 font-medium text-xs mb-1">
+                    📝 NOT
+                  </p>
+                  <p className="text-slate-300">{profileVisitor.notes}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Performance Detail Modal */}
+      {selectedStaffPerf && (
+        <div
+          data-ocid="stats.performance_modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-md p-7 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(14,165,233,0.3)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-white font-bold text-lg">
+                  {selectedStaffPerf.name}
+                </h3>
+                <p className="text-slate-400 text-sm">Performans Detayı</p>
+              </div>
+              <button
+                type="button"
+                data-ocid="stats.performance_modal.close_button"
+                onClick={() => setSelectedStaffPerf(null)}
+                className="text-slate-400 hover:text-white text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-3">
+              {[
+                {
+                  label: "Toplam Kayıt",
+                  value: selectedStaffPerf.total.toString(),
+                  icon: "👤",
+                },
+                {
+                  label: "En Yoğun Vardiya",
+                  value:
+                    selectedStaffPerf.busiestShift === "morning"
+                      ? "Sabah"
+                      : selectedStaffPerf.busiestShift === "afternoon"
+                        ? "Öğleden Sonra"
+                        : "Gece",
+                  icon: "🕐",
+                },
+                {
+                  label: "En Yoğun Gün",
+                  value: selectedStaffPerf.busiestDay ?? "—",
+                  icon: "📅",
+                },
+                {
+                  label: "Ort. Kalış Süresi",
+                  value:
+                    selectedStaffPerf.avgDurMins > 0
+                      ? `${selectedStaffPerf.avgDurMins} dk`
+                      : "—",
+                  icon: "⏱️",
+                },
+                {
+                  label: "En Çok Kategori",
+                  value: selectedStaffPerf.topCat,
+                  icon: "🏷️",
+                },
+                {
+                  label: "Ort. Ziyaretçi Puanı",
+                  value:
+                    selectedStaffPerf.avgRating !== undefined
+                      ? selectedStaffPerf.avgRating !== "—"
+                        ? `⭐ ${selectedStaffPerf.avgRating}`
+                        : "—"
+                      : "—",
+                  icon: "⭐",
+                },
+                {
+                  label: "Yorum Bırakan (%)",
+                  value:
+                    selectedStaffPerf.commentPct !== undefined
+                      ? `%${selectedStaffPerf.commentPct}`
+                      : "—",
+                  icon: "💬",
+                },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="flex items-center justify-between p-3 rounded-xl"
+                  style={{ background: "rgba(255,255,255,0.05)" }}
+                >
+                  <span className="text-slate-400 text-sm">
+                    {item.icon} {item.label}
+                  </span>
+                  <span className="text-white font-semibold text-sm">
+                    {item.value}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         </div>

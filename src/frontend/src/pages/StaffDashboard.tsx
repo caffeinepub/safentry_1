@@ -1,10 +1,27 @@
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertTriangle,
+  Calendar,
+  ClipboardList,
+  HelpCircle,
+  ShieldOff,
+  Users,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { addAuditLog } from "../auditLog";
+import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
 import QRCode from "../components/QRCode";
 import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { getLang, t } from "../i18n";
+import { copyToClipboard } from "../lib/utils";
 import {
   addAlertHistory,
   clearSession,
@@ -17,6 +34,7 @@ import {
   getCompanyFloors,
   getCustomCategories,
   getInvitations,
+  getLockdown,
   getSession,
   getStaffByCompany,
   getVisitors,
@@ -44,6 +62,7 @@ import {
   generateVisitorId,
   hoursSince,
 } from "../utils";
+import { printFormalDocument } from "../utils/formalDocument";
 import { generateVisitorBadgePDF } from "../utils/visitorBadge";
 
 const LABEL_COLORS: Record<string, string> = {
@@ -213,6 +232,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const session = getSession()!;
   const staff = findStaffById(session.staffId!)!;
   const company = findCompanyById(session.companyId);
+  const [lockdownActive] = useState(() => getLockdown(session.companyId));
+  const [storageDismissed, setStorageDismissed] = useState(
+    () => localStorage.getItem("safentry_storage_notice_dismissed") === "1",
+  );
   const [tab, setTab] = useState<Tab>("register");
   const [form, setForm] = useState(EMPTY_FORM);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
@@ -329,6 +352,17 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     null,
   );
   const [rejectReason, setRejectReason] = useState("");
+  // Bulk exit state
+  const [bulkExitModalOpen, setBulkExitModalOpen] = useState(false);
+  // Visitor profile state
+  const [profileVisitor, setProfileVisitor] = useState<Visitor | null>(null);
+  // Appointment calendar view
+  const [apptView, setApptView] = useState<"list" | "calendar">("list");
+  // Private note state
+  const [privateNoteVisitor, setPrivateNoteVisitor] = useState<Visitor | null>(
+    null,
+  );
+  const [privateNoteText, setPrivateNoteText] = useState("");
 
   const loadKioskPending = useCallback(() => {
     const all: KioskPendingVisitor[] = JSON.parse(
@@ -416,7 +450,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   };
 
   const copyCode = (code: string, key: string) => {
-    navigator.clipboard.writeText(code).catch(() => {});
+    copyToClipboard(code);
     setCopiedCode(key);
     setTimeout(() => setCopiedCode(null), 2000);
   };
@@ -492,19 +526,21 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   const submitVisitor = () => {
     if (!form.name || !form.idNumber || !form.phone || !form.hostStaffId) {
-      setFormError("Lütfen zorunlu alanları doldurun.");
+      setFormError(
+        "Bu alan zorunludur — lütfen ad soyad, TC/pasaport, telefon ve ev sahibi alanlarını doldurun.",
+      );
       return;
     }
     if (!form.department || !form.floor) {
-      setFormError("Departman ve kat seçiniz.");
+      setFormError("Departman ve kat seçimi zorunludur.");
       return;
     }
     if (!form.ndaAccepted) {
-      setFormError("Gizlilik sözleşmesini onaylamalısınız.");
+      setFormError("Gizlilik sözleşmesini onaylamanız gerekiyor.");
       return;
     }
     if (!form.signatureData) {
-      setFormError("Lütfen dijital imza atın.");
+      setFormError("Lütfen dijital imzanızı atın.");
       return;
     }
     // Check required custom fields
@@ -523,13 +559,16 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         sq.blocking &&
         form.screeningAnswers[sq.id] === "Hayır"
       ) {
-        setFormError("Güvenlik sorusu yanıtı nedeniyle giriş engellenmiştir.");
+        setFormError(
+          "Güvenlik sorusu yanıtı nedeniyle giriş engellenmiştir. Lütfen güvenlik görevlisiyle iletişime geçin.",
+        );
         return;
       }
     }
     if (isBlacklisted(session.companyId, form.idNumber)) {
       setBlacklistModalName(form.name);
       setBlacklistModalVisible(true);
+      toast.error("Bu kişi kara listede — giriş engellidir");
       const alertEntry: AlertHistoryEntry = {
         id: generateId(),
         companyId: session.companyId,
@@ -605,6 +644,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setReturningSuggestion(null);
     setPendingVisitorData(null);
     setShowIdVerify(false);
+    toast.success("Ziyaretçi başarıyla kaydedildi");
     reload();
   };
 
@@ -652,7 +692,32 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setExitRating(0);
     setExitComment("");
     setEquipmentReturnChecked(false);
+    toast.success("Çıkış kaydedildi");
     reload();
+  };
+
+  const bulkExit = () => {
+    const now = Date.now();
+    for (const v of activeVisitors) {
+      saveVisitor({ ...v, status: "departed", departureTime: now });
+    }
+    setVisitors(getVisitors(session!.companyId));
+    setBulkExitModalOpen(false);
+    addAuditLog(
+      session!.companyId,
+      staff?.name ?? session!.staffId ?? "Personel",
+      session!.staffId ?? "",
+      "Toplu Çıkış",
+      `${activeVisitors.length} ziyaretçi toplu çıkış yapıldı`,
+    );
+  };
+
+  const savePrivateNote = () => {
+    if (!privateNoteVisitor) return;
+    saveVisitor({ ...privateNoteVisitor, privateNote: privateNoteText });
+    setVisitors(getVisitors(session!.companyId));
+    setPrivateNoteVisitor(null);
+    setPrivateNoteText("");
   };
 
   const checkout = (v: Visitor) => {
@@ -681,8 +746,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         hostName,
         true,
       );
+      toast.success("Rozet yazdırıldı");
     } catch (err) {
       console.error("Print failed", err);
+      toast.error("Rozet yazdırılırken hata oluştu");
     } finally {
       setPdfLoading(null);
     }
@@ -738,6 +805,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setApptForm(EMPTY_APPT);
     setApptError("");
     reload();
+    toast.success("Randevu oluşturuldu");
   };
 
   const approveAppointment = (appt: Appointment) => {
@@ -1098,6 +1166,51 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   return (
     <div className="min-h-screen" style={{ background: "#0a0f1e" }}>
+      {/* Lockdown Banner */}
+      {lockdownActive && (
+        <div
+          data-ocid="staff_dashboard.lockdown_banner"
+          className="flex items-center gap-3 px-6 py-3 text-white font-bold text-sm"
+          style={{
+            background: "linear-gradient(90deg,#7f1d1d,#991b1b)",
+            borderBottom: "2px solid #ef4444",
+          }}
+        >
+          <span className="animate-pulse text-lg">⚠️</span>
+          ACİL DURUM MOD AKTİF — Yönetici tarafından ziyaretçi girişleri
+          durduruldu. Kayıt formu devre dışı.
+        </div>
+      )}
+
+      {/* Storage Notice */}
+      {!storageDismissed && (
+        <div
+          data-ocid="staff_dashboard.storage_notice"
+          className="flex items-center justify-between gap-3 px-6 py-2.5 text-sm"
+          style={{
+            background: "rgba(245,158,11,0.12)",
+            borderBottom: "1px solid rgba(245,158,11,0.25)",
+          }}
+        >
+          <span className="text-amber-300">
+            📦 Verileriniz bu tarayıcıda yerel olarak saklanmaktadır. Farklı
+            tarayıcı veya cihazda verilerinize erişilemez.
+          </span>
+          <button
+            type="button"
+            data-ocid="staff_dashboard.storage_notice.close_button"
+            onClick={() => {
+              localStorage.setItem("safentry_storage_notice_dismissed", "1");
+              setStorageDismissed(true);
+            }}
+            className="text-amber-400 hover:text-white shrink-0 text-lg leading-none"
+            aria-label="Kapat"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* ID Verification Dialog */}
       {showIdVerify && pendingVisitorData && (
         <div
@@ -1526,6 +1639,211 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       )}
 
       {/* Notes Dialog */}
+      {/* Private Note Modal */}
+      {privateNoteVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm p-6 rounded-2xl"
+            style={{
+              background: "#1e293b",
+              border: "1.5px solid rgba(239,68,68,0.3)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg mb-1 flex items-center gap-2">
+              🔒 Gizli Not
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">
+              {privateNoteVisitor.name}
+            </p>
+            <textarea
+              data-ocid="private_note.input"
+              value={privateNoteText}
+              onChange={(e) => setPrivateNoteText(e.target.value)}
+              rows={4}
+              placeholder="Sadece güvenlik personeli görebilir..."
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none focus:border-red-500/50"
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setPrivateNoteVisitor(null);
+                  setPrivateNoteText("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium text-slate-300 bg-white/10 hover:bg-white/15"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                data-ocid="private_note.save_button"
+                onClick={savePrivateNote}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "rgba(239,68,68,0.4)",
+                  border: "1px solid rgba(239,68,68,0.5)",
+                }}
+              >
+                Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visitor Profile Modal */}
+      {profileVisitor && (
+        <div
+          data-ocid="visitor_profile.sheet"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+        >
+          <div
+            className="w-full max-w-lg p-6 rounded-2xl max-h-[80vh] overflow-y-auto"
+            style={{
+              background: "#1e293b",
+              border: "1.5px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-bold text-lg">
+                👤 Ziyaretçi Profili
+              </h3>
+              <button
+                type="button"
+                data-ocid="visitor_profile.close_button"
+                onClick={() => setProfileVisitor(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div
+                className="p-4 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.04)" }}
+              >
+                <div className="text-white font-semibold text-base">
+                  {profileVisitor.name}
+                </div>
+                <div className="text-slate-400 text-sm mt-1">
+                  TC/ID:{" "}
+                  <span className="font-mono text-white">
+                    {profileVisitor.idNumber}
+                  </span>
+                </div>
+                {profileVisitor.phone && (
+                  <div className="text-slate-400 text-sm">
+                    📞 {profileVisitor.phone}
+                  </div>
+                )}
+                {profileVisitor.category && (
+                  <span
+                    className="inline-block mt-2 px-2 py-0.5 rounded text-xs font-medium text-white"
+                    style={{
+                      background:
+                        CATEGORY_COLORS[profileVisitor.category] ?? "#64748b",
+                    }}
+                  >
+                    {profileVisitor.category}
+                  </span>
+                )}
+              </div>
+              {/* All visits */}
+              <div>
+                <p className="text-slate-400 text-xs font-medium mb-2">
+                  TÜM ZİYARETLER
+                </p>
+                <div className="space-y-2">
+                  {visitors
+                    .filter((v) => v.idNumber === profileVisitor.idNumber)
+                    .map((v, idx) => (
+                      <div
+                        key={v.visitorId}
+                        data-ocid={`visitor_profile.item.${idx + 1}`}
+                        className="p-3 rounded-lg text-sm"
+                        style={{
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.08)",
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-white">
+                            {formatDateTime(v.arrivalTime)}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-semibold ${v.status === "active" ? "text-emerald-400 bg-emerald-500/15" : "text-slate-400 bg-white/10"}`}
+                          >
+                            {v.status === "active" ? "Aktif" : "Ayrıldı"}
+                          </span>
+                        </div>
+                        <div className="text-slate-500 text-xs mt-1">
+                          Host:{" "}
+                          {staffList.find((s) => s.staffId === v.hostStaffId)
+                            ?.name ?? v.hostStaffId}
+                        </div>
+                        {v.departureTime && (
+                          <div className="text-slate-500 text-xs">
+                            Çıkış: {formatDateTime(v.departureTime)}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+              {/* Notes */}
+              {profileVisitor.notes && (
+                <div
+                  className="p-3 rounded-lg text-sm"
+                  style={{
+                    background: "rgba(245,158,11,0.08)",
+                    border: "1px solid rgba(245,158,11,0.2)",
+                  }}
+                >
+                  <p className="text-amber-400 font-medium text-xs mb-1">
+                    📝 NOT
+                  </p>
+                  <p className="text-slate-300">{profileVisitor.notes}</p>
+                </div>
+              )}
+              {/* Private note */}
+              {profileVisitor.privateNote && (
+                <div
+                  className="p-3 rounded-lg text-sm"
+                  style={{
+                    background: "rgba(239,68,68,0.08)",
+                    border: "1px solid rgba(239,68,68,0.2)",
+                  }}
+                >
+                  <p className="text-red-400 font-medium text-xs mb-1">
+                    🔒 GİZLİ NOT
+                  </p>
+                  <p className="text-slate-300">{profileVisitor.privateNote}</p>
+                </div>
+              )}
+              {/* Blacklist status */}
+              {isBlacklisted(
+                profileVisitor.companyId,
+                profileVisitor.idNumber,
+              ) && (
+                <div
+                  className="p-3 rounded-lg text-sm"
+                  style={{
+                    background: "rgba(239,68,68,0.12)",
+                    border: "1px solid rgba(239,68,68,0.3)",
+                  }}
+                >
+                  <p className="text-red-400 font-semibold">🚫 Kara Listede</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {notesVisitor && (
         <div
           data-ocid="visitor_notes.dialog"
@@ -1905,9 +2223,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     type="button"
                     data-ocid="invite_create.copy_button"
                     onClick={() => {
-                      navigator.clipboard
-                        .writeText(createdInviteLink)
-                        .catch(() => {});
+                      copyToClipboard(createdInviteLink);
                       setInviteLinkCopied(true);
                       setTimeout(() => setInviteLinkCopied(false), 2000);
                     }}
@@ -2191,20 +2507,33 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               <h2 className="text-white font-bold text-xl">
                 {t(lang, "registerVisitor")}
               </h2>
-              <button
-                type="button"
-                data-ocid="register.kiosk_button"
-                onClick={() =>
-                  onNavigate("kiosk", { companyId: session.companyId })
-                }
-                className="px-4 py-2 rounded-xl text-sm font-medium text-white flex items-center gap-2"
-                style={{
-                  background: "rgba(168,85,247,0.15)",
-                  border: "1px solid rgba(168,85,247,0.35)",
-                }}
-              >
-                🖵 Kiosk Modu
-              </button>
+              <div className="flex items-center gap-2">
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-4 h-4 text-slate-500 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      Kiosk modunda ziyaretçiler formu kendileri doldurur ve
+                      güvenlik onayı bekler
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <button
+                  type="button"
+                  data-ocid="register.kiosk_button"
+                  onClick={() =>
+                    onNavigate("kiosk", { companyId: session.companyId })
+                  }
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-white flex items-center gap-2"
+                  style={{
+                    background: "rgba(168,85,247,0.15)",
+                    border: "1px solid rgba(168,85,247,0.35)",
+                  }}
+                >
+                  🖵 Kiosk Modu
+                </button>
+              </div>
             </div>
 
             {/* Off-hours warning */}
@@ -2229,9 +2558,20 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 border: "1px solid rgba(255,255,255,0.1)",
               }}
             >
-              <span className="text-slate-400 text-sm shrink-0">
-                Davet kodu:
-              </span>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-slate-400 text-sm">Davet kodu:</span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="w-3.5 h-3.5 text-slate-500 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">
+                      Önceden oluşturulmuş davet kodunu girerek bilgileri
+                      otomatik doldurabilirsiniz
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <input
                 data-ocid="register.invite_code_input"
                 value={inviteCodeInput}
@@ -2890,9 +3230,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                         className="mt-2 text-slate-400 text-xs leading-relaxed p-3 rounded-lg"
                         style={{ background: "rgba(255,255,255,0.05)" }}
                       >
-                        Kişisel verileriniz KVKK kapsamında ziyaret kaydı
-                        amacıyla işlenmektedir. Verileriniz 90 gün sonra
-                        otomatik olarak silinecektir.
+                        {company?.categoryNda?.[form.category] ||
+                          "Kişisel verileriniz KVKK kapsamında ziyaret kaydı amacıyla işlenmektedir. Verileriniz saklama süresi dolunca otomatik olarak silinecektir."}
                       </p>
                     )}
                   </div>
@@ -2927,6 +3266,72 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         {/* ACTIVE VISITORS TAB */}
         {tab === "active" && (
           <div>
+            {/* Bulk Exit Button */}
+            {activeVisitors.length > 0 && (
+              <div className="flex justify-end mb-4">
+                <button
+                  type="button"
+                  data-ocid="bulk_exit.open_modal_button"
+                  onClick={() => setBulkExitModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-90 active:scale-95"
+                  style={{
+                    background: "rgba(239,68,68,0.2)",
+                    border: "1.5px solid rgba(239,68,68,0.4)",
+                    color: "#f87171",
+                  }}
+                >
+                  🚪 Toplu Çıkış ({activeVisitors.length} kişi)
+                </button>
+              </div>
+            )}
+            {/* Bulk Exit Confirmation Modal */}
+            {bulkExitModalOpen && (
+              <div
+                data-ocid="bulk_exit.dialog"
+                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                style={{ background: "rgba(0,0,0,0.7)" }}
+              >
+                <div
+                  className="w-full max-w-sm p-6 rounded-2xl"
+                  style={{
+                    background: "#1e293b",
+                    border: "1.5px solid rgba(239,68,68,0.3)",
+                  }}
+                >
+                  <h3 className="text-white font-bold text-lg mb-2">
+                    🚪 Toplu Çıkış
+                  </h3>
+                  <p className="text-slate-400 text-sm mb-6">
+                    Tüm aktif ziyaretçileri çıkış yaptırmak istiyor musunuz?{" "}
+                    <strong className="text-white">
+                      ({activeVisitors.length} kişi)
+                    </strong>
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      data-ocid="bulk_exit.cancel_button"
+                      onClick={() => setBulkExitModalOpen(false)}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-medium text-slate-300 bg-white/10 hover:bg-white/15"
+                    >
+                      İptal
+                    </button>
+                    <button
+                      type="button"
+                      data-ocid="bulk_exit.confirm_button"
+                      onClick={bulkExit}
+                      className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                      style={{
+                        background: "rgba(239,68,68,0.5)",
+                        border: "1px solid rgba(239,68,68,0.6)",
+                      }}
+                    >
+                      Evet, Çıkış Yaptır
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             {/* Kiosk Pending Approvals */}
             {kioskPending.length > 0 && (
               <div
@@ -2985,12 +3390,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             )}
 
             {activeVisitors.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="active_visitors.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                {t(lang, "noVisitors")}
-              </div>
+                icon={ClipboardList}
+                title="Aktif ziyaretçi yok"
+                description="Şu anda kayıtlı aktif ziyaretçi bulunmuyor."
+              />
             ) : (
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {activeVisitors
@@ -3233,7 +3638,111 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                           >
                             {pdfLoading === v.visitorId ? "⏳" : "📄"}
                           </button>
+                          <button
+                            type="button"
+                            data-ocid={`formal_doc.button.${i + 1}`}
+                            onClick={() =>
+                              printFormalDocument(
+                                v,
+                                company?.name ?? "Safentry",
+                                staffList.find(
+                                  (s) => s.staffId === v.hostStaffId,
+                                )?.name ?? "",
+                              )
+                            }
+                            title="Resmi Belge Yazdır"
+                            className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-80"
+                            style={{
+                              background: "rgba(20,184,166,0.15)",
+                              border: "1px solid rgba(20,184,166,0.3)",
+                            }}
+                          >
+                            📋
+                          </button>
+                          <button
+                            type="button"
+                            data-ocid={`visitor_profile.open_modal_button.${i + 1}`}
+                            onClick={() => setProfileVisitor(v)}
+                            title="Ziyaretçi Profili"
+                            className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-80"
+                            style={{
+                              background: "rgba(168,85,247,0.15)",
+                              border: "1px solid rgba(168,85,247,0.3)",
+                            }}
+                          >
+                            👤
+                          </button>
+                          <button
+                            type="button"
+                            data-ocid={`private_note.open_button.${i + 1}`}
+                            onClick={() => {
+                              setPrivateNoteVisitor(v);
+                              setPrivateNoteText(v.privateNote ?? "");
+                            }}
+                            title="Gizli Not"
+                            className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                            style={{
+                              background: v.privateNote
+                                ? "rgba(239,68,68,0.2)"
+                                : "rgba(239,68,68,0.08)",
+                              border: "1px solid rgba(239,68,68,0.3)",
+                              color: v.privateNote ? "#f87171" : "#94a3b8",
+                            }}
+                          >
+                            🔒
+                          </button>
                         </div>
+                        {/* Badge validity warning */}
+                        {(() => {
+                          const validHours = company?.badgeValidityHours ?? 8;
+                          const elapsed =
+                            (Date.now() - v.arrivalTime) / 3600000;
+                          const remaining = validHours - elapsed;
+                          if (remaining <= 0) {
+                            return (
+                              <div
+                                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-red-400"
+                                style={{
+                                  background: "rgba(239,68,68,0.12)",
+                                  border: "1px solid rgba(239,68,68,0.3)",
+                                }}
+                              >
+                                🚫 Rozet Süresi Doldu
+                              </div>
+                            );
+                          }
+                          if (remaining <= 0.5) {
+                            return (
+                              <div
+                                className="mt-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-amber-400"
+                                style={{
+                                  background: "rgba(245,158,11,0.12)",
+                                  border: "1px solid rgba(245,158,11,0.3)",
+                                }}
+                              >
+                                ⚠️ Rozet Süresi Yaklaşıyor (
+                                {Math.round(remaining * 60)} dk)
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                        {/* Private note indicator */}
+                        {v.privateNote && (
+                          <div
+                            className="mt-2 px-3 py-1.5 rounded-lg text-xs text-red-300"
+                            style={{
+                              background: "rgba(239,68,68,0.08)",
+                              border: "1px solid rgba(239,68,68,0.2)",
+                            }}
+                          >
+                            🔒{" "}
+                            <span className="text-red-400 font-medium">
+                              Gizli Not:
+                            </span>{" "}
+                            {v.privateNote}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -3297,12 +3806,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {insideVisitors.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="inside.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Şu an içeride ziyaretçi yok.
-              </div>
+                icon={Users}
+                title="Şu an içeride kimse yok"
+                description="Aktif ziyaretçi bulunmuyor."
+              />
             ) : (
               <div className="space-y-3">
                 {insideVisitors
@@ -3432,52 +3941,186 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         {/* APPOINTMENTS TAB */}
         {tab === "appointments" && (
           <div>
-            {/* Sub-tabs */}
-            <div className="flex gap-2 mb-6">
-              <button
-                type="button"
-                data-ocid="appointments.today.tab"
-                onClick={() => setApptTab("today")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  apptTab === "today"
-                    ? "text-white"
-                    : "text-slate-400 hover:text-white"
-                }`}
-                style={
-                  apptTab === "today"
-                    ? { background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }
-                    : { background: "rgba(255,255,255,0.05)" }
-                }
-              >
-                📋 Bugünün Randevuları ({todayAppointments.length})
-              </button>
-              <button
-                type="button"
-                data-ocid="appointments.create.tab"
-                onClick={() => setApptTab("create")}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  apptTab === "create"
-                    ? "text-white"
-                    : "text-slate-400 hover:text-white"
-                }`}
-                style={
-                  apptTab === "create"
-                    ? { background: "linear-gradient(135deg,#f59e0b,#d97706)" }
-                    : { background: "rgba(255,255,255,0.05)" }
-                }
-              >
-                + Yeni Randevu
-              </button>
+            {/* Sub-tabs + View toggle */}
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-ocid="appointments.today.tab"
+                  onClick={() => setApptTab("today")}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    apptTab === "today"
+                      ? "text-white"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                  style={
+                    apptTab === "today"
+                      ? {
+                          background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                        }
+                      : { background: "rgba(255,255,255,0.05)" }
+                  }
+                >
+                  📋 Bugünün Randevuları ({todayAppointments.length})
+                </button>
+                <button
+                  type="button"
+                  data-ocid="appointments.create.tab"
+                  onClick={() => setApptTab("create")}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    apptTab === "create"
+                      ? "text-white"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                  style={
+                    apptTab === "create"
+                      ? {
+                          background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                        }
+                      : { background: "rgba(255,255,255,0.05)" }
+                  }
+                >
+                  + Yeni Randevu
+                </button>
+              </div>
+              {apptTab === "today" && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-ocid="appointments.list_tab"
+                    onClick={() => setApptView("list")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${apptView === "list" ? "text-white" : "text-slate-400 hover:text-white"}`}
+                    style={
+                      apptView === "list"
+                        ? {
+                            background: "rgba(14,165,233,0.2)",
+                            border: "1px solid rgba(14,165,233,0.4)",
+                          }
+                        : { background: "rgba(255,255,255,0.05)" }
+                    }
+                  >
+                    📋 Liste
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="appointments.calendar_tab"
+                    onClick={() => setApptView("calendar")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${apptView === "calendar" ? "text-white" : "text-slate-400 hover:text-white"}`}
+                    style={
+                      apptView === "calendar"
+                        ? {
+                            background: "rgba(14,165,233,0.2)",
+                            border: "1px solid rgba(14,165,233,0.4)",
+                          }
+                        : { background: "rgba(255,255,255,0.05)" }
+                    }
+                  >
+                    📅 Takvim
+                  </button>
+                </div>
+              )}
             </div>
 
             {apptTab === "today" && (
               <div>
                 {todayAppointments.length === 0 ? (
-                  <div
+                  <EmptyState
                     data-ocid="appointments.empty_state"
-                    className="text-center py-16 text-slate-500"
-                  >
-                    Bugün için randevu bulunmuyor.
+                    icon={Calendar}
+                    title="Bugün için randevu yok"
+                    description="Bugün planlanmış randevu bulunmuyor."
+                  />
+                ) : apptView === "calendar" ? (
+                  /* Calendar view */
+                  <div className="overflow-x-auto">
+                    <div className="min-w-[600px]">
+                      <div className="grid grid-cols-[60px_repeat(7,1fr)] gap-1 mb-2">
+                        <div />
+                        {["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"].map(
+                          (d) => (
+                            <div
+                              key={d}
+                              className="text-center text-xs text-slate-400 font-medium py-1"
+                            >
+                              {d}
+                            </div>
+                          ),
+                        )}
+                      </div>
+                      {Array.from({ length: 11 }, (_, i) => i + 8).map(
+                        (hour) => {
+                          const hourStr = `${String(hour).padStart(2, "0")}:00`;
+                          const todayDow = (new Date().getDay() + 6) % 7; // Mon=0
+                          return (
+                            <div
+                              key={hour}
+                              className="grid grid-cols-[60px_repeat(7,1fr)] gap-1 mb-1"
+                            >
+                              <div className="text-xs text-slate-500 text-right pr-2 pt-1">
+                                {hourStr}
+                              </div>
+                              {(
+                                [
+                                  "Pzt",
+                                  "Sal",
+                                  "Çar",
+                                  "Per",
+                                  "Cum",
+                                  "Cmt",
+                                  "Paz",
+                                ] as string[]
+                              ).map((dayName, col) => {
+                                const appts = todayAppointments.filter((a) => {
+                                  const [h] = a.appointmentTime
+                                    .split(":")
+                                    .map(Number);
+                                  const dow =
+                                    (new Date(a.appointmentDate).getDay() + 6) %
+                                    7;
+                                  return h === hour && dow === col;
+                                });
+                                return (
+                                  <div
+                                    key={`${hour}-${dayName}`}
+                                    className="min-h-[40px] rounded-lg p-1"
+                                    style={{
+                                      background:
+                                        col === todayDow
+                                          ? "rgba(14,165,233,0.05)"
+                                          : "rgba(255,255,255,0.02)",
+                                      border:
+                                        col === todayDow
+                                          ? "1px solid rgba(14,165,233,0.15)"
+                                          : "1px solid rgba(255,255,255,0.05)",
+                                    }}
+                                  >
+                                    {appts.map((a) => (
+                                      <div
+                                        key={a.id}
+                                        className="text-xs px-1.5 py-0.5 rounded mb-0.5 truncate font-medium"
+                                        style={{
+                                          background:
+                                            a.status === "approved"
+                                              ? "rgba(34,197,94,0.25)"
+                                              : "rgba(14,165,233,0.25)",
+                                          color:
+                                            a.status === "approved"
+                                              ? "#4ade80"
+                                              : "#38bdf8",
+                                        }}
+                                        title={`${a.visitorName} - ${a.appointmentTime}`}
+                                      >
+                                        {a.appointmentTime} {a.visitorName}
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -3867,12 +4510,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         {tab === "preregistered" && (
           <div>
             {preregistered.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="preregistered.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Ön kayıt bulunamadı.
-              </div>
+                icon={ClipboardList}
+                title="Ön kayıt bulunamadı"
+                description="Henüz ön kayıtlı ziyaretçi yok."
+              />
             ) : (
               <div className="space-y-3">
                 {preregistered.map((v, i) => (
@@ -4360,12 +5003,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
 
             {invitations.length === 0 ? (
-              <div
+              <EmptyState
                 data-ocid="invitations.empty_state"
-                className="text-center py-16 text-slate-500"
-              >
-                Bekleyen davet başvurusu yok.
-              </div>
+                icon={Calendar}
+                title="Davet başvurusu yok"
+                description="Bekleyen davet başvurusu bulunmuyor."
+              />
             ) : (
               <div className="space-y-3">
                 {invitations.map((inv, i) => (
