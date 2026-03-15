@@ -3,6 +3,7 @@ import type {
   Appointment,
   BlacklistEntry,
   Company,
+  Invitation,
   Session,
   Staff,
   Visitor,
@@ -35,12 +36,47 @@ const DEFAULT_CATEGORIES = [
   "Diğer",
 ];
 
+const DEFAULT_DEPARTMENTS = [
+  "Yönetim",
+  "İK",
+  "Muhasebe",
+  "IT",
+  "Satış",
+  "Üretim",
+  "Güvenlik",
+];
+
+const DEFAULT_FLOORS = [
+  "Zemin",
+  "1. Kat",
+  "2. Kat",
+  "3. Kat",
+  "4. Kat",
+  "5. Kat",
+];
+
 export function getCustomCategories(companyId: string): string[] {
   const company = findCompanyById(companyId);
   if (company?.customCategories && company.customCategories.length > 0) {
     return company.customCategories;
   }
   return DEFAULT_CATEGORIES;
+}
+
+export function getCompanyDepartments(companyId: string): string[] {
+  const company = findCompanyById(companyId);
+  if (company?.departments && company.departments.length > 0) {
+    return company.departments;
+  }
+  return DEFAULT_DEPARTMENTS;
+}
+
+export function getCompanyFloors(companyId: string): string[] {
+  const company = findCompanyById(companyId);
+  if (company?.floors && company.floors.length > 0) {
+    return company.floors;
+  }
+  return DEFAULT_FLOORS;
 }
 
 export function getAllStaff(): Staff[] {
@@ -227,4 +263,52 @@ export function lookupInviteCode(code: string): string | null {
     localStorage.getItem("safentry_invites") || "{}",
   );
   return codes[code] ?? null;
+}
+
+// Invitation (guest self-registration) functions
+export function getInvitations(companyId: string): Invitation[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_invitations_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveInvitation(inv: Invitation) {
+  const list = getInvitations(inv.companyId).filter(
+    (x) => x.token !== inv.token,
+  );
+  localStorage.setItem(
+    `safentry_invitations_${inv.companyId}`,
+    JSON.stringify([...list, inv]),
+  );
+}
+export function findInvitationByToken(token: string): Invitation | null {
+  const companies = getCompanies();
+  for (const c of companies) {
+    const inv = getInvitations(c.companyId).find((i) => i.token === token);
+    if (inv) return inv;
+  }
+  return null;
+}
+
+// Alert History
+export function getAlertHistory(
+  companyId: string,
+): import("./types").AlertHistoryEntry[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_alerts_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function addAlertHistory(entry: import("./types").AlertHistoryEntry) {
+  const list = getAlertHistory(entry.companyId);
+  localStorage.setItem(
+    `safentry_alerts_${entry.companyId}`,
+    JSON.stringify([entry, ...list].slice(0, 500)),
+  );
 }

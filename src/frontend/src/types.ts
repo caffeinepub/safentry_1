@@ -1,3 +1,45 @@
+export interface ScreeningQuestion {
+  id: string;
+  text: string;
+  type: "yes_no" | "text";
+  blocking: boolean;
+}
+
+export interface ExitQuestion {
+  id: string;
+  question: string;
+  type: "rating" | "text" | "yesno";
+}
+
+export interface AlertHistoryEntry {
+  id: string;
+  companyId: string;
+  type: "blacklist" | "capacity" | "afterhours" | "prescreening";
+  timestamp: number;
+  detail: string;
+  personelId?: string;
+}
+
+export interface Invitation {
+  token: string;
+  companyId: string;
+  createdBy: string;
+  createdAt: number;
+  visitorName: string;
+  status: "pending" | "submitted" | "approved" | "rejected";
+  preData?: {
+    name: string;
+    idNumber: string;
+    phone: string;
+    visitReason: string;
+    hostName: string;
+    department: string;
+    floor: string;
+  };
+  rejectionReason?: string;
+  hostName?: string;
+}
+
 export interface Company {
   companyId: string;
   loginCode: string;
@@ -17,6 +59,10 @@ export interface Company {
   workingHoursStart?: number;
   workingHoursEnd?: number;
   kioskWelcomeMessage?: string;
+  departments?: string[];
+  floors?: string[];
+  screeningQuestions?: ScreeningQuestion[];
+  customExitQuestions?: ExitQuestion[];
 }
 
 export interface Staff {
@@ -26,6 +72,9 @@ export interface Staff {
   role: "admin" | "receptionist" | "staff";
   availabilityStatus: "available" | "in_meeting" | "outside";
   createdAt: number;
+  isAbsent?: boolean;
+  absenceReason?: string;
+  absentUntil?: string;
 }
 
 export interface Visitor {
@@ -51,11 +100,18 @@ export interface Visitor {
   rating?: number;
   exitRating?: number;
   exitComment?: string;
+  exitSurveyAnswers?: Record<string, string>;
   createdAt: number;
   customFieldValues?: Record<string, string>;
   shiftType?: "morning" | "afternoon" | "night";
   visitorPhoto?: string;
   specialNeeds?: string;
+  multiDay?: boolean;
+  endDate?: string;
+  department?: string;
+  floor?: string;
+  equipment?: { type: string; id: string; assignedAt: string } | null;
+  screeningAnswers?: { questionId: string; question: string; answer: string }[];
 }
 
 export interface BlacklistEntry {
@@ -121,4 +177,5 @@ export type AppScreen =
   | "company-dashboard"
   | "staff-dashboard"
   | "kiosk"
-  | "verify";
+  | "verify"
+  | "invite";

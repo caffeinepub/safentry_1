@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getLang } from "./i18n";
+import InvitePage from "./pages/InvitePage";
 import { clearSession, getSession } from "./store";
 import type { AppScreen } from "./types";
 
@@ -14,14 +15,23 @@ import StaffRegister from "./pages/StaffRegister";
 import Verify from "./pages/Verify";
 import Welcome from "./pages/Welcome";
 
+// Check if current URL is an invite link
+function getInviteToken(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/invite\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
 export default function App() {
   const [, forceRender] = useState(0);
   const refresh = () => forceRender((x) => x + 1);
 
   const hasLang = !!localStorage.getItem("safentry_lang");
   const session = getSession();
+  const inviteToken = getInviteToken();
 
   const getInitialScreen = (): AppScreen => {
+    if (inviteToken) return "invite";
     if (!hasLang) return "language";
     if (!session) return "welcome";
     return session.type === "company" ? "company-dashboard" : "staff-dashboard";
@@ -29,10 +39,14 @@ export default function App() {
 
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
   const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
+  const [currentInviteToken, setCurrentInviteToken] = useState<string | null>(
+    inviteToken,
+  );
 
   const navigate = useCallback(
-    (s: AppScreen, state?: { companyId?: string }) => {
+    (s: AppScreen, state?: { companyId?: string; token?: string }) => {
       if (s === "kiosk" && state?.companyId) setKioskCompanyId(state.companyId);
+      if (s === "invite" && state?.token) setCurrentInviteToken(state.token);
       setScreen(s);
     },
     [],
@@ -56,6 +70,8 @@ export default function App() {
 
   void getLang();
 
+  if (screen === "invite" && currentInviteToken)
+    return <InvitePage token={currentInviteToken} onNavigate={navigate} />;
   if (screen === "language")
     return (
       <LanguageSelect

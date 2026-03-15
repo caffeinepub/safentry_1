@@ -13,11 +13,16 @@ import ConfirmModal from "../components/ConfirmModal";
 import LangSwitcher from "../components/LangSwitcher";
 import { getLang, t } from "../i18n";
 import {
+  addAlertHistory,
   addToBlacklist,
   clearSession,
   findCompanyById,
+  getAlertHistory,
   getAnnouncements,
+  getAppointments,
   getBlacklist,
+  getCompanyDepartments,
+  getCompanyFloors,
   getSession,
   getStaffByCompany,
   getVisitors,
@@ -26,16 +31,21 @@ import {
   removeStaff as removeStaffStore,
   resetStaffCode,
   saveAnnouncement,
+  saveAppointment,
   saveCompany,
   saveInviteCode,
   saveStaff,
   saveVisitor,
 } from "../store";
 import type {
+  AlertHistoryEntry,
   AppScreen,
+  Appointment,
   AuditLog,
   BlacklistEntry,
   Company,
+  ExitQuestion,
+  ScreeningQuestion,
   Staff,
   Visitor,
 } from "../types";
@@ -75,6 +85,8 @@ type Tab =
   | "evacuation"
   | "announcements"
   | "auditlog"
+  | "alerthistory"
+  | "equipment"
   | "profile";
 
 function getLast7DaysData(visitors: Visitor[]) {
@@ -108,6 +120,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     "all" | "active" | "departed"
   >("all");
   const [visitorSearch, setVisitorSearch] = useState("");
+  const [timeFilter, setTimeFilter] = useState<
+    "today" | "week" | "month" | "all"
+  >("today");
   const [visitors, setVisitors] = useState<Visitor[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
@@ -146,11 +161,47 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [newFieldLabel, setNewFieldLabel] = useState("");
   const [newFieldRequired, setNewFieldRequired] = useState(false);
 
+  // Department/Floor management
+  const [newDeptInput, setNewDeptInput] = useState("");
+  const [newFloorInput, setNewFloorInput] = useState("");
+
+  // Screening questions management
+  const [newSqText, setNewSqText] = useState("");
+  const [newSqType, setNewSqType] = useState<"yes_no" | "text">("yes_no");
+  const [newSqBlocking, setNewSqBlocking] = useState(false);
+
+  // Alert history
+  const [alertHistory, setAlertHistory] = useState<AlertHistoryEntry[]>([]);
+
+  // Custom exit questions
+  const [newExitQText, setNewExitQText] = useState("");
+  const [newExitQType, setNewExitQType] = useState<"rating" | "text" | "yesno">(
+    "rating",
+  );
+
+  // Advanced filter panel
+  const [showAdvancedFilter, setShowAdvancedFilter] = useState(false);
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterPersonnel, setFilterPersonnel] = useState("");
+
+  // Re-invite
+  const [reinviteOpen, setReinviteOpen] = useState(false);
+  const [reinviteVisitorData, setReinviteVisitorData] =
+    useState<Visitor | null>(null);
+  const [reinviteDate, setReinviteDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [reinviteTime, setReinviteTime] = useState("10:00");
+  const [reinvitePurpose, setReinvitePurpose] = useState("");
+
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
     setBlacklist(getBlacklist(session.companyId));
     setAuditLogs(getAuditLogs(session.companyId));
+    setAlertHistory(getAlertHistory(session.companyId));
     refreshSession();
   }, [session.companyId]);
 
@@ -159,6 +210,30 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     const timer = setInterval(() => reload(), 60000);
     return () => clearInterval(timer);
   }, [reload]);
+
+  // Log capacity exceeded alert when threshold crossed
+  useEffect(() => {
+    const maxC = company?.maxCapacity ?? company?.maxConcurrentVisitors ?? 0;
+    if (
+      maxC > 0 &&
+      visitors.filter((v) => v.status === "active").length >= maxC
+    ) {
+      const history = getAlertHistory(session.companyId);
+      const recentCapAlert = history.find(
+        (e) =>
+          e.type === "capacity" && Date.now() - e.timestamp < 5 * 60 * 1000,
+      );
+      if (!recentCapAlert) {
+        addAlertHistory({
+          id: Math.random().toString(36).substring(2, 9),
+          companyId: session.companyId,
+          type: "capacity",
+          timestamp: Date.now(),
+          detail: `Kapasite sınırına ulaşıldı: ${visitors.filter((v) => v.status === "active").length}/${maxC} kişi`,
+        });
+      }
+    }
+  }, [visitors, company, session.companyId]);
 
   // Auto-checkout effect
   useEffect(() => {
@@ -361,6 +436,155 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   };
 
+  // Department management helpers
+  const getCurrentDepartments = (): string[] => {
+    const fresh = findCompanyById(session.companyId);
+    return fresh?.departments?.length
+      ? fresh.departments
+      : getCompanyDepartments(session.companyId);
+  };
+
+  const addDepartment = () => {
+    if (!newDeptInput.trim()) return;
+    const depts = getCurrentDepartments();
+    if (depts.includes(newDeptInput.trim())) return;
+    const fresh = findCompanyById(session.companyId);
+    if (fresh)
+      saveCompany({ ...fresh, departments: [...depts, newDeptInput.trim()] });
+    setNewDeptInput("");
+    reload();
+  };
+
+  const removeDepartment = (dept: string) => {
+    const fresh = findCompanyById(session.companyId);
+    if (fresh)
+      saveCompany({
+        ...fresh,
+        departments: getCurrentDepartments().filter((d) => d !== dept),
+      });
+    reload();
+  };
+
+  // Floor management helpers
+  const getCurrentFloors = (): string[] => {
+    const fresh = findCompanyById(session.companyId);
+    return fresh?.floors?.length
+      ? fresh.floors
+      : getCompanyFloors(session.companyId);
+  };
+
+  const addFloor = () => {
+    if (!newFloorInput.trim()) return;
+    const floors = getCurrentFloors();
+    if (floors.includes(newFloorInput.trim())) return;
+    const fresh = findCompanyById(session.companyId);
+    if (fresh)
+      saveCompany({ ...fresh, floors: [...floors, newFloorInput.trim()] });
+    setNewFloorInput("");
+    reload();
+  };
+
+  const removeFloor = (floor: string) => {
+    const fresh = findCompanyById(session.companyId);
+    if (fresh)
+      saveCompany({
+        ...fresh,
+        floors: getCurrentFloors().filter((f) => f !== floor),
+      });
+    reload();
+  };
+
+  // Screening questions helpers
+  const getCurrentScreeningQuestions = (): ScreeningQuestion[] => {
+    return findCompanyById(session.companyId)?.screeningQuestions ?? [];
+  };
+
+  const addScreeningQuestion = () => {
+    if (!newSqText.trim()) return;
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    const questions = fresh.screeningQuestions ?? [];
+    const newQ: ScreeningQuestion = {
+      id: Math.random().toString(36).substring(2, 9),
+      text: newSqText.trim(),
+      type: newSqType,
+      blocking: newSqBlocking,
+    };
+    saveCompany({ ...fresh, screeningQuestions: [...questions, newQ] });
+    setNewSqText("");
+    setNewSqType("yes_no");
+    setNewSqBlocking(false);
+    reload();
+  };
+
+  // Exit questions helpers
+  const getCurrentExitQuestions = (): ExitQuestion[] => {
+    return findCompanyById(session.companyId)?.customExitQuestions ?? [];
+  };
+
+  const addExitQuestion = () => {
+    if (!newExitQText.trim()) return;
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    const qs = fresh.customExitQuestions ?? [];
+    const newQ: ExitQuestion = {
+      id: Math.random().toString(36).substring(2, 9),
+      question: newExitQText.trim(),
+      type: newExitQType,
+    };
+    saveCompany({ ...fresh, customExitQuestions: [...qs, newQ] });
+    setNewExitQText("");
+    reload();
+  };
+
+  const removeExitQuestion = (id: string) => {
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    saveCompany({
+      ...fresh,
+      customExitQuestions: (fresh.customExitQuestions ?? []).filter(
+        (q) => q.id !== id,
+      ),
+    });
+    reload();
+  };
+
+  // Re-invite helper
+  const submitReinvite = () => {
+    if (!reinviteVisitorData) return;
+    const appt: Appointment = {
+      id: Math.random().toString(36).substring(2, 9),
+      companyId: session.companyId,
+      visitorName: reinviteVisitorData.name,
+      visitorId: reinviteVisitorData.idNumber,
+      hostName:
+        staffList.find((s) => s.staffId === reinviteVisitorData.hostStaffId)
+          ?.name ?? "",
+      appointmentDate: reinviteDate,
+      appointmentTime: reinviteTime,
+      purpose: reinvitePurpose || reinviteVisitorData.visitReason,
+      status: "pending",
+      createdBy: session.companyId,
+      createdAt: Date.now(),
+    };
+    saveAppointment(appt);
+    setReinviteOpen(false);
+    setReinviteVisitorData(null);
+    reload();
+  };
+
+  const removeScreeningQuestion = (id: string) => {
+    const fresh = findCompanyById(session.companyId);
+    if (!fresh) return;
+    saveCompany({
+      ...fresh,
+      screeningQuestions: (fresh.screeningQuestions ?? []).filter(
+        (q) => q.id !== id,
+      ),
+    });
+    reload();
+  };
+
   // Category management helpers
   const getCurrentCategories = (): string[] => {
     const fresh = findCompanyById(session.companyId);
@@ -425,7 +649,35 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   };
 
   // Filter visitors by status AND search text
-  const filtered = visitors
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const startOfWeek = startOfToday - 6 * 24 * 60 * 60 * 1000;
+
+  const visitorsByTime = (tf: "today" | "week" | "month" | "all") =>
+    visitors.filter((v) => {
+      const d = new Date(v.arrivalTime);
+      if (tf === "today") return d.toDateString() === now.toDateString();
+      if (tf === "week") return v.arrivalTime >= startOfWeek;
+      if (tf === "month")
+        return (
+          d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth()
+        );
+      return true;
+    });
+
+  const timeCounts = {
+    today: visitorsByTime("today").length,
+    week: visitorsByTime("week").length,
+    month: visitorsByTime("month").length,
+    all: visitors.length,
+  };
+
+  const filtered = visitorsByTime(timeFilter)
     .filter((v) =>
       visitorFilter === "all" ? true : v.status === visitorFilter,
     )
@@ -440,6 +692,23 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         v.hostStaffId.toLowerCase().includes(q) ||
         hostName.toLowerCase().includes(q)
       );
+    })
+    .filter((v) => {
+      if (filterCategory && v.category !== filterCategory) return false;
+      if (filterDateFrom) {
+        const fromTs = new Date(filterDateFrom).getTime();
+        if (v.arrivalTime < fromTs) return false;
+      }
+      if (filterDateTo) {
+        const toTs = new Date(filterDateTo).getTime() + 86400000;
+        if (v.arrivalTime > toTs) return false;
+      }
+      if (filterPersonnel) {
+        const h = staffList.find((s) => s.staffId === v.hostStaffId);
+        if (!h?.name.toLowerCase().includes(filterPersonnel.toLowerCase()))
+          return false;
+      }
+      return true;
     });
 
   const activeNow = visitors.filter((v) => v.status === "active");
@@ -463,6 +732,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "evacuation", label: t(lang, "evacuation") },
     { key: "announcements", label: t(lang, "announcements") },
     { key: "auditlog", label: "📋 Denetim Logu" },
+    {
+      key: "alerthistory",
+      label: `⚠️ Uyarı Geçmişi${alertHistory.length > 0 ? ` (${alertHistory.length})` : ""}`,
+    },
+    {
+      key: "equipment",
+      label: `📦 Ekipmanlar (${visitors.filter((v) => v.status === "active" && v.equipment).length})`,
+    },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -854,6 +1131,59 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             )}
 
+            {/* Time Period Filter */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              {(["today", "week", "month", "all"] as const).map((tf) => {
+                const labels = {
+                  today: "Günlük",
+                  week: "Haftalık",
+                  month: "Aylık",
+                  all: "Tümü",
+                };
+                const ocids = {
+                  today: "visitors.today.tab",
+                  week: "visitors.week.tab",
+                  month: "visitors.month.tab",
+                  all: "visitors.all_time.tab",
+                };
+                return (
+                  <button
+                    type="button"
+                    key={tf}
+                    data-ocid={ocids[tf]}
+                    onClick={() => setTimeFilter(tf)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                      timeFilter === tf
+                        ? "text-white"
+                        : "text-slate-400 hover:text-white"
+                    }`}
+                    style={
+                      timeFilter === tf
+                        ? {
+                            background: "rgba(14,165,233,0.3)",
+                            border: "1px solid rgba(14,165,233,0.6)",
+                          }
+                        : {
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                          }
+                    }
+                  >
+                    {labels[tf]}
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        timeFilter === tf
+                          ? "bg-sky-500/40 text-sky-200"
+                          : "bg-white/10 text-slate-400"
+                      }`}
+                    >
+                      {timeCounts[tf]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
             {/* Filters + search */}
             <div className="flex flex-wrap gap-3 mb-5 items-center">
               {(["all", "active", "departed"] as const).map((f) => (
@@ -893,7 +1223,139 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 placeholder={t(lang, "search")}
                 className="flex-1 min-w-[200px] px-4 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
               />
+              <button
+                type="button"
+                data-ocid="visitors.filter.toggle"
+                onClick={() => setShowAdvancedFilter((v) => !v)}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-all"
+                style={{
+                  background: showAdvancedFilter
+                    ? "rgba(245,158,11,0.2)"
+                    : "rgba(255,255,255,0.07)",
+                  border: showAdvancedFilter
+                    ? "1px solid rgba(245,158,11,0.4)"
+                    : "1px solid rgba(255,255,255,0.15)",
+                  color: showAdvancedFilter ? "#f59e0b" : "#94a3b8",
+                }}
+              >
+                🔽 Gelişmiş Filtre{" "}
+                {filterCategory ||
+                filterDateFrom ||
+                filterDateTo ||
+                filterPersonnel
+                  ? "●"
+                  : ""}
+              </button>
+            </div>
 
+            {/* Advanced Filter Panel */}
+            {showAdvancedFilter && (
+              <div
+                data-ocid="visitors.filter.panel"
+                className="mb-4 p-4 rounded-xl grid grid-cols-2 gap-3"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <div>
+                  <p className="text-slate-400 text-xs mb-1.5">Kategori</p>
+                  <select
+                    data-ocid="visitors.category.select"
+                    value={filterCategory}
+                    onChange={(e) => setFilterCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "#0f1729",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <option value="" className="bg-[#0f1729]">
+                      Tümü
+                    </option>
+                    {[
+                      "Misafir",
+                      "Müteahhit",
+                      "Teslimat",
+                      "Mülakat",
+                      "Tedarikçi",
+                      "Diğer",
+                    ].map((c) => (
+                      <option key={c} value={c} className="bg-[#0f1729]">
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1.5">Personel</p>
+                  <input
+                    data-ocid="visitors.personnel.input"
+                    type="text"
+                    value={filterPersonnel}
+                    onChange={(e) => setFilterPersonnel(e.target.value)}
+                    placeholder="Personel adı..."
+                    className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1.5">
+                    Başlangıç Tarihi
+                  </p>
+                  <input
+                    data-ocid="visitors.date_from.input"
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1.5">Bitiş Tarihi</p>
+                  <input
+                    data-ocid="visitors.date_to.input"
+                    type="date"
+                    value={filterDateTo}
+                    onChange={(e) => setFilterDateTo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  />
+                </div>
+                <div className="col-span-2 flex justify-end">
+                  <button
+                    type="button"
+                    data-ocid="visitors.filter.clear_button"
+                    onClick={() => {
+                      setFilterCategory("");
+                      setFilterDateFrom("");
+                      setFilterDateTo("");
+                      setFilterPersonnel("");
+                    }}
+                    className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300"
+                    style={{
+                      background: "rgba(239,68,68,0.12)",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                    }}
+                  >
+                    🗑️ Filtreyi Temizle
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* CSV Export */}
+            <div className="flex flex-wrap gap-3 mb-5 items-center">
               {/* CSV Export */}
               <div className="flex gap-2 items-center">
                 <input
@@ -977,12 +1439,32 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                           </div>
                         </div>
                       </div>
-                      <div className="text-slate-500 text-xs shrink-0 ml-4">
-                        {v.departureTime
-                          ? durationLabel(v.arrivalTime, v.departureTime)
-                          : v.status === "active"
-                            ? durationLabel(v.arrivalTime)
-                            : ""}
+                      <div className="flex items-center gap-2 shrink-0 ml-4">
+                        <div className="text-slate-500 text-xs">
+                          {v.departureTime
+                            ? durationLabel(v.arrivalTime, v.departureTime)
+                            : v.status === "active"
+                              ? durationLabel(v.arrivalTime)
+                              : ""}
+                        </div>
+                        <button
+                          type="button"
+                          data-ocid={`visitors.reinvite.button.${i + 1}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setReinviteVisitorData(v);
+                            setReinviteOpen(true);
+                            setReinvitePurpose(v.visitReason);
+                          }}
+                          className="px-2 py-1 rounded-lg text-xs font-medium whitespace-nowrap"
+                          style={{
+                            background: "rgba(14,165,233,0.15)",
+                            border: "1px solid rgba(14,165,233,0.3)",
+                            color: "#0ea5e9",
+                          }}
+                        >
+                          ✉️ Davet
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1624,6 +2106,26 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                       <div className="text-slate-400 text-xs">
                         {v.phone} &bull; {formatDateTime(v.arrivalTime)}
                       </div>
+                      {(v.department || v.floor) && (
+                        <div className="flex gap-1 mt-1">
+                          {v.department && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-xs text-white"
+                              style={{ background: "rgba(14,165,233,0.2)" }}
+                            >
+                              {v.department}
+                            </span>
+                          )}
+                          {v.floor && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-xs text-white"
+                              style={{ background: "rgba(168,85,247,0.2)" }}
+                            >
+                              {v.floor}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <span
                       className="text-xs px-2 py-1 rounded"
@@ -1786,6 +2288,216 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ALERT HISTORY TAB */}
+        {tab === "alerthistory" && (
+          <div>
+            <div className="mb-6">
+              <h2 className="text-white font-bold text-xl">Uyarı Geçmişi</h2>
+              <p className="text-slate-400 text-sm">
+                Tetiklenen güvenlik uyarıları
+              </p>
+            </div>
+            {alertHistory.length === 0 ? (
+              <div
+                data-ocid="alerthistory.empty_state"
+                className="text-center py-16 text-slate-500"
+              >
+                Henüz uyarı kaydı yok.
+              </div>
+            ) : (
+              <div
+                data-ocid="alerthistory.table"
+                className="overflow-auto rounded-2xl border border-white/10"
+              >
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr
+                      className="border-b border-white/10"
+                      style={{ background: "rgba(255,255,255,0.04)" }}
+                    >
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Tarih/Saat
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Tür
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Detay
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alertHistory.map((entry, i) => {
+                      const typeColors: Record<
+                        string,
+                        { bg: string; text: string; label: string }
+                      > = {
+                        blacklist: {
+                          bg: "rgba(239,68,68,0.15)",
+                          text: "#ef4444",
+                          label: "🚫 Kara Liste",
+                        },
+                        capacity: {
+                          bg: "rgba(245,158,11,0.15)",
+                          text: "#f59e0b",
+                          label: "⚠️ Kapasite",
+                        },
+                        afterhours: {
+                          bg: "rgba(168,85,247,0.15)",
+                          text: "#a855f7",
+                          label: "🌙 Mesai Dışı",
+                        },
+                        prescreening: {
+                          bg: "rgba(239,68,68,0.15)",
+                          text: "#ef4444",
+                          label: "🛡️ Ön Eleme",
+                        },
+                      };
+                      const tc = typeColors[entry.type] ?? {
+                        bg: "rgba(255,255,255,0.1)",
+                        text: "#94a3b8",
+                        label: entry.type,
+                      };
+                      return (
+                        <tr
+                          key={entry.id}
+                          data-ocid={`alerthistory.row.${i + 1}`}
+                          className="border-b border-white/5 hover:bg-white/3 transition-colors"
+                        >
+                          <td className="p-3 text-slate-400 text-xs whitespace-nowrap">
+                            {new Date(entry.timestamp).toLocaleString("tr-TR")}
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap"
+                              style={{ background: tc.bg, color: tc.text }}
+                            >
+                              {tc.label}
+                            </span>
+                          </td>
+                          <td className="p-3 text-slate-300 text-sm">
+                            {entry.detail}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* EQUIPMENT TAB */}
+        {tab === "equipment" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-white font-bold text-xl">Ekipmanlar</h2>
+                <p className="text-slate-400 text-sm">
+                  Şu an teslim edilmiş ekipmanlar
+                </p>
+              </div>
+            </div>
+            {visitors.filter((v) => v.status === "active" && v.equipment)
+              .length === 0 ? (
+              <div
+                data-ocid="equipment.empty_state"
+                className="text-center py-16 text-slate-500"
+              >
+                Şu an teslim edilmiş ekipman yok.
+              </div>
+            ) : (
+              <div className="overflow-auto rounded-2xl border border-white/10">
+                <table className="w-full text-sm" data-ocid="equipment.table">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Ziyaretçi
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Ekipman
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        ID
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Saat
+                      </th>
+                      <th className="p-3 text-left text-slate-400 font-medium">
+                        Departman / Kat
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visitors
+                      .filter((v) => v.status === "active" && v.equipment)
+                      .map((v, i) => (
+                        <tr
+                          key={v.visitorId}
+                          data-ocid={`equipment.row.${i + 1}`}
+                          className="border-b border-white/5 hover:bg-white/3 transition-colors"
+                        >
+                          <td className="p-3">
+                            <div className="text-white font-medium">
+                              {v.name}
+                            </div>
+                            <div className="text-slate-500 text-xs">
+                              {v.idNumber}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <span
+                              className="px-2 py-1 rounded-full text-xs font-semibold"
+                              style={{
+                                background: "rgba(245,158,11,0.2)",
+                                color: "#f59e0b",
+                                border: "1px solid rgba(245,158,11,0.3)",
+                              }}
+                            >
+                              📦 {v.equipment!.type}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono text-slate-300 text-sm">
+                            #{v.equipment!.id}
+                          </td>
+                          <td className="p-3 text-slate-400 text-xs">
+                            {new Date(
+                              v.equipment!.assignedAt,
+                            ).toLocaleTimeString("tr-TR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex gap-1 flex-wrap">
+                              {v.department && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs text-white"
+                                  style={{ background: "rgba(14,165,233,0.2)" }}
+                                >
+                                  {v.department}
+                                </span>
+                              )}
+                              {v.floor && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs text-white"
+                                  style={{ background: "rgba(168,85,247,0.2)" }}
+                                >
+                                  {v.floor}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -2003,6 +2715,239 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               {t(lang, "updateProfile")}
             </button>
 
+            {/* Department Management */}
+            <div
+              className="mt-6 p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">🏢 Departmanlar</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {getCurrentDepartments().map((dept, i) => (
+                  <div
+                    key={dept}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-white"
+                    style={{
+                      background: "rgba(14,165,233,0.2)",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                    }}
+                  >
+                    {dept}
+                    <button
+                      type="button"
+                      data-ocid={`profile.dept_delete_button.${i + 1}`}
+                      onClick={() => removeDepartment(dept)}
+                      className="text-white/60 hover:text-white text-xs ml-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  data-ocid="profile.dept_input"
+                  value={newDeptInput}
+                  onChange={(e) => setNewDeptInput(e.target.value)}
+                  placeholder="Yeni departman..."
+                  onKeyDown={(e) => e.key === "Enter" && addDepartment()}
+                  className="flex-1 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <button
+                  type="button"
+                  data-ocid="profile.dept_add_button"
+                  onClick={addDepartment}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "rgba(14,165,233,0.2)",
+                    border: "1px solid rgba(14,165,233,0.4)",
+                  }}
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
+
+            {/* Floor Management */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">🏗️ Katlar</h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {getCurrentFloors().map((floor, i) => (
+                  <div
+                    key={floor}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium text-white"
+                    style={{
+                      background: "rgba(168,85,247,0.2)",
+                      border: "1px solid rgba(168,85,247,0.3)",
+                    }}
+                  >
+                    {floor}
+                    <button
+                      type="button"
+                      data-ocid={`profile.floor_delete_button.${i + 1}`}
+                      onClick={() => removeFloor(floor)}
+                      className="text-white/60 hover:text-white text-xs ml-1"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  data-ocid="profile.floor_input"
+                  value={newFloorInput}
+                  onChange={(e) => setNewFloorInput(e.target.value)}
+                  placeholder="Yeni kat..."
+                  onKeyDown={(e) => e.key === "Enter" && addFloor()}
+                  className="flex-1 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <button
+                  type="button"
+                  data-ocid="profile.floor_add_button"
+                  onClick={addFloor}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "rgba(168,85,247,0.2)",
+                    border: "1px solid rgba(168,85,247,0.4)",
+                  }}
+                >
+                  Ekle
+                </button>
+              </div>
+            </div>
+
+            {/* Screening Questions Management */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-1">
+                🛡️ Ön Eleme Soruları
+              </h3>
+              <p className="text-slate-500 text-xs mb-4">
+                Ziyaretçi kaydında gösterilecek güvenlik soruları. Engelleme
+                aktifse "Hayır" yanıtı girişi reddeder.
+              </p>
+              {getCurrentScreeningQuestions().length === 0 ? (
+                <p className="text-slate-500 text-sm mb-4">
+                  Henüz soru eklenmemiş.
+                </p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {getCurrentScreeningQuestions().map((sq, i) => (
+                    <div
+                      key={sq.id}
+                      className="flex items-start justify-between p-3 rounded-xl"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white text-sm">{sq.text}</div>
+                        <div className="flex gap-2 mt-1 flex-wrap">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-medium"
+                            style={{
+                              background: "rgba(14,165,233,0.15)",
+                              color: "#0ea5e9",
+                            }}
+                          >
+                            {sq.type === "yes_no" ? "Evet/Hayır" : "Metin"}
+                          </span>
+                          {sq.blocking && (
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium"
+                              style={{
+                                background: "rgba(239,68,68,0.15)",
+                                color: "#ef4444",
+                              }}
+                            >
+                              🚫 Engelleyici
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-ocid={`profile.sq_delete_button.${i + 1}`}
+                        onClick={() => removeScreeningQuestion(sq.id)}
+                        className="text-slate-500 hover:text-red-400 ml-3 text-sm shrink-0"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-3">
+                <input
+                  data-ocid="profile.sq_text_input"
+                  value={newSqText}
+                  onChange={(e) => setNewSqText(e.target.value)}
+                  placeholder="Soru metni..."
+                  className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <div className="flex gap-3 items-center flex-wrap">
+                  <select
+                    data-ocid="profile.sq_type_select"
+                    value={newSqType}
+                    onChange={(e) =>
+                      setNewSqType(e.target.value as "yes_no" | "text")
+                    }
+                    className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "#0f1729",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <option value="yes_no" className="bg-[#0f1729]">
+                      Evet/Hayır
+                    </option>
+                    <option value="text" className="bg-[#0f1729]">
+                      Metin Girişi
+                    </option>
+                  </select>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      data-ocid="profile.sq_blocking_checkbox"
+                      type="checkbox"
+                      checked={newSqBlocking}
+                      onChange={(e) => setNewSqBlocking(e.target.checked)}
+                      className="w-4 h-4 accent-[#ef4444]"
+                    />
+                    <span className="text-slate-300 text-sm">
+                      Engelleyici (Hayır = Giriş Yok)
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    data-ocid="profile.sq_add_button"
+                    onClick={addScreeningQuestion}
+                    className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                    style={{
+                      background: "rgba(14,165,233,0.2)",
+                      border: "1px solid rgba(14,165,233,0.4)",
+                    }}
+                  >
+                    Soru Ekle
+                  </button>
+                </div>
+              </div>
+            </div>
+
             {/* Category Management */}
             <div
               className="mt-6 p-5 rounded-2xl"
@@ -2148,22 +3093,228 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 </button>
               </div>
             </div>
+
+            {/* Custom Exit Questions */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-1">
+                📋 Çıkış Anketi Soruları
+              </h3>
+              <p className="text-slate-500 text-xs mb-4">
+                Ziyaretçi çıkışında gösterilecek özel sorular. Tanımlanmazsa
+                varsayılan yıldız puanı kullanılır.
+              </p>
+              {getCurrentExitQuestions().length === 0 ? (
+                <p className="text-slate-500 text-sm mb-4">
+                  Henüz özel soru eklenmemiş.
+                </p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {getCurrentExitQuestions().map((q, i) => (
+                    <div
+                      key={q.id}
+                      className="flex items-start justify-between p-3 rounded-xl"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white text-sm">{q.question}</div>
+                        <span
+                          className="mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={{
+                            background: "rgba(14,165,233,0.15)",
+                            color: "#0ea5e9",
+                          }}
+                        >
+                          {q.type === "rating"
+                            ? "⭐ Puanlama"
+                            : q.type === "yesno"
+                              ? "Evet/Hayır"
+                              : "Metin"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        data-ocid={`profile.exit_question_delete_button.${i + 1}`}
+                        onClick={() => removeExitQuestion(q.id)}
+                        className="text-red-400 hover:text-red-300 text-sm px-2 py-1 rounded ml-3 shrink-0"
+                        style={{ background: "rgba(239,68,68,0.1)" }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-3">
+                <input
+                  data-ocid="profile.exit_question_input"
+                  value={newExitQText}
+                  onChange={(e) => setNewExitQText(e.target.value)}
+                  placeholder="Soru metni..."
+                  className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <div className="flex gap-3 items-center">
+                  <select
+                    data-ocid="profile.exit_question_type_select"
+                    value={newExitQType}
+                    onChange={(e) =>
+                      setNewExitQType(
+                        e.target.value as "rating" | "text" | "yesno",
+                      )
+                    }
+                    className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "#0f1729",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    <option value="rating" className="bg-[#0f1729]">
+                      ⭐ Puanlama
+                    </option>
+                    <option value="yesno" className="bg-[#0f1729]">
+                      Evet/Hayır
+                    </option>
+                    <option value="text" className="bg-[#0f1729]">
+                      Metin Girişi
+                    </option>
+                  </select>
+                  <button
+                    type="button"
+                    data-ocid="profile.exit_question_add_button"
+                    onClick={addExitQuestion}
+                    className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                    style={{
+                      background: "rgba(14,165,233,0.2)",
+                      border: "1px solid rgba(14,165,233,0.4)",
+                    }}
+                  >
+                    Soru Ekle
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Footer */}
-      <footer className="text-center py-6 text-slate-600 text-xs border-t border-white/5">
-        © {new Date().getFullYear()}. Built with love using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-slate-500 hover:text-slate-300 transition-colors"
+      {/* Re-invite Modal */}
+      {reinviteOpen && reinviteVisitorData && (
+        <div
+          data-ocid="reinvite.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(4px)",
+          }}
         >
-          caffeine.ai
-        </a>
-      </footer>
+          <div
+            className="w-full max-w-md p-6 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(14,165,233,0.4)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg mb-4">
+              ✉️ Tekrar Davet Et
+            </h3>
+            <div className="space-y-4">
+              <div
+                className="p-3 rounded-xl"
+                style={{
+                  background: "rgba(14,165,233,0.08)",
+                  border: "1px solid rgba(14,165,233,0.2)",
+                }}
+              >
+                <p className="text-white font-medium">
+                  {reinviteVisitorData.name}
+                </p>
+                <p className="text-slate-400 text-xs">
+                  {reinviteVisitorData.idNumber}
+                </p>
+              </div>
+              <div>
+                <p className="text-slate-300 text-xs mb-1.5">Randevu Tarihi</p>
+                <input
+                  data-ocid="reinvite.date.input"
+                  type="date"
+                  value={reinviteDate}
+                  onChange={(e) => setReinviteDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                />
+              </div>
+              <div>
+                <p className="text-slate-300 text-xs mb-1.5">Randevu Saati</p>
+                <input
+                  data-ocid="reinvite.time.input"
+                  type="time"
+                  value={reinviteTime}
+                  onChange={(e) => setReinviteTime(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                />
+              </div>
+              <div>
+                <p className="text-slate-300 text-xs mb-1.5">Ziyaret Amacı</p>
+                <input
+                  data-ocid="reinvite.purpose.input"
+                  type="text"
+                  value={reinvitePurpose}
+                  onChange={(e) => setReinvitePurpose(e.target.value)}
+                  placeholder="Ziyaret amacı..."
+                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                data-ocid="reinvite.cancel_button"
+                onClick={() => {
+                  setReinviteOpen(false);
+                  setReinviteVisitorData(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                data-ocid="reinvite.confirm_button"
+                onClick={submitReinvite}
+                className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                Randevu Oluştur
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

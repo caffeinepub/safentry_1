@@ -5,6 +5,7 @@ import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { useQRScannerLocal as useQRScanner } from "../hooks/useQRScannerLocal";
 import { getLang, t } from "../i18n";
 import {
+  addAlertHistory,
   findCompanyById,
   getCustomCategories,
   getStaffByCompany,
@@ -192,6 +193,13 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       setFormError(
         "Sisteme girişiniz engellenmiştir. Lütfen güvenlik personeline başvurun.",
       );
+      addAlertHistory({
+        id: Math.random().toString(36).substring(2, 9),
+        companyId,
+        type: "blacklist",
+        timestamp: Date.now(),
+        detail: `Kiosk: ${form.name} (TC: ${form.idNumber}) kara listede — giriş engellendi`,
+      });
       return;
     }
 

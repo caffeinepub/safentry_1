@@ -6,22 +6,37 @@ import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { getLang, t } from "../i18n";
 import {
+  addAlertHistory,
   clearSession,
   findCompanyById,
   findStaffById,
+  getAlertHistory,
   getAllStaff,
   getAppointments,
+  getCompanyDepartments,
+  getCompanyFloors,
   getCustomCategories,
+  getInvitations,
   getSession,
   getStaffByCompany,
   getVisitors,
   isBlacklisted,
   refreshSession,
   saveAppointment,
+  saveInvitation,
   saveStaff,
   saveVisitor,
 } from "../store";
-import type { AppScreen, Appointment, Company, Staff, Visitor } from "../types";
+import type {
+  AlertHistoryEntry,
+  AppScreen,
+  Appointment,
+  Company,
+  ExitQuestion,
+  Invitation,
+  Staff,
+  Visitor,
+} from "../types";
 import {
   durationLabel,
   formatDateTime,
@@ -59,7 +74,8 @@ type Tab =
   | "appointments"
   | "preregistered"
   | "history"
-  | "profile";
+  | "profile"
+  | "invitations";
 
 const EMPTY_FORM = {
   name: "",
@@ -78,6 +94,11 @@ const EMPTY_FORM = {
   customFieldValues: {} as Record<string, string>,
   specialNeeds: "Yok",
   visitorPhoto: "",
+  multiDay: false,
+  endDate: "",
+  department: "",
+  floor: "",
+  screeningAnswers: {} as Record<string, string>,
 };
 
 const EMPTY_APPT = {
@@ -267,6 +288,48 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const [showCameraCapture, setShowCameraCapture] = useState(false);
   const camera = useCamera();
 
+  // Equipment modal
+  const [equipmentModalVisitor, setEquipmentModalVisitor] =
+    useState<Visitor | null>(null);
+  const [equipmentForm, setEquipmentForm] = useState({
+    type: "Misafir Kartı",
+    id: "",
+  });
+  const [equipmentReturnChecked, setEquipmentReturnChecked] = useState(false);
+
+  // Blacklist blocking modal
+  const [blacklistModalVisible, setBlacklistModalVisible] = useState(false);
+  const [blacklistModalName, setBlacklistModalName] = useState("");
+
+  // Personnel absence
+  const [absenceToggle, setAbsenceToggle] = useState(staff?.isAbsent ?? false);
+  const [absenceReason, setAbsenceReason] = useState(
+    staff?.absenceReason ?? "İzin",
+  );
+  const [absentUntil, setAbsentUntil] = useState(staff?.absentUntil ?? "");
+
+  // Exit survey custom answers
+  const [exitSurveyAnswers, setExitSurveyAnswers] = useState<
+    Record<string, string>
+  >({});
+
+  // Shift report
+  const [shiftReportOpen, setShiftReportOpen] = useState(false);
+
+  // Re-invite prefill
+  const [_reinviteVisitor, setReinviteVisitor] = useState<Visitor | null>(null);
+
+  // Guest invitation
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [showCreateInviteModal, setShowCreateInviteModal] = useState(false);
+  const [newInviteHostName, setNewInviteHostName] = useState("");
+  const [createdInviteLink, setCreatedInviteLink] = useState("");
+  const [inviteLinkCopied, setInviteLinkCopied] = useState(false);
+  const [rejectInviteToken, setRejectInviteToken] = useState<string | null>(
+    null,
+  );
+  const [rejectReason, setRejectReason] = useState("");
+
   const loadKioskPending = useCallback(() => {
     const all: KioskPendingVisitor[] = JSON.parse(
       localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]",
@@ -278,6 +341,9 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
     setAppointments(getAppointments(session.companyId));
+    setInvitations(
+      getInvitations(session.companyId).filter((i) => i.status === "submitted"),
+    );
     loadKioskPending();
     refreshSession();
   }, [session.companyId, loadKioskPending]);
@@ -333,6 +399,20 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const setAvail = (status: Staff["availabilityStatus"]) => {
     setAvailability(status);
     if (staff) saveStaff({ ...staff, availabilityStatus: status });
+  };
+
+  const saveAbsenceSettings = (
+    absent: boolean,
+    reason: string,
+    until: string,
+  ) => {
+    if (!staff) return;
+    saveStaff({
+      ...staff,
+      isAbsent: absent,
+      absenceReason: reason,
+      absentUntil: until,
+    });
   };
 
   const copyCode = (code: string, key: string) => {
@@ -415,6 +495,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       setFormError("Lütfen zorunlu alanları doldurun.");
       return;
     }
+    if (!form.department || !form.floor) {
+      setFormError("Departman ve kat seçiniz.");
+      return;
+    }
     if (!form.ndaAccepted) {
       setFormError("Gizlilik sözleşmesini onaylamalısınız.");
       return;
@@ -431,8 +515,30 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         return;
       }
     }
+    // Check blocking screening questions
+    const screeningQs = company?.screeningQuestions ?? [];
+    for (const sq of screeningQs) {
+      if (
+        sq.type === "yes_no" &&
+        sq.blocking &&
+        form.screeningAnswers[sq.id] === "Hayır"
+      ) {
+        setFormError("Güvenlik sorusu yanıtı nedeniyle giriş engellenmiştir.");
+        return;
+      }
+    }
     if (isBlacklisted(session.companyId, form.idNumber)) {
-      setFormError(t(lang, "blacklistedPerson"));
+      setBlacklistModalName(form.name);
+      setBlacklistModalVisible(true);
+      const alertEntry: AlertHistoryEntry = {
+        id: generateId(),
+        companyId: session.companyId,
+        type: "blacklist",
+        timestamp: Date.now(),
+        detail: `${form.name} (TC: ${form.idNumber}) kara listede tespit edildi — giriş engellendi`,
+        personelId: session.staffId,
+      };
+      addAlertHistory(alertEntry);
       return;
     }
     const visitorId = generateVisitorId();
@@ -462,6 +568,17 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         : undefined,
       specialNeeds: form.specialNeeds !== "Yok" ? form.specialNeeds : undefined,
       visitorPhoto: form.visitorPhoto || undefined,
+      multiDay: form.multiDay || undefined,
+      endDate: form.multiDay && form.endDate ? form.endDate : undefined,
+      department: form.department || undefined,
+      floor: form.floor || undefined,
+      screeningAnswers: Object.keys(form.screeningAnswers).length
+        ? Object.entries(form.screeningAnswers).map(([qid, ans]) => ({
+            questionId: qid,
+            question: qid,
+            answer: ans,
+          }))
+        : undefined,
     };
     // Show ID verification dialog before saving
     setPendingVisitorData(visitor);
@@ -501,16 +618,28 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setExitModalVisitor(v);
     setExitRating(0);
     setExitComment("");
+    setExitSurveyAnswers({});
   };
 
   const confirmExit = () => {
-    if (!exitModalVisitor || exitRating === 0) return;
+    const customQs = company?.customExitQuestions ?? [];
+    const hasCustom = customQs.length > 0;
+    if (!exitModalVisitor) return;
+    if (!hasCustom && exitRating === 0) return;
+    if (exitModalVisitor.equipment && !equipmentReturnChecked) return;
     saveVisitor({
       ...exitModalVisitor,
       status: "departed",
       departureTime: Date.now(),
-      exitRating,
+      exitRating: hasCustom ? exitRating || undefined : exitRating,
       exitComment: exitComment.trim() || undefined,
+      exitSurveyAnswers: Object.keys(exitSurveyAnswers).length
+        ? exitSurveyAnswers
+        : undefined,
+      equipment:
+        exitModalVisitor.equipment && equipmentReturnChecked
+          ? null
+          : exitModalVisitor.equipment,
     });
     addAuditLog(
       session.companyId,
@@ -522,6 +651,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setExitModalVisitor(null);
     setExitRating(0);
     setExitComment("");
+    setEquipmentReturnChecked(false);
     reload();
   };
 
@@ -684,6 +814,19 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     reload();
   };
 
+  // Re-invite visitor pre-fill
+  const openReinvite = (v: Visitor) => {
+    setReinviteVisitor(v);
+    setApptForm((f) => ({
+      ...f,
+      visitorName: v.name,
+      visitorId: v.idNumber,
+      purpose: v.visitReason,
+    }));
+    setTab("appointments");
+    setApptTab("create");
+  };
+
   // Generate invite code for appointment
   const generateInviteCode = (appt: Appointment) => {
     if (appt.inviteCode) return;
@@ -779,6 +922,116 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     reload();
   };
 
+  // Assign equipment to visitor
+  const assignEquipment = () => {
+    if (!equipmentModalVisitor || !equipmentForm.id.trim()) return;
+    saveVisitor({
+      ...equipmentModalVisitor,
+      equipment: {
+        type: equipmentForm.type,
+        id: equipmentForm.id.trim(),
+        assignedAt: new Date().toISOString(),
+      },
+    });
+    addAuditLog(
+      session.companyId,
+      staff?.name ?? "Personel",
+      session.staffId ?? "",
+      "equipment_assigned",
+      `${equipmentModalVisitor.name} — ${equipmentForm.type} #${equipmentForm.id} teslim edildi`,
+    );
+    setEquipmentModalVisitor(null);
+    setEquipmentForm({ type: "Misafir Kartı", id: "" });
+    reload();
+  };
+
+  // Create guest self-registration invite
+  const createGuestInvite = () => {
+    const token = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const inv: Invitation = {
+      token,
+      companyId: session.companyId,
+      createdBy: session.staffId ?? "",
+      createdAt: Date.now(),
+      visitorName: "",
+      status: "pending",
+      hostName: newInviteHostName || staff?.name || "",
+    };
+    saveInvitation(inv);
+    const link = `${window.location.origin}/invite/${token}`;
+    setCreatedInviteLink(link);
+    setNewInviteHostName("");
+    addAuditLog(
+      session.companyId,
+      staff?.name ?? "Personel",
+      session.staffId ?? "",
+      "invite_created",
+      `Davet linki oluşturuldu: ${token}`,
+    );
+  };
+
+  const approveGuestInvitation = (inv: Invitation) => {
+    if (!inv.preData) return;
+    const visitorId = generateVisitorId();
+    const hostStaffMember = staffList.find(
+      (s) => s.name === inv.preData?.hostName,
+    );
+    const visitor: Visitor = {
+      visitorId,
+      companyId: session.companyId,
+      registeredBy: session.staffId ?? "",
+      name: inv.preData.name,
+      idNumber: inv.preData.idNumber,
+      phone: inv.preData.phone,
+      hostStaffId: hostStaffMember?.staffId ?? "",
+      arrivalTime: Date.now(),
+      visitReason: inv.preData.visitReason,
+      visitType: "business",
+      ndaAccepted: true,
+      signatureData: "",
+      label: "normal",
+      category: "Misafir",
+      status: "active",
+      badgeQr: visitorId,
+      notes: "",
+      createdAt: Date.now(),
+      department: inv.preData.department,
+      floor: inv.preData.floor,
+    };
+    saveVisitor(visitor);
+    saveInvitation({ ...inv, status: "approved" });
+    addAuditLog(
+      session.companyId,
+      staff?.name ?? "Personel",
+      session.staffId ?? "",
+      "invite_approved",
+      `${inv.preData.name} davet başvurusu onaylandı`,
+    );
+    reload();
+  };
+
+  const rejectGuestInvitation = () => {
+    if (!rejectInviteToken) return;
+    const allInv = getInvitations(session.companyId);
+    const inv = allInv.find((i) => i.token === rejectInviteToken);
+    if (!inv) return;
+    saveInvitation({
+      ...inv,
+      status: "rejected",
+      rejectionReason: rejectReason,
+    });
+    addAuditLog(
+      session.companyId,
+      staff?.name ?? "Personel",
+      session.staffId ?? "",
+      "invite_rejected",
+      `${inv.visitorName || inv.token} davet başvurusu reddedildi`,
+    );
+    setRejectInviteToken(null);
+    setRejectReason("");
+    reload();
+  };
+
   const activeVisitors = visitors.filter((v) => v.status === "active");
   const insideVisitors = visitors.filter((v) => v.status === "active");
   const preregistered = visitors.filter((v) => v.status === "preregistered");
@@ -799,6 +1052,9 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Categories for this company
   const companyCategories = getCustomCategories(session.companyId);
+  const companyDepartments = getCompanyDepartments(session.companyId);
+  const companyFloors = getCompanyFloors(session.companyId);
+  const screeningQuestions = company?.screeningQuestions ?? [];
   const customFields = company?.customFields ?? [];
 
   // History search results
@@ -833,6 +1089,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["appointments", `📅 Randevular (${todayAppointments.length})`],
     ["preregistered", t(lang, "preregistered")],
     ["history", "📜 Geçmiş"],
+    [
+      "invitations",
+      `✉️ Davetler${invitations.length > 0 ? ` (${invitations.length})` : ""}`,
+    ],
     ["profile", "Hesabım"],
   ];
 
@@ -895,6 +1155,199 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       )}
 
       {/* Exit Rating Modal */}
+      {/* Shift Report Modal */}
+      {shiftReportOpen &&
+        (() => {
+          const currentShift = getShiftType(new Date().toISOString());
+          const shiftVisitors = visitors.filter(
+            (v) => v.shiftType === currentShift,
+          );
+          const departed = shiftVisitors.filter((v) => v.departureTime);
+          const avgMin = departed.length
+            ? Math.round(
+                departed.reduce(
+                  (acc, v) => acc + (v.departureTime! - v.arrivalTime) / 60000,
+                  0,
+                ) / departed.length,
+              )
+            : 0;
+          const todayAppts = appointments.filter(
+            (a) => a.appointmentDate === new Date().toISOString().slice(0, 10),
+          );
+          const noShows = todayAppts.filter(
+            (a) => a.status === "pending",
+          ).length;
+          const catBreakdown: Record<string, number> = {};
+          for (const v of shiftVisitors) {
+            const cat = v.category ?? "Diğer";
+            catBreakdown[cat] = (catBreakdown[cat] ?? 0) + 1;
+          }
+          return (
+            <div
+              data-ocid="shift_report.modal"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              style={{
+                background: "rgba(0,0,0,0.75)",
+                backdropFilter: "blur(4px)",
+              }}
+            >
+              <div
+                className="w-full max-w-lg p-6 rounded-2xl"
+                style={{
+                  background: "#0f1729",
+                  border: "1.5px solid rgba(14,165,233,0.4)",
+                }}
+              >
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-white font-bold text-xl">
+                      Vardiya Raporu
+                    </h3>
+                    <p className="text-slate-400 text-sm">
+                      {shiftLabel(currentShift)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    data-ocid="shift_report.close_button"
+                    onClick={() => setShiftReportOpen(false)}
+                    className="text-slate-400 hover:text-white text-xl"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-3 mb-5">
+                  {[
+                    {
+                      label: "Toplam Ziyaretçi",
+                      value: shiftVisitors.length,
+                      color: "#0ea5e9",
+                    },
+                    {
+                      label: "Ort. Kalış (dk)",
+                      value: avgMin,
+                      color: "#22c55e",
+                    },
+                    {
+                      label: "Gelmeyen Randevu",
+                      value: noShows,
+                      color: "#f59e0b",
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="p-4 rounded-xl text-center"
+                      style={{
+                        background: "rgba(255,255,255,0.05)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <div
+                        className="text-2xl font-bold mb-1"
+                        style={{ color: item.color }}
+                      >
+                        {item.value}
+                      </div>
+                      <div className="text-slate-400 text-xs">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {Object.keys(catBreakdown).length > 0 && (
+                  <div
+                    className="mb-5 p-4 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <p className="text-slate-300 text-sm font-semibold mb-3">
+                      Kategoriye Göre Dağılım
+                    </p>
+                    <div className="space-y-2">
+                      {Object.entries(catBreakdown).map(([cat, cnt]) => (
+                        <div
+                          key={cat}
+                          className="flex items-center justify-between"
+                        >
+                          <span className="text-slate-400 text-sm">{cat}</span>
+                          <span className="text-white font-semibold text-sm">
+                            {cnt}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    data-ocid="shift_report.print_button"
+                    onClick={() => window.print()}
+                    className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
+                    style={{
+                      background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    }}
+                  >
+                    📄 Yazdır / PDF İndir
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="shift_report.cancel_button"
+                    onClick={() => setShiftReportOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-slate-300 text-sm"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    Kapat
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* Blacklist Blocking Modal */}
+      {blacklistModalVisible && (
+        <div
+          data-ocid="blacklist_block.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-sm p-6 rounded-2xl text-center"
+            style={{
+              background: "#0f1729",
+              border: "2px solid rgba(239,68,68,0.5)",
+            }}
+          >
+            <div className="text-5xl mb-3">🚫</div>
+            <h3 className="text-red-400 font-bold text-xl mb-2">
+              Giriş Engellendi!
+            </h3>
+            <p className="text-slate-300 text-sm mb-1">
+              Bu ziyaretçi kara listede kayıtlı:
+            </p>
+            <p className="text-white font-semibold text-base mb-4">
+              {blacklistModalName}
+            </p>
+            <p className="text-slate-400 text-xs mb-6">
+              Güvenlik yöneticisiyle iletişime geçin.
+            </p>
+            <button
+              type="button"
+              data-ocid="blacklist_block.close_button"
+              onClick={() => setBlacklistModalVisible(false)}
+              className="w-full py-2.5 rounded-xl text-white font-semibold"
+              style={{ background: "linear-gradient(135deg,#ef4444,#dc2626)" }}
+            >
+              Kapat
+            </button>
+          </div>
+        </div>
+      )}
+
       {exitModalVisitor && (
         <div
           data-ocid="exit_rating.modal"
@@ -914,10 +1367,83 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             <p className="text-slate-400 text-sm mb-4">
               {exitModalVisitor.name}
             </p>
-            <p className="text-slate-300 text-sm mb-3">
-              Ziyaret deneyiminizi puanlayın:
-            </p>
-            <StarRating value={exitRating} onChange={setExitRating} />
+            {(() => {
+              const customQs = company?.customExitQuestions ?? [];
+              if (customQs.length > 0) {
+                return (
+                  <div className="space-y-4 mb-2">
+                    {customQs.map((q) => (
+                      <div key={q.id}>
+                        <p className="text-slate-300 text-sm mb-2">
+                          {q.question}
+                        </p>
+                        {q.type === "rating" ? (
+                          <StarRating
+                            value={Number(exitSurveyAnswers[q.id] ?? 0)}
+                            onChange={(v) =>
+                              setExitSurveyAnswers((a) => ({
+                                ...a,
+                                [q.id]: String(v),
+                              }))
+                            }
+                          />
+                        ) : q.type === "yesno" ? (
+                          <div className="flex gap-3">
+                            {["Evet", "Hayır"].map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() =>
+                                  setExitSurveyAnswers((a) => ({
+                                    ...a,
+                                    [q.id]: opt,
+                                  }))
+                                }
+                                className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
+                                style={{
+                                  background:
+                                    exitSurveyAnswers[q.id] === opt
+                                      ? "rgba(14,165,233,0.3)"
+                                      : "rgba(255,255,255,0.07)",
+                                  border:
+                                    exitSurveyAnswers[q.id] === opt
+                                      ? "1px solid rgba(14,165,233,0.6)"
+                                      : "1px solid rgba(255,255,255,0.15)",
+                                  color: "#fff",
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={exitSurveyAnswers[q.id] ?? ""}
+                            onChange={(e) =>
+                              setExitSurveyAnswers((a) => ({
+                                ...a,
+                                [q.id]: e.target.value,
+                              }))
+                            }
+                            placeholder="Yanıtınız..."
+                            className="w-full px-3 py-2 rounded-xl text-sm text-white bg-white/7 border border-white/15 focus:outline-none"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              }
+              return (
+                <>
+                  <p className="text-slate-300 text-sm mb-3">
+                    Ziyaret deneyiminizi puanlayın:
+                  </p>
+                  <StarRating value={exitRating} onChange={setExitRating} />
+                </>
+              );
+            })()}
             <div className="mt-4">
               <textarea
                 data-ocid="exit_rating.comment.textarea"
@@ -936,11 +1462,40 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               </p>
             </div>
 
+            {/* Equipment return step */}
+            {exitModalVisitor?.equipment && (
+              <div className="my-4 p-4 rounded-xl border border-amber-500/40 bg-amber-900/15">
+                <p className="text-amber-400 font-semibold text-sm mb-2">
+                  📦 Ekipman İadesi
+                </p>
+                <p className="text-slate-300 text-xs mb-3">
+                  {exitModalVisitor.equipment.type} #
+                  {exitModalVisitor.equipment.id} iade alındı mı?
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    data-ocid="exit_rating.equipment_return.checkbox"
+                    type="checkbox"
+                    checked={equipmentReturnChecked}
+                    onChange={(e) =>
+                      setEquipmentReturnChecked(e.target.checked)
+                    }
+                    className="w-4 h-4 accent-[#f59e0b]"
+                  />
+                  <span className="text-slate-200 text-sm">
+                    Ekipmanı iade aldım, onaylıyorum
+                  </span>
+                </label>
+              </div>
+            )}
             <div className="flex gap-3">
               <button
                 type="button"
                 data-ocid="exit_rating.cancel_button"
-                onClick={() => setExitModalVisitor(null)}
+                onClick={() => {
+                  setExitModalVisitor(null);
+                  setEquipmentReturnChecked(false);
+                }}
                 className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm font-medium transition-opacity hover:opacity-80"
                 style={{
                   background: "rgba(255,255,255,0.07)",
@@ -953,7 +1508,11 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 type="button"
                 data-ocid="exit_rating.confirm_button"
                 onClick={confirmExit}
-                disabled={exitRating === 0}
+                disabled={
+                  ((company?.customExitQuestions ?? []).length === 0 &&
+                    exitRating === 0) ||
+                  (!!exitModalVisitor?.equipment && !equipmentReturnChecked)
+                }
                 className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40"
                 style={{
                   background: "linear-gradient(135deg,#ef4444,#dc2626)",
@@ -1201,6 +1760,302 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 )}
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Equipment Assign Modal */}
+      {equipmentModalVisitor && (
+        <div
+          data-ocid="equipment.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(245,158,11,0.4)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg mb-1">
+              📦 Ekipman Teslim
+            </h3>
+            <p className="text-slate-400 text-sm mb-5">
+              {equipmentModalVisitor.name}
+            </p>
+            <div className="space-y-4">
+              <div>
+                <p className="text-slate-300 text-sm mb-1">Ekipman Türü</p>
+                <select
+                  data-ocid="equipment.type.select"
+                  value={equipmentForm.type}
+                  onChange={(e) =>
+                    setEquipmentForm((f) => ({ ...f, type: e.target.value }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl text-white focus:outline-none"
+                  style={{
+                    background: "#0f1729",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                >
+                  {[
+                    "Misafir Kartı",
+                    "Araç Kartı",
+                    "Laptop",
+                    "Tablet",
+                    "Anahtarlık",
+                    "Diğer",
+                  ].map((t) => (
+                    <option key={t} value={t} className="bg-[#0f1729]">
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="text-slate-300 text-sm mb-1">
+                  Ekipman ID / Numarası *
+                </p>
+                <input
+                  data-ocid="equipment.id.input"
+                  value={equipmentForm.id}
+                  onChange={(e) =>
+                    setEquipmentForm((f) => ({ ...f, id: e.target.value }))
+                  }
+                  placeholder="Örn: K-07, SN-12345"
+                  className="w-full px-4 py-3 rounded-xl text-white focus:outline-none text-sm font-mono"
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.2)",
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                data-ocid="equipment.cancel_button"
+                onClick={() => setEquipmentModalVisitor(null)}
+                className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                data-ocid="equipment.confirm_button"
+                onClick={assignEquipment}
+                disabled={!equipmentForm.id.trim()}
+                className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-40"
+                style={{
+                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                }}
+              >
+                Teslim Et
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Invite Modal */}
+      {showCreateInviteModal && (
+        <div
+          data-ocid="invite_create.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(168,85,247,0.4)",
+            }}
+          >
+            {createdInviteLink ? (
+              <>
+                <h3 className="text-white font-bold text-lg mb-2">
+                  ✉️ Davet Linki Hazır
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Aşağıdaki linki ziyaretçiye gönderin:
+                </p>
+                <div
+                  className="p-3 rounded-xl font-mono text-xs break-all mb-4"
+                  style={{
+                    background: "rgba(168,85,247,0.1)",
+                    border: "1px solid rgba(168,85,247,0.3)",
+                    color: "#a855f7",
+                  }}
+                >
+                  {createdInviteLink}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    data-ocid="invite_create.copy_button"
+                    onClick={() => {
+                      navigator.clipboard
+                        .writeText(createdInviteLink)
+                        .catch(() => {});
+                      setInviteLinkCopied(true);
+                      setTimeout(() => setInviteLinkCopied(false), 2000);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                    style={{
+                      background: inviteLinkCopied
+                        ? "rgba(34,197,94,0.2)"
+                        : "rgba(168,85,247,0.2)",
+                      border: inviteLinkCopied
+                        ? "1px solid rgba(34,197,94,0.4)"
+                        : "1px solid rgba(168,85,247,0.4)",
+                      color: inviteLinkCopied ? "#22c55e" : "#a855f7",
+                    }}
+                  >
+                    {inviteLinkCopied ? "✓ Kopyalandı" : "Kopyala"}
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="invite_create.close_button"
+                    onClick={() => {
+                      setShowCreateInviteModal(false);
+                      setCreatedInviteLink("");
+                    }}
+                    className="flex-1 py-2.5 rounded-xl text-white text-sm"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    Kapat
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-white font-bold text-lg mb-2">
+                  ✉️ Ziyaretçi Daveti Oluştur
+                </h3>
+                <p className="text-slate-400 text-sm mb-4">
+                  Ziyaretçiye gönderilecek self-registration linki oluşturulur.
+                </p>
+                <div className="mb-4">
+                  <p className="text-slate-300 text-sm mb-1">
+                    Ev Sahibi (isteğe bağlı)
+                  </p>
+                  <input
+                    data-ocid="invite_create.host.input"
+                    value={newInviteHostName}
+                    onChange={(e) => setNewInviteHostName(e.target.value)}
+                    placeholder={staff?.name ?? "Personel adı"}
+                    className="w-full px-4 py-3 rounded-xl text-white text-sm focus:outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                    }}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    data-ocid="invite_create.cancel_button"
+                    onClick={() => setShowCreateInviteModal(false)}
+                    className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm"
+                    style={{
+                      background: "rgba(255,255,255,0.07)",
+                      border: "1px solid rgba(255,255,255,0.15)",
+                    }}
+                  >
+                    İptal
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="invite_create.primary_button"
+                    onClick={createGuestInvite}
+                    className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
+                    style={{
+                      background: "linear-gradient(135deg,#a855f7,#7c3aed)",
+                    }}
+                  >
+                    Link Oluştur
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Reject Invitation Dialog */}
+      {rejectInviteToken && (
+        <div
+          data-ocid="invite_reject.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(239,68,68,0.4)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg mb-4">
+              Başvuruyu Reddet
+            </h3>
+            <textarea
+              data-ocid="invite_reject.reason.textarea"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Red sebebi (isteğe bağlı)..."
+              rows={3}
+              className="w-full px-4 py-3 rounded-xl text-white text-sm focus:outline-none resize-none mb-4"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+            />
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="invite_reject.cancel_button"
+                onClick={() => {
+                  setRejectInviteToken(null);
+                  setRejectReason("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                data-ocid="invite_reject.confirm_button"
+                onClick={rejectGuestInvitation}
+                className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
+                style={{
+                  background: "linear-gradient(135deg,#ef4444,#dc2626)",
+                }}
+              >
+                Reddet
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1555,6 +2410,86 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
                 />
               </div>
+              {/* Department */}
+              <div>
+                <p className="text-slate-300 text-sm mb-1 block">Departman *</p>
+                <select
+                  data-ocid="register.department.select"
+                  value={form.department}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, department: e.target.value }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-[#0f1729] border border-white/20 text-white focus:outline-none"
+                >
+                  <option value="" className="bg-[#0f1729]">
+                    Seçin...
+                  </option>
+                  {companyDepartments.map((d) => (
+                    <option key={d} value={d} className="bg-[#0f1729]">
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {/* Floor */}
+              <div>
+                <p className="text-slate-300 text-sm mb-1 block">Kat *</p>
+                <select
+                  data-ocid="register.floor.select"
+                  value={form.floor}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, floor: e.target.value }))
+                  }
+                  className="w-full px-4 py-3 rounded-xl bg-[#0f1729] border border-white/20 text-white focus:outline-none"
+                >
+                  <option value="" className="bg-[#0f1729]">
+                    Seçin...
+                  </option>
+                  {companyFloors.map((fl) => (
+                    <option key={fl} value={fl} className="bg-[#0f1729]">
+                      {fl}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {/* Multi-day toggle */}
+              <div className="sm:col-span-2">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    data-ocid="register.multiday.checkbox"
+                    type="checkbox"
+                    checked={form.multiDay}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        multiDay: e.target.checked,
+                        endDate: "",
+                      }))
+                    }
+                    className="w-4 h-4 rounded accent-[#0ea5e9]"
+                  />
+                  <span className="text-slate-300 text-sm">
+                    Çok günlü ziyaret mi?
+                  </span>
+                </label>
+                {form.multiDay && (
+                  <div className="mt-3">
+                    <p className="text-slate-300 text-sm mb-1 block">
+                      Bitiş Tarihi *
+                    </p>
+                    <input
+                      data-ocid="register.enddate.input"
+                      type="date"
+                      value={form.endDate}
+                      min={form.arrivalTime.slice(0, 10)}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, endDate: e.target.value }))
+                      }
+                      className="w-full max-w-xs px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none"
+                    />
+                  </div>
+                )}
+              </div>
               <div>
                 <p className="text-slate-300 text-sm mb-1 block">
                   {t(lang, "visitType")}
@@ -1815,6 +2750,102 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             </div>
             <div className="mt-4 space-y-4">
+              {/* Screening Questions */}
+              {screeningQuestions.length > 0 && (
+                <div
+                  className="p-4 rounded-xl"
+                  style={{
+                    background: "rgba(14,165,233,0.04)",
+                    border: "1.5px solid rgba(14,165,233,0.2)",
+                  }}
+                >
+                  <h4 className="text-white font-semibold text-sm mb-4 flex items-center gap-2">
+                    🛡️ Güvenlik Kontrolü
+                  </h4>
+                  <div className="space-y-4">
+                    {screeningQuestions.map((sq) => (
+                      <div key={sq.id}>
+                        <p className="text-slate-300 text-sm mb-2">
+                          {sq.text}
+                          {sq.blocking && sq.type === "yes_no" && (
+                            <span className="ml-1 text-red-400 text-xs">*</span>
+                          )}
+                        </p>
+                        {sq.type === "yes_no" ? (
+                          <div className="flex gap-3">
+                            {["Evet", "Hayır"].map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                data-ocid={`screening.${sq.id}.${opt.toLowerCase()}.button`}
+                                onClick={() =>
+                                  setForm((f) => ({
+                                    ...f,
+                                    screeningAnswers: {
+                                      ...f.screeningAnswers,
+                                      [sq.id]: opt,
+                                    },
+                                  }))
+                                }
+                                className="px-5 py-2 rounded-lg text-sm font-medium transition-all"
+                                style={{
+                                  background:
+                                    form.screeningAnswers[sq.id] === opt
+                                      ? opt === "Evet"
+                                        ? "rgba(34,197,94,0.3)"
+                                        : "rgba(239,68,68,0.3)"
+                                      : "rgba(255,255,255,0.07)",
+                                  border:
+                                    form.screeningAnswers[sq.id] === opt
+                                      ? opt === "Evet"
+                                        ? "1px solid rgba(34,197,94,0.5)"
+                                        : "1px solid rgba(239,68,68,0.5)"
+                                      : "1px solid rgba(255,255,255,0.15)",
+                                  color:
+                                    form.screeningAnswers[sq.id] === opt
+                                      ? opt === "Evet"
+                                        ? "#22c55e"
+                                        : "#ef4444"
+                                      : "#94a3b8",
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <input
+                            data-ocid={`screening.${sq.id}.input`}
+                            value={form.screeningAnswers[sq.id] ?? ""}
+                            onChange={(e) =>
+                              setForm((f) => ({
+                                ...f,
+                                screeningAnswers: {
+                                  ...f.screeningAnswers,
+                                  [sq.id]: e.target.value,
+                                },
+                              }))
+                            }
+                            className="w-full px-4 py-2.5 rounded-xl text-white text-sm focus:outline-none"
+                            style={{
+                              background: "rgba(255,255,255,0.08)",
+                              border: "1px solid rgba(255,255,255,0.2)",
+                            }}
+                          />
+                        )}
+                        {sq.blocking &&
+                          sq.type === "yes_no" &&
+                          form.screeningAnswers[sq.id] === "Hayır" && (
+                            <div className="mt-2 p-3 rounded-lg border border-red-500/40 bg-red-900/20 text-red-400 text-xs">
+                              🚫 Giriş Engellenmiştir — Bu soru için "Hayır"
+                              yanıtı giriş izni vermez.
+                            </div>
+                          )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* NDA/KVKK with collapsible text */}
               <div
                 className="p-4 rounded-xl"
@@ -2086,6 +3117,59 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                             </span>
                           </div>
                         )}
+                        {/* Equipment badge */}
+                        {v.equipment && (
+                          <div
+                            className="mb-2 px-3 py-1.5 rounded-lg text-xs flex items-center gap-2"
+                            style={{
+                              background: "rgba(245,158,11,0.15)",
+                              border: "1px solid rgba(245,158,11,0.3)",
+                            }}
+                          >
+                            <span className="text-amber-400 font-semibold">
+                              📦 {v.equipment.type}
+                            </span>
+                            <span className="text-amber-300 font-mono">
+                              #{v.equipment.id}
+                            </span>
+                          </div>
+                        )}
+                        {/* Dept/Floor badge */}
+                        {(v.department || v.floor) && (
+                          <div className="mb-2 flex gap-2">
+                            {v.department && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs font-medium text-white"
+                                style={{ background: "rgba(14,165,233,0.2)" }}
+                              >
+                                🏢 {v.department}
+                              </span>
+                            )}
+                            {v.floor && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs font-medium text-white"
+                                style={{ background: "rgba(168,85,247,0.2)" }}
+                              >
+                                🏗️ {v.floor}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {/* Date range for multi-day */}
+                        {v.multiDay && v.endDate && (
+                          <div className="mb-2 text-slate-400 text-xs">
+                            📅{" "}
+                            {new Date(v.arrivalTime).toLocaleDateString(
+                              "tr-TR",
+                              { day: "2-digit", month: "short" },
+                            )}
+                            {" — "}
+                            {new Date(v.endDate).toLocaleDateString("tr-TR", {
+                              day: "2-digit",
+                              month: "short",
+                            })}
+                          </div>
+                        )}
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -2098,6 +3182,27 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                             }}
                           >
                             {t(lang, "checkout")}
+                          </button>
+                          <button
+                            type="button"
+                            data-ocid={`active_visitors.equipment.button.${i + 1}`}
+                            onClick={() => {
+                              setEquipmentModalVisitor(v);
+                              setEquipmentForm({
+                                type: "Misafir Kartı",
+                                id: "",
+                              });
+                            }}
+                            title="Ekipman Ver"
+                            className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-80"
+                            style={{
+                              background: v.equipment
+                                ? "rgba(245,158,11,0.3)"
+                                : "rgba(245,158,11,0.15)",
+                              border: "1px solid rgba(245,158,11,0.3)",
+                            }}
+                          >
+                            📦
                           </button>
                           <button
                             type="button"
@@ -2251,6 +3356,33 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               {v.vehiclePlate && (
                                 <span className="font-mono text-xs text-slate-300">
                                   🚗 {v.vehiclePlate}
+                                </span>
+                              )}
+                              {v.department && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs text-white"
+                                  style={{ background: "rgba(14,165,233,0.2)" }}
+                                >
+                                  🏢 {v.department}
+                                </span>
+                              )}
+                              {v.floor && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs text-white"
+                                  style={{ background: "rgba(168,85,247,0.2)" }}
+                                >
+                                  🏗️ {v.floor}
+                                </span>
+                              )}
+                              {v.equipment && (
+                                <span
+                                  className="px-1.5 py-0.5 rounded text-xs font-medium"
+                                  style={{
+                                    background: "rgba(245,158,11,0.2)",
+                                    color: "#f59e0b",
+                                  }}
+                                >
+                                  📦 {v.equipment.type}
                                 </span>
                               )}
                             </div>
@@ -2432,6 +3564,31 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               <div className="text-slate-400 text-sm flex items-center gap-2 flex-wrap">
                                 🕐 {appt.appointmentTime} &bull; Host:{" "}
                                 {appt.hostName}
+                                {(() => {
+                                  const hostStaff = staffList.find(
+                                    (s) =>
+                                      s.name === appt.hostName ||
+                                      s.staffId === appt.hostName,
+                                  );
+                                  if (hostStaff?.isAbsent) {
+                                    return (
+                                      <span
+                                        data-ocid={`appointments.absent_warning.${i + 1}`}
+                                        className="px-2 py-0.5 rounded-full text-xs font-bold"
+                                        style={{
+                                          background: "rgba(245,158,11,0.2)",
+                                          color: "#f59e0b",
+                                          border:
+                                            "1px solid rgba(245,158,11,0.4)",
+                                        }}
+                                      >
+                                        ⚠️ Personel Yok (
+                                        {hostStaff.absenceReason ?? "İzin"})
+                                      </span>
+                                    );
+                                  }
+                                  return null;
+                                })()}
                                 {(() => {
                                   const cd = getAppointmentCountdown(
                                     appt.appointmentDate,
@@ -2821,6 +3978,9 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                         <th className="p-3 text-left text-slate-400 font-medium">
                           Kaydeden
                         </th>
+                        <th className="p-3 text-left text-slate-400 font-medium">
+                          Aksiyon
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2885,6 +4045,21 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                           <td className="p-3 text-slate-400 text-xs">
                             {staffList.find((s) => s.staffId === v.registeredBy)
                               ?.name ?? v.registeredBy}
+                          </td>
+                          <td className="p-3">
+                            <button
+                              type="button"
+                              data-ocid={`history.reinvite.button.${i + 1}`}
+                              onClick={() => openReinvite(v)}
+                              className="px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap"
+                              style={{
+                                background: "rgba(14,165,233,0.15)",
+                                border: "1px solid rgba(14,165,233,0.35)",
+                                color: "#0ea5e9",
+                              }}
+                            >
+                              ✉️ Tekrar Davet
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -2966,6 +4141,129 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               </p>
             </div>
 
+            {/* Absence Management */}
+            <div
+              data-ocid="absence.panel"
+              className="p-5 rounded-2xl"
+              style={{
+                background: absenceToggle
+                  ? "rgba(245,158,11,0.08)"
+                  : "rgba(255,255,255,0.04)",
+                border: absenceToggle
+                  ? "1.5px solid rgba(245,158,11,0.35)"
+                  : "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-white font-semibold text-sm">
+                    Müsaitlik Durumu
+                  </p>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    Bugün yoksa randevular uyarı gösterir
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="absence.toggle"
+                  onClick={() => {
+                    const newVal = !absenceToggle;
+                    setAbsenceToggle(newVal);
+                    saveAbsenceSettings(newVal, absenceReason, absentUntil);
+                  }}
+                  className="relative w-12 h-6 rounded-full transition-colors"
+                  style={{
+                    background: absenceToggle
+                      ? "#f59e0b"
+                      : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-md transition-transform"
+                    style={{
+                      transform: absenceToggle
+                        ? "translateX(1.5rem)"
+                        : "translateX(0.125rem)",
+                    }}
+                  />
+                </button>
+              </div>
+              {absenceToggle && (
+                <div className="space-y-3 mt-3">
+                  <div>
+                    <p className="text-slate-300 text-xs mb-1.5">Sebep</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {["İzin", "Hastalık", "Diğer"].map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          data-ocid={"absence.reason.toggle"}
+                          onClick={() => {
+                            setAbsenceReason(r);
+                            saveAbsenceSettings(absenceToggle, r, absentUntil);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                          style={{
+                            background:
+                              absenceReason === r
+                                ? "rgba(245,158,11,0.25)"
+                                : "rgba(255,255,255,0.07)",
+                            border:
+                              absenceReason === r
+                                ? "1px solid rgba(245,158,11,0.5)"
+                                : "1px solid rgba(255,255,255,0.12)",
+                            color: absenceReason === r ? "#f59e0b" : "#94a3b8",
+                          }}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-slate-300 text-xs mb-1.5">
+                      Dönüş Tarihi
+                    </p>
+                    <input
+                      data-ocid="absence.return_date.input"
+                      type="date"
+                      value={absentUntil}
+                      onChange={(e) => {
+                        setAbsentUntil(e.target.value);
+                        saveAbsenceSettings(
+                          absenceToggle,
+                          absenceReason,
+                          e.target.value,
+                        );
+                      }}
+                      className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.07)",
+                        border: "1px solid rgba(255,255,255,0.2)",
+                      }}
+                    />
+                  </div>
+                  <p className="text-amber-400/70 text-xs">
+                    ⚠️ Randevularınızda yeniden atama uyarısı gösterilecek.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Shift Report Button */}
+            <button
+              type="button"
+              data-ocid="shift_report.open_modal_button"
+              onClick={() => setShiftReportOpen(true)}
+              className="w-full py-3 rounded-xl text-white font-semibold flex items-center justify-center gap-2"
+              style={{
+                background: "rgba(14,165,233,0.15)",
+                border: "1px solid rgba(14,165,233,0.35)",
+              }}
+            >
+              📊 Vardiya Raporu Oluştur
+            </button>
+
             <div>
               <div className="text-slate-300 text-sm font-semibold mb-3 flex items-center gap-2">
                 <span style={{ color: "#f59e0b" }}>🏢</span> Kayıtlı Olduğunuz
@@ -3035,20 +4333,140 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
           </div>
         )}
-      </div>
+        {/* INVITATIONS TAB */}
+        {tab === "invitations" && (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-white font-bold text-xl">Davetler</h2>
+                <p className="text-slate-400 text-sm">
+                  Bekleyen self-registration başvuruları
+                </p>
+              </div>
+              <button
+                type="button"
+                data-ocid="invitations.create.open_modal_button"
+                onClick={() => {
+                  setShowCreateInviteModal(true);
+                  setCreatedInviteLink("");
+                }}
+                className="px-4 py-2.5 rounded-xl text-white text-sm font-semibold flex items-center gap-2"
+                style={{
+                  background: "linear-gradient(135deg,#a855f7,#7c3aed)",
+                }}
+              >
+                ✉️ Ziyaretçi Daveti Oluştur
+              </button>
+            </div>
 
-      {/* Footer */}
-      <footer className="text-center py-6 text-slate-600 text-xs border-t border-white/5">
-        © {new Date().getFullYear()}. Built with love using{" "}
-        <a
-          href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-slate-500 hover:text-slate-300 transition-colors"
-        >
-          caffeine.ai
-        </a>
-      </footer>
+            {invitations.length === 0 ? (
+              <div
+                data-ocid="invitations.empty_state"
+                className="text-center py-16 text-slate-500"
+              >
+                Bekleyen davet başvurusu yok.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {invitations.map((inv, i) => (
+                  <div
+                    key={inv.token}
+                    data-ocid={`invitations.item.${i + 1}`}
+                    className="p-5 rounded-2xl"
+                    style={{
+                      background: "rgba(168,85,247,0.06)",
+                      border: "1.5px solid rgba(168,85,247,0.3)",
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-white font-semibold">
+                            {inv.preData?.name || "—"}
+                          </span>
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                            style={{
+                              background: "rgba(245,158,11,0.2)",
+                              color: "#f59e0b",
+                            }}
+                          >
+                            ⏳ Onay Bekliyor
+                          </span>
+                        </div>
+                        {inv.preData && (
+                          <div className="text-slate-400 text-xs space-y-0.5 mt-2">
+                            <div>
+                              TC/Pasaport:{" "}
+                              <span className="font-mono text-slate-300">
+                                {inv.preData.idNumber}
+                              </span>
+                            </div>
+                            <div>Telefon: {inv.preData.phone}</div>
+                            {inv.preData.visitReason && (
+                              <div>Amaç: {inv.preData.visitReason}</div>
+                            )}
+                            {inv.preData.department && (
+                              <div className="flex gap-2 mt-1">
+                                <span
+                                  className="px-2 py-0.5 rounded text-xs text-white"
+                                  style={{ background: "rgba(14,165,233,0.2)" }}
+                                >
+                                  🏢 {inv.preData.department}
+                                </span>
+                                {inv.preData.floor && (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-xs text-white"
+                                    style={{
+                                      background: "rgba(168,85,247,0.2)",
+                                    }}
+                                  >
+                                    🏗️ {inv.preData.floor}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="text-slate-600 text-xs mt-2">
+                          {new Date(inv.createdAt).toLocaleString("tr-TR")}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2 shrink-0">
+                        <button
+                          type="button"
+                          data-ocid={`invitations.approve.button.${i + 1}`}
+                          onClick={() => approveGuestInvitation(inv)}
+                          disabled={!inv.preData}
+                          className="px-4 py-2 rounded-lg text-xs font-semibold text-white disabled:opacity-40"
+                          style={{
+                            background: "rgba(34,197,94,0.25)",
+                            border: "1px solid rgba(34,197,94,0.4)",
+                          }}
+                        >
+                          ✓ Onayla
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid={`invitations.reject.button.${i + 1}`}
+                          onClick={() => setRejectInviteToken(inv.token)}
+                          className="px-4 py-2 rounded-lg text-xs font-medium text-red-400"
+                          style={{
+                            background: "rgba(239,68,68,0.1)",
+                            border: "1px solid rgba(239,68,68,0.3)",
+                          }}
+                        >
+                          Reddet
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
