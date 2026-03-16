@@ -2,9 +2,13 @@ import type {
   Announcement,
   Appointment,
   BlacklistEntry,
+  CategoryTimeRestriction,
   Company,
+  ContractorPermit,
+  Department,
   Invitation,
   ScreeningQuestion,
+  SentryNotification,
   Session,
   Staff,
   Visitor,
@@ -349,4 +353,187 @@ export function setLockdown(companyId: string, active: boolean) {
   } else {
     localStorage.removeItem(`safentry_lockdown_${companyId}`);
   }
+}
+
+// Approved Visitors
+export function getApprovedVisitors(
+  companyId: string,
+): import("./types").ApprovedVisitor[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_approved_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveApprovedVisitor(av: import("./types").ApprovedVisitor) {
+  const list = getApprovedVisitors(av.companyId).filter((x) => x.id !== av.id);
+  localStorage.setItem(
+    `safentry_approved_${av.companyId}`,
+    JSON.stringify([...list, av]),
+  );
+}
+export function deleteApprovedVisitor(companyId: string, id: string) {
+  const list = getApprovedVisitors(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_approved_${companyId}`, JSON.stringify(list));
+}
+export function findApprovedByIdNumber(
+  companyId: string,
+  idNumber: string,
+): import("./types").ApprovedVisitor | null {
+  return (
+    getApprovedVisitors(companyId).find((x) => x.idNumber === idNumber) ?? null
+  );
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+export function getNotifications(companyId: string): SentryNotification[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_notifications_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function addNotification(n: SentryNotification) {
+  const list = getNotifications(n.companyId);
+  localStorage.setItem(
+    `safentry_notifications_${n.companyId}`,
+    JSON.stringify([n, ...list].slice(0, 200)),
+  );
+}
+export function markAllNotificationsRead(companyId: string) {
+  const list = getNotifications(companyId).map((n) => ({ ...n, read: true }));
+  localStorage.setItem(
+    `safentry_notifications_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+export function dismissNotification(companyId: string, id: string) {
+  const list = getNotifications(companyId).filter((n) => n.id !== id);
+  localStorage.setItem(
+    `safentry_notifications_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Departments (full objects with floor+capacity) ────────────────────────────
+export function getDepartments(companyId: string): Department[] {
+  try {
+    const stored = localStorage.getItem(`safentry_departments_${companyId}`);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    /* empty */
+  }
+  // Default departments
+  return [
+    { id: "dept_1", companyId, name: "Yönetim", floor: "1. Kat", capacity: 20 },
+    {
+      id: "dept_2",
+      companyId,
+      name: "İnsan Kaynakları",
+      floor: "2. Kat",
+      capacity: 15,
+    },
+    {
+      id: "dept_3",
+      companyId,
+      name: "Bilgi İşlem",
+      floor: "3. Kat",
+      capacity: 30,
+    },
+    {
+      id: "dept_4",
+      companyId,
+      name: "Muhasebe",
+      floor: "2. Kat",
+      capacity: 10,
+    },
+    {
+      id: "dept_5",
+      companyId,
+      name: "Güvenlik",
+      floor: "Zemin Kat",
+      capacity: 8,
+    },
+  ];
+}
+export function saveDepartment(d: Department) {
+  const list = getDepartments(d.companyId).filter((x) => x.id !== d.id);
+  localStorage.setItem(
+    `safentry_departments_${d.companyId}`,
+    JSON.stringify([...list, d]),
+  );
+}
+export function deleteDepartment(companyId: string, id: string) {
+  const list = getDepartments(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_departments_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Contractor Permits ────────────────────────────────────────────────────────
+export function getPermits(companyId: string): ContractorPermit[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_permits_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function savePermit(p: ContractorPermit) {
+  const list = getPermits(p.companyId).filter((x) => x.id !== p.id);
+  localStorage.setItem(
+    `safentry_permits_${p.companyId}`,
+    JSON.stringify([...list, p]),
+  );
+}
+export function deletePermit(companyId: string, id: string) {
+  const list = getPermits(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_permits_${companyId}`, JSON.stringify(list));
+}
+export function findPermitByIdNumber(
+  companyId: string,
+  idNumber: string,
+): ContractorPermit | null {
+  return getPermits(companyId).find((p) => p.idNumber === idNumber) ?? null;
+}
+
+// ─── Category Time Restrictions ───────────────────────────────────────────────
+export function getCategoryTimeRestrictions(
+  companyId: string,
+): CategoryTimeRestriction[] {
+  const company = findCompanyById(companyId);
+  return company?.categoryTimeRestrictions ?? [];
+}
+export function saveCategoryTimeRestriction(
+  companyId: string,
+  restriction: CategoryTimeRestriction,
+) {
+  const company = findCompanyById(companyId);
+  if (!company) return;
+  const list = (company.categoryTimeRestrictions ?? []).filter(
+    (r) => r.category !== restriction.category,
+  );
+  saveCompany({
+    ...company,
+    categoryTimeRestrictions: [...list, restriction],
+  });
+}
+export function removeCategoryTimeRestriction(
+  companyId: string,
+  category: string,
+) {
+  const company = findCompanyById(companyId);
+  if (!company) return;
+  saveCompany({
+    ...company,
+    categoryTimeRestrictions: (company.categoryTimeRestrictions ?? []).filter(
+      (r) => r.category !== category,
+    ),
+  });
 }

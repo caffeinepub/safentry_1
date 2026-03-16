@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { getLang, t } from "../i18n";
-import { copyToClipboard } from "../lib/utils";
+
 import { saveCompany } from "../store";
 import type { AppScreen, Company } from "../types";
-import { generateCompanyId, generateLoginCode } from "../utils";
+import {
+  copyToClipboard,
+  generateCompanyId,
+  generateLoginCode,
+} from "../utils";
 
 interface Props {
   onNavigate: (s: AppScreen) => void;

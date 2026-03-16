@@ -20,6 +20,50 @@ export interface AlertHistoryEntry {
   personelId?: string;
 }
 
+export interface SentryNotification {
+  id: string;
+  companyId: string;
+  type:
+    | "kiosk_pending"
+    | "blacklist_hit"
+    | "capacity_warning"
+    | "badge_expiry"
+    | "permit_expiry"
+    | "sla_breach";
+  message: string;
+  createdAt: number;
+  read: boolean;
+  relatedId?: string;
+}
+
+export interface Department {
+  id: string;
+  companyId: string;
+  name: string;
+  floor: string;
+  capacity: number;
+}
+
+export interface ContractorPermit {
+  id: string;
+  companyId: string;
+  contractorName: string;
+  idNumber: string;
+  permitNumber: string;
+  issueDate: string;
+  expiryDate: string;
+  insuranceInfo: string;
+  createdAt: number;
+}
+
+export interface CategoryTimeRestriction {
+  category: string;
+  allowedStart: string; // HH:MM
+  allowedEnd: string; // HH:MM
+  allowedDays: number[]; // 0=Sun,1=Mon,...6=Sat
+  strictMode: boolean;
+}
+
 export interface Invitation {
   token: string;
   companyId: string;
@@ -65,6 +109,10 @@ export interface Company {
   screeningQuestions?: ScreeningQuestion[];
   customExitQuestions?: ExitQuestion[];
   categoryNda?: Record<string, string>;
+  badgeFields?: string[];
+  parkingSpaces?: ParkingSpace[];
+  slaThreshold?: number; // minutes, default 10
+  categoryTimeRestrictions?: CategoryTimeRestriction[];
 }
 
 export interface Staff {
@@ -115,6 +163,7 @@ export interface Visitor {
   equipment?: { type: string; id: string; assignedAt: string } | null;
   screeningAnswers?: { questionId: string; question: string; answer: string }[];
   privateNote?: string;
+  parkingSpace?: string;
 }
 
 export interface BlacklistEntry {
@@ -183,3 +232,20 @@ export type AppScreen =
   | "kiosk"
   | "verify"
   | "invite";
+
+export interface ParkingSpace {
+  id: string;
+  label: string;
+  occupied: boolean;
+  visitorId?: string;
+}
+
+export interface ApprovedVisitor {
+  id: string;
+  companyId: string;
+  name: string;
+  idNumber: string;
+  phone?: string;
+  visitReason?: string;
+  category?: string;
+}

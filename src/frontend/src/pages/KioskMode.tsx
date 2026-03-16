@@ -3,9 +3,10 @@ import { addAuditLog } from "../auditLog";
 import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { useQRScannerLocal as useQRScanner } from "../hooks/useQRScannerLocal";
-import { getLang, t } from "../i18n";
+import { LANGUAGES, getLang, t } from "../i18n";
 import {
   addAlertHistory,
+  addNotification,
   findCompanyById,
   getCustomCategories,
   getLockdown,
@@ -47,7 +48,8 @@ const EMPTY_FORM = {
 };
 
 export default function KioskMode({ companyId, onNavigate }: Props) {
-  const lang = getLang();
+  const [kioskLang, setKioskLang] = useState(getLang());
+  const lang = kioskLang;
   const company = findCompanyById(companyId);
   const staffList = getStaffByCompany(companyId);
   const categories = getCustomCategories(companyId);
@@ -238,6 +240,15 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     const pending = JSON.parse(localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]");
     pending.push({ ...visitor, _submittedAt: now });
     localStorage.setItem(KIOSK_PENDING_KEY, JSON.stringify(pending));
+    addNotification({
+      id: `${visitor.visitorId}_kiosk`,
+      companyId,
+      type: "kiosk_pending",
+      message: `Kiosk başvurusu: ${visitor.name} (${visitor.category}) onay bekliyor.`,
+      createdAt: now,
+      read: false,
+      relatedId: visitor.visitorId,
+    });
     addAuditLog(
       companyId,
       "Kiosk",
@@ -322,9 +333,34 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
           <p className="text-slate-400 mb-2">
             {company?.kioskWelcomeMessage || "Ziyaretçi kaydı için dokunun"}
           </p>
-          <p className="text-slate-600 text-sm mb-10">
+          <p className="text-slate-600 text-sm mb-4">
             Lütfen aşağıdaki seçeneklerden birini seçin
           </p>
+          {/* Language selector */}
+          <div className="flex flex-wrap gap-2 justify-center mb-8">
+            {LANGUAGES.map((lng) => (
+              <button
+                key={lng.code}
+                type="button"
+                data-ocid={`kiosk.lang_${lng.code}.button`}
+                onClick={() => setKioskLang(lng.code)}
+                className="px-2 py-1 rounded-lg text-xs font-medium transition-all"
+                style={{
+                  background:
+                    kioskLang === lng.code
+                      ? "rgba(14,165,233,0.25)"
+                      : "rgba(255,255,255,0.06)",
+                  border:
+                    kioskLang === lng.code
+                      ? "1.5px solid rgba(14,165,233,0.6)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                  color: kioskLang === lng.code ? "#38bdf8" : "#94a3b8",
+                }}
+              >
+                {lng.flag} {lng.label}
+              </button>
+            ))}
+          </div>
 
           {showQrScanner ? (
             <div className="mb-6">

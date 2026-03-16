@@ -23,20 +23,28 @@ import { addAuditLog, getAuditLogs } from "../auditLog";
 import ConfirmModal from "../components/ConfirmModal";
 import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
+import NotificationCenter from "../components/NotificationCenter";
 import { getLang, t } from "../i18n";
-import { copyToClipboard } from "../lib/utils";
+
 import {
   addAlertHistory,
   addToBlacklist,
   clearSession,
+  deleteApprovedVisitor,
+  deleteDepartment,
+  deletePermit,
+  findApprovedByIdNumber,
   findCompanyById,
   getAlertHistory,
   getAnnouncements,
   getAppointments,
+  getApprovedVisitors,
   getBlacklist,
   getCompanyDepartments,
   getCompanyFloors,
+  getDepartments,
   getLockdown,
+  getPermits,
   getSession,
   getStaffByCompany,
   getVisitors,
@@ -46,8 +54,11 @@ import {
   resetStaffCode,
   saveAnnouncement,
   saveAppointment,
+  saveApprovedVisitor,
   saveCompany,
+  saveDepartment,
   saveInviteCode,
+  savePermit,
   saveStaff,
   saveVisitor,
   setLockdown,
@@ -56,15 +67,25 @@ import type {
   AlertHistoryEntry,
   AppScreen,
   Appointment,
+  ApprovedVisitor,
   AuditLog,
   BlacklistEntry,
+  CategoryTimeRestriction,
   Company,
+  ContractorPermit,
+  Department,
   ExitQuestion,
+  ParkingSpace,
   ScreeningQuestion,
   Staff,
   Visitor,
 } from "../types";
-import { durationLabel, formatDateTime, generateId } from "../utils";
+import {
+  copyToClipboard,
+  durationLabel,
+  formatDateTime,
+  generateId,
+} from "../utils";
 
 const LABEL_COLORS: Record<string, string> = {
   normal: "#0ea5e9",
@@ -103,6 +124,9 @@ type Tab =
   | "auditlog"
   | "alerthistory"
   | "equipment"
+  | "approved"
+  | "departments"
+  | "permits"
   | "profile";
 
 function getLast7DaysData(visitors: Visitor[]) {
@@ -145,6 +169,36 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [announcements, setAnnouncements] = useState(
     getAnnouncements(session.companyId),
   );
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [permits, setPermits] = useState<ContractorPermit[]>([]);
+  // Department form
+  const [newDeptName, setNewDeptName] = useState("");
+  const [newDeptFloor, setNewDeptFloor] = useState("");
+  const [newDeptCapacity, setNewDeptCapacity] = useState("10");
+  const [editDept, setEditDept] = useState<Department | null>(null);
+  // Permit form
+  const [showPermitForm, setShowPermitForm] = useState(false);
+  const [editPermit, setEditPermit] = useState<ContractorPermit | null>(null);
+  const [permitForm, setPermitForm] = useState({
+    contractorName: "",
+    idNumber: "",
+    permitNumber: "",
+    issueDate: "",
+    expiryDate: "",
+    insuranceInfo: "",
+  });
+  // Category time restrictions
+  const [editingRestriction, setEditingRestriction] = useState<string | null>(
+    null,
+  );
+  const [restrictionForm, setRestrictionForm] = useState<
+    Omit<CategoryTimeRestriction, "category">
+  >({
+    allowedStart: "08:00",
+    allowedEnd: "18:00",
+    allowedDays: [1, 2, 3, 4, 5],
+    strictMode: false,
+  });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditActionFilter, setAuditActionFilter] = useState("");
   const [auditDateFilter, setAuditDateFilter] = useState("");
@@ -242,12 +296,28 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [reinviteTime, setReinviteTime] = useState("10:00");
   const [reinvitePurpose, setReinvitePurpose] = useState("");
 
+  // Approved visitors state
+  const [approvedVisitors, setApprovedVisitors] = useState<ApprovedVisitor[]>(
+    () => getApprovedVisitors(session.companyId),
+  );
+  const [newApprovedName, setNewApprovedName] = useState("");
+  const [newApprovedId, setNewApprovedId] = useState("");
+  const [newApprovedPhone, setNewApprovedPhone] = useState("");
+  const [newApprovedReason, setNewApprovedReason] = useState("");
+  const [newApprovedCategory, setNewApprovedCategory] = useState("");
+
+  // Parking state
+  const [newParkingLabel, setNewParkingLabel] = useState("");
+
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
     setBlacklist(getBlacklist(session.companyId));
     setAuditLogs(getAuditLogs(session.companyId));
     setAlertHistory(getAlertHistory(session.companyId));
+    setApprovedVisitors(getApprovedVisitors(session.companyId));
+    setDepartments(getDepartments(session.companyId));
+    setPermits(getPermits(session.companyId));
     refreshSession();
   }, [session.companyId]);
 
@@ -805,6 +875,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       key: "equipment",
       label: `📦 Ekipmanlar (${visitors.filter((v) => v.status === "active" && v.equipment).length})`,
     },
+    { key: "approved", label: "✅ Onaylı Ziyaretçiler" },
+    { key: "departments", label: `🏢 Departmanlar (${departments.length})` },
+    { key: "permits", label: `📋 İş İzinleri (${permits.length})` },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -1290,6 +1363,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <NotificationCenter companyId={session.companyId} />
           <LangSwitcher onChange={onRefresh} />
           <button
             type="button"
@@ -2365,6 +2439,162 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               })}
             </div>
 
+            {/* Satisfaction score section */}
+            {(() => {
+              const rated = visitors.filter(
+                (v) => v.exitRating && v.exitRating > 0,
+              );
+              const avgSat = rated.length
+                ? (
+                    rated.reduce((acc, v) => acc + (v.exitRating ?? 0), 0) /
+                    rated.length
+                  ).toFixed(1)
+                : null;
+              const dist = [1, 2, 3, 4, 5].map((star) => ({
+                star,
+                count: rated.filter((v) => v.exitRating === star).length,
+              }));
+              const last7 = (() => {
+                const days: { date: string; avg: number | null }[] = [];
+                for (let i = 6; i >= 0; i--) {
+                  const d = new Date();
+                  d.setDate(d.getDate() - i);
+                  const dayRated = rated.filter((v) => {
+                    const vd = new Date(v.arrivalTime);
+                    return (
+                      vd.getFullYear() === d.getFullYear() &&
+                      vd.getMonth() === d.getMonth() &&
+                      vd.getDate() === d.getDate()
+                    );
+                  });
+                  days.push({
+                    date: d.toLocaleDateString("tr-TR", {
+                      weekday: "short",
+                      day: "numeric",
+                    }),
+                    avg: dayRated.length
+                      ? Number.parseFloat(
+                          (
+                            dayRated.reduce(
+                              (a, v) => a + (v.exitRating ?? 0),
+                              0,
+                            ) / dayRated.length
+                          ).toFixed(1),
+                        )
+                      : null,
+                  });
+                }
+                return days;
+              })();
+              return (
+                <div
+                  className="p-5 rounded-2xl"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <p className="text-slate-300 text-sm font-semibold mb-4">
+                    ⭐ Ziyaretçi Memnuniyet Puanı
+                  </p>
+                  <div className="grid grid-cols-2 gap-4 mb-5">
+                    <div
+                      className="p-4 rounded-xl text-center"
+                      style={{
+                        background: "rgba(245,158,11,0.1)",
+                        border: "1px solid rgba(245,158,11,0.25)",
+                      }}
+                    >
+                      <div
+                        className="text-3xl font-bold"
+                        style={{ color: "#f59e0b" }}
+                      >
+                        {avgSat ?? "—"}
+                      </div>
+                      <div className="text-slate-400 text-xs mt-1">
+                        Ortalama Puan
+                      </div>
+                      <div className="text-slate-500 text-xs">
+                        {rated.length} değerlendirme
+                      </div>
+                    </div>
+                    <div
+                      className="p-4 rounded-xl"
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <div className="text-slate-300 text-xs font-semibold mb-2">
+                        Dağılım
+                      </div>
+                      {dist.map(({ star, count }) => (
+                        <div
+                          key={star}
+                          className="flex items-center gap-2 mb-1"
+                        >
+                          <span className="text-xs text-slate-500 w-3">
+                            {star}
+                          </span>
+                          <span className="text-yellow-400 text-xs">
+                            {"★".repeat(star)}
+                            {"☆".repeat(5 - star)}
+                          </span>
+                          <div
+                            className="flex-1 h-1.5 rounded-full"
+                            style={{ background: "rgba(255,255,255,0.08)" }}
+                          >
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${rated.length ? (count / rated.length) * 100 : 0}%`,
+                                background: "#f59e0b",
+                              }}
+                            />
+                          </div>
+                          <span className="text-slate-500 text-xs w-4">
+                            {count}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-slate-400 text-xs mb-2">
+                      Son 7 Gün Trendi
+                    </p>
+                    <div
+                      className="flex items-end gap-1"
+                      style={{ height: 48 }}
+                    >
+                      {last7.map((day) => (
+                        <div
+                          key={day.date}
+                          className="flex-1 flex flex-col items-center gap-1"
+                        >
+                          <div
+                            className="w-full rounded-t"
+                            style={{
+                              height: day.avg
+                                ? `${(day.avg / 5) * 40}px`
+                                : "2px",
+                              background: day.avg
+                                ? "#f59e0b"
+                                : "rgba(255,255,255,0.1)",
+                              minHeight: "2px",
+                            }}
+                          />
+                          <span className="text-slate-600 text-xs">
+                            {day.avg ?? "—"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Staff performance table */}
             {staffPerformance.length > 0 && (
               <div
@@ -2745,6 +2975,188 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     >
                       {v.label.toUpperCase()}
                     </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* APPROVED VISITORS TAB */}
+        {tab === "approved" && (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-white font-bold text-lg">
+                ✅ Onaylı Ziyaretçiler
+              </h2>
+              <span className="text-slate-400 text-sm">
+                {approvedVisitors.length} kayıt
+              </span>
+            </div>
+            {/* Add new */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4 text-sm">
+                Yeni Onaylı Ziyaretçi Ekle
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">Ad Soyad *</p>
+                  <input
+                    data-ocid="approved.name.input"
+                    value={newApprovedName}
+                    onChange={(e) => setNewApprovedName(e.target.value)}
+                    placeholder="Ad Soyad"
+                    className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">TC Kimlik No *</p>
+                  <input
+                    data-ocid="approved.idnumber.input"
+                    value={newApprovedId}
+                    onChange={(e) => setNewApprovedId(e.target.value)}
+                    placeholder="11 hane"
+                    maxLength={11}
+                    className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm font-mono focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">Telefon</p>
+                  <input
+                    data-ocid="approved.phone.input"
+                    value={newApprovedPhone}
+                    onChange={(e) => setNewApprovedPhone(e.target.value)}
+                    placeholder="0500 000 0000"
+                    className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">Ziyaret Nedeni</p>
+                  <input
+                    data-ocid="approved.reason.input"
+                    value={newApprovedReason}
+                    onChange={(e) => setNewApprovedReason(e.target.value)}
+                    placeholder="Toplantı, teslimat..."
+                    className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <p className="text-slate-400 text-xs mb-1">Kategori</p>
+                  <select
+                    data-ocid="approved.category.select"
+                    value={newApprovedCategory}
+                    onChange={(e) => setNewApprovedCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#1e293b] border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  >
+                    <option value="">Seçiniz</option>
+                    {(company?.customCategories?.length
+                      ? company.customCategories
+                      : [
+                          "Misafir",
+                          "Müteahhit",
+                          "Teslimat",
+                          "Mülakat",
+                          "Tedarikçi",
+                        ]
+                    ).map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <button
+                type="button"
+                data-ocid="approved.add.button"
+                onClick={() => {
+                  if (!newApprovedName.trim() || !newApprovedId.trim()) return;
+                  const av: ApprovedVisitor = {
+                    id: generateId(),
+                    companyId: session.companyId,
+                    name: newApprovedName.trim(),
+                    idNumber: newApprovedId.trim(),
+                    phone: newApprovedPhone || undefined,
+                    visitReason: newApprovedReason || undefined,
+                    category: newApprovedCategory || undefined,
+                  };
+                  saveApprovedVisitor(av);
+                  setApprovedVisitors(getApprovedVisitors(session.companyId));
+                  setNewApprovedName("");
+                  setNewApprovedId("");
+                  setNewApprovedPhone("");
+                  setNewApprovedReason("");
+                  setNewApprovedCategory("");
+                  toast.success("Onaylı ziyaretçi eklendi");
+                }}
+                className="mt-4 w-full py-2 rounded-xl text-white font-semibold text-sm"
+                style={{
+                  background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                }}
+              >
+                ✅ Ekle
+              </button>
+            </div>
+            {/* List */}
+            {approvedVisitors.length === 0 ? (
+              <div
+                data-ocid="approved.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                Henüz onaylı ziyaretçi yok
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {approvedVisitors.map((av, i) => (
+                  <div
+                    key={av.id}
+                    data-ocid={`approved.item.${i + 1}`}
+                    className="flex items-center justify-between p-4 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div>
+                      <div className="text-white font-semibold text-sm">
+                        {av.name}
+                      </div>
+                      <div className="text-slate-400 text-xs font-mono">
+                        {av.idNumber}
+                      </div>
+                      {av.phone && (
+                        <div className="text-slate-500 text-xs">{av.phone}</div>
+                      )}
+                      {av.category && (
+                        <span
+                          className="inline-block mt-1 px-2 py-0.5 rounded-full text-xs text-white"
+                          style={{ background: "rgba(14,165,233,0.25)" }}
+                        >
+                          {av.category}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      data-ocid={`approved.delete_button.${i + 1}`}
+                      onClick={() => {
+                        deleteApprovedVisitor(session.companyId, av.id);
+                        setApprovedVisitors(
+                          getApprovedVisitors(session.companyId),
+                        );
+                        toast.success("Silindi");
+                      }}
+                      className="text-red-400 hover:text-red-300 px-3 py-1 rounded-lg text-xs"
+                      style={{ background: "rgba(239,68,68,0.1)" }}
+                    >
+                      Sil
+                    </button>
                   </div>
                 ))}
               </div>
@@ -3258,10 +3670,548 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 </p>
               </div>
             </div>
+
+            {/* Data Export Section */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold mb-4">
+                📥 Veri Dışa Aktarım
+              </p>
+              <p className="text-slate-400 text-xs mb-4">
+                GDPR/KVKK veri silme talepleri veya yedekleme için tüm şirket
+                verisini indirin.
+              </p>
+              <div className="flex gap-3 flex-wrap">
+                <button
+                  type="button"
+                  data-ocid="compliance.json_export.button"
+                  onClick={() => {
+                    const data = {
+                      exportDate: new Date().toISOString(),
+                      company,
+                      visitors: getVisitors(session.companyId),
+                      staff: getStaffByCompany(session.companyId),
+                      blacklist: getBlacklist(session.companyId),
+                      appointments: getAppointments(session.companyId),
+                      approvedVisitors: getApprovedVisitors(session.companyId),
+                    };
+                    const blob = new Blob([JSON.stringify(data, null, 2)], {
+                      type: "application/json",
+                    });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `safentry-export-${session.companyId}-${new Date().toISOString().slice(0, 10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    toast.success("JSON dosyası indirildi");
+                  }}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                  }}
+                >
+                  📄 JSON Olarak İndir
+                </button>
+                <button
+                  type="button"
+                  data-ocid="compliance.csv_export.button"
+                  onClick={() => {
+                    const vs = getVisitors(session.companyId);
+                    const headers = [
+                      "ID",
+                      "Ad Soyad",
+                      "TC",
+                      "Telefon",
+                      "Geliş",
+                      "Çıkış",
+                      "Durum",
+                      "Neden",
+                      "Kategori",
+                      "Etiket",
+                    ];
+                    const rows = vs.map((v) =>
+                      [
+                        v.visitorId,
+                        v.name,
+                        v.idNumber,
+                        v.phone,
+                        new Date(v.arrivalTime).toLocaleString("tr-TR"),
+                        v.departureTime
+                          ? new Date(v.departureTime).toLocaleString("tr-TR")
+                          : "",
+                        v.status,
+                        v.visitReason,
+                        v.category ?? "",
+                        v.label,
+                      ]
+                        .map((x) => `"${String(x).replace(/"/g, '""')}"`)
+                        .join(","),
+                    );
+                    const csv = [headers.join(","), ...rows].join("\n");
+                    const blob = new Blob([`﻿${csv}`], {
+                      type: "text/csv;charset=utf-8;",
+                    });
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `safentry-visitors-${session.companyId}-${new Date().toISOString().slice(0, 10)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                    toast.success("CSV dosyası indirildi");
+                  }}
+                  className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                  style={{
+                    background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                  }}
+                >
+                  📊 Ziyaretçiler CSV
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
         {/* PROFILE TAB */}
+        {tab === "departments" && (
+          <div data-ocid="departments.section">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-white font-bold text-lg">
+                🏢 Departman Yönetimi
+              </h2>
+            </div>
+            {/* Add/Edit Department Form */}
+            <div
+              className="p-5 rounded-2xl mb-6"
+              style={{
+                background: "rgba(14,165,233,0.07)",
+                border: "1.5px solid rgba(14,165,233,0.2)",
+              }}
+            >
+              <h3 className="text-[#0ea5e9] font-semibold text-sm mb-4">
+                {editDept ? "✏️ Departman Düzenle" : "➕ Yeni Departman Ekle"}
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                <input
+                  data-ocid="departments.name.input"
+                  value={editDept ? editDept.name : newDeptName}
+                  onChange={(e) =>
+                    editDept
+                      ? setEditDept({ ...editDept, name: e.target.value })
+                      : setNewDeptName(e.target.value)
+                  }
+                  placeholder="Departman adı"
+                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <input
+                  data-ocid="departments.floor.input"
+                  value={editDept ? editDept.floor : newDeptFloor}
+                  onChange={(e) =>
+                    editDept
+                      ? setEditDept({ ...editDept, floor: e.target.value })
+                      : setNewDeptFloor(e.target.value)
+                  }
+                  placeholder="Kat (örn. 3. Kat)"
+                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <input
+                  data-ocid="departments.capacity.input"
+                  type="number"
+                  value={editDept ? editDept.capacity : newDeptCapacity}
+                  onChange={(e) =>
+                    editDept
+                      ? setEditDept({
+                          ...editDept,
+                          capacity: Number(e.target.value),
+                        })
+                      : setNewDeptCapacity(e.target.value)
+                  }
+                  placeholder="Kapasite"
+                  className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-ocid="departments.save.button"
+                  onClick={() => {
+                    if (editDept) {
+                      saveDepartment(editDept);
+                      setEditDept(null);
+                    } else {
+                      if (!newDeptName.trim()) return;
+                      saveDepartment({
+                        id: generateId(),
+                        companyId: session.companyId,
+                        name: newDeptName.trim(),
+                        floor: newDeptFloor.trim() || "Zemin Kat",
+                        capacity: Number(newDeptCapacity) || 10,
+                      });
+                      setNewDeptName("");
+                      setNewDeptFloor("");
+                      setNewDeptCapacity("10");
+                    }
+                    reload();
+                  }}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                  style={{
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                  }}
+                >
+                  {editDept ? "Kaydet" : "Ekle"}
+                </button>
+                {editDept && (
+                  <button
+                    type="button"
+                    data-ocid="departments.cancel.button"
+                    onClick={() => setEditDept(null)}
+                    className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+                  >
+                    İptal
+                  </button>
+                )}
+              </div>
+            </div>
+            {/* Department List */}
+            {departments.length === 0 ? (
+              <div
+                data-ocid="departments.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                <div className="text-4xl mb-2">🏢</div>
+                <p>Henüz departman eklenmedi.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {departments.map((d, i) => (
+                  <div
+                    key={d.id}
+                    data-ocid={`departments.item.${i + 1}`}
+                    className="flex items-center justify-between p-4 rounded-2xl"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div>
+                      <p className="text-white font-semibold">{d.name}</p>
+                      <p className="text-slate-400 text-xs mt-0.5">
+                        📍 {d.floor} &bull; 👥 Kapasite: {d.capacity}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-ocid={`departments.edit_button.${i + 1}`}
+                        onClick={() => setEditDept(d)}
+                        className="px-3 py-1.5 rounded-lg text-xs text-[#0ea5e9] border border-[#0ea5e9]/30 hover:bg-[#0ea5e9]/10"
+                      >
+                        Düzenle
+                      </button>
+                      <button
+                        type="button"
+                        data-ocid={`departments.delete_button.${i + 1}`}
+                        onClick={() => {
+                          deleteDepartment(session.companyId, d.id);
+                          reload();
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-500/30 hover:bg-red-900/20"
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "permits" && (
+          <div data-ocid="permits.section">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-white font-bold text-lg">
+                📋 Müteahhit İş İzni Takibi
+              </h2>
+              <button
+                type="button"
+                data-ocid="permits.open_modal_button"
+                onClick={() => {
+                  setShowPermitForm(true);
+                  setEditPermit(null);
+                  setPermitForm({
+                    contractorName: "",
+                    idNumber: "",
+                    permitNumber: "",
+                    issueDate: "",
+                    expiryDate: "",
+                    insuranceInfo: "",
+                  });
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#f97316,#ea580c)",
+                }}
+              >
+                ➕ Yeni İzin Ekle
+              </button>
+            </div>
+            {/* Permit Form */}
+            {(showPermitForm || editPermit) && (
+              <div
+                data-ocid="permits.dialog"
+                className="p-5 rounded-2xl mb-6"
+                style={{
+                  background: "rgba(249,115,22,0.07)",
+                  border: "1.5px solid rgba(249,115,22,0.2)",
+                }}
+              >
+                <h3 className="text-orange-400 font-semibold text-sm mb-4">
+                  {editPermit ? "✏️ İzin Düzenle" : "➕ Yeni İş İzni"}
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <input
+                    data-ocid="permits.contractor_name.input"
+                    value={permitForm.contractorName}
+                    onChange={(e) =>
+                      setPermitForm((f) => ({
+                        ...f,
+                        contractorName: e.target.value,
+                      }))
+                    }
+                    placeholder="Müteahhit adı soyadı"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                  />
+                  <input
+                    data-ocid="permits.id_number.input"
+                    value={permitForm.idNumber}
+                    onChange={(e) =>
+                      setPermitForm((f) => ({ ...f, idNumber: e.target.value }))
+                    }
+                    placeholder="TC Kimlik No"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                  />
+                  <input
+                    data-ocid="permits.permit_number.input"
+                    value={permitForm.permitNumber}
+                    onChange={(e) =>
+                      setPermitForm((f) => ({
+                        ...f,
+                        permitNumber: e.target.value,
+                      }))
+                    }
+                    placeholder="İzin numarası"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                  />
+                  <input
+                    data-ocid="permits.insurance_info.input"
+                    value={permitForm.insuranceInfo}
+                    onChange={(e) =>
+                      setPermitForm((f) => ({
+                        ...f,
+                        insuranceInfo: e.target.value,
+                      }))
+                    }
+                    placeholder="Sigorta bilgisi"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                  />
+                  <div>
+                    <span className="text-xs text-slate-400 mb-1 block">
+                      Düzenleme Tarihi
+                    </span>
+                    <input
+                      type="date"
+                      data-ocid="permits.issue_date.input"
+                      value={permitForm.issueDate}
+                      onChange={(e) =>
+                        setPermitForm((f) => ({
+                          ...f,
+                          issueDate: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                    />
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-400 mb-1 block">
+                      Geçerlilik Tarihi
+                    </span>
+                    <input
+                      type="date"
+                      data-ocid="permits.expiry_date.input"
+                      value={permitForm.expiryDate}
+                      onChange={(e) =>
+                        setPermitForm((f) => ({
+                          ...f,
+                          expiryDate: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-orange-400"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-ocid="permits.save.button"
+                    onClick={() => {
+                      const p: ContractorPermit = {
+                        ...(editPermit ?? {
+                          id: generateId(),
+                          companyId: session.companyId,
+                          createdAt: Date.now(),
+                        }),
+                        ...permitForm,
+                      };
+                      savePermit(p);
+                      setShowPermitForm(false);
+                      setEditPermit(null);
+                      reload();
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#f97316,#ea580c)",
+                    }}
+                  >
+                    Kaydet
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="permits.cancel_button"
+                    onClick={() => {
+                      setShowPermitForm(false);
+                      setEditPermit(null);
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+                  >
+                    İptal
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* Permits Table */}
+            {permits.length === 0 ? (
+              <div
+                data-ocid="permits.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                <div className="text-4xl mb-2">📋</div>
+                <p>Henüz iş izni eklenmedi.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {permits.map((p, i) => {
+                  const now = new Date();
+                  const expiry = new Date(p.expiryDate);
+                  const daysLeft = Math.ceil(
+                    (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+                  );
+                  const status =
+                    daysLeft < 0
+                      ? "expired"
+                      : daysLeft <= 7
+                        ? "expiring"
+                        : "valid";
+                  const statusLabel =
+                    status === "expired"
+                      ? "Süresi Dolmuş"
+                      : status === "expiring"
+                        ? "Süresi Dolmak Üzere"
+                        : "Geçerli";
+                  const statusColor =
+                    status === "expired"
+                      ? "#ef4444"
+                      : status === "expiring"
+                        ? "#f59e0b"
+                        : "#22c55e";
+                  return (
+                    <div
+                      key={p.id}
+                      data-ocid={`permits.item.${i + 1}`}
+                      className="p-4 rounded-2xl"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: `1px solid ${statusColor}30`,
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-white font-semibold">
+                              {p.contractorName}
+                            </p>
+                            <span
+                              className="px-2 py-0.5 rounded-full text-[11px] font-bold"
+                              style={{
+                                background: `${statusColor}20`,
+                                color: statusColor,
+                              }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-xs">
+                            TC: {p.idNumber} &bull; İzin No: {p.permitNumber}
+                          </p>
+                          <p className="text-slate-500 text-xs mt-0.5">
+                            Düzenleme: {p.issueDate} &bull; Geçerlilik:{" "}
+                            <span style={{ color: statusColor }}>
+                              {p.expiryDate}
+                            </span>
+                            {status === "expiring"
+                              ? ` (${daysLeft} gün kaldı)`
+                              : ""}
+                          </p>
+                          {p.insuranceInfo && (
+                            <p className="text-slate-500 text-xs mt-0.5">
+                              Sigorta: {p.insuranceInfo}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            data-ocid={`permits.edit_button.${i + 1}`}
+                            onClick={() => {
+                              setEditPermit(p);
+                              setPermitForm({
+                                contractorName: p.contractorName,
+                                idNumber: p.idNumber,
+                                permitNumber: p.permitNumber,
+                                issueDate: p.issueDate,
+                                expiryDate: p.expiryDate,
+                                insuranceInfo: p.insuranceInfo,
+                              });
+                              setShowPermitForm(false);
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs text-[#0ea5e9] border border-[#0ea5e9]/30 hover:bg-[#0ea5e9]/10"
+                          >
+                            Düzenle
+                          </button>
+                          <button
+                            type="button"
+                            data-ocid={`permits.delete_button.${i + 1}`}
+                            onClick={() => {
+                              deletePermit(session.companyId, p.id);
+                              reload();
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-500/30 hover:bg-red-900/20"
+                          >
+                            Sil
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -3538,6 +4488,294 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             </div>
 
+            {/* SLA Threshold */}
+            <div
+              className="mt-6 p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">
+                ⏱️ Kiosk SLA Eşiği
+              </h3>
+              <p className="text-slate-400 text-xs mb-3">
+                Kiosk üzerinden başvuran ziyaretçi kaç dakika beklediğinde uyarı
+                oluşturulsun?
+              </p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  data-ocid="profile.sla_threshold.input"
+                  value={profileForm.slaThreshold ?? 10}
+                  onChange={(e) =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      slaThreshold: Number(e.target.value),
+                    }))
+                  }
+                  min={1}
+                  max={60}
+                  className="w-24 px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <span className="text-slate-400 text-sm">dakika</span>
+              </div>
+            </div>
+
+            {/* Category Time Restrictions */}
+            <div
+              className="mt-6 p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-2">
+                🕐 Zaman Kısıtlı Erişim
+              </h3>
+              <p className="text-slate-400 text-xs mb-4">
+                Her kategori için giriş yapılabilecek saat ve günleri
+                tanımlayın.
+              </p>
+              {(
+                profileForm.customCategories ??
+                company?.customCategories ?? [
+                  "Misafir",
+                  "Müteahhit",
+                  "Teslimat",
+                  "Mülakat",
+                  "Tedarikçi",
+                  "Diğer",
+                ]
+              ).map((cat) => {
+                const restr = (
+                  profileForm.categoryTimeRestrictions ??
+                  company?.categoryTimeRestrictions ??
+                  []
+                ).find((r) => r.category === cat);
+                const isEditing = editingRestriction === cat;
+                const DAY_LABELS = [
+                  "Paz",
+                  "Pzt",
+                  "Sal",
+                  "Çar",
+                  "Per",
+                  "Cum",
+                  "Cmt",
+                ];
+                return (
+                  <div
+                    key={cat}
+                    className="mb-3 p-3 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-white text-sm font-medium">
+                        {cat}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {restr && !isEditing && (
+                          <span className="text-xs text-amber-400">
+                            {restr.allowedStart}–{restr.allowedEnd}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          data-ocid={`profile.time_restriction.${cat}.toggle`}
+                          onClick={() => {
+                            if (isEditing) {
+                              setEditingRestriction(null);
+                            } else {
+                              setEditingRestriction(cat);
+                              setRestrictionForm(
+                                restr
+                                  ? {
+                                      allowedStart: restr.allowedStart,
+                                      allowedEnd: restr.allowedEnd,
+                                      allowedDays: restr.allowedDays,
+                                      strictMode: restr.strictMode,
+                                    }
+                                  : {
+                                      allowedStart: "08:00",
+                                      allowedEnd: "18:00",
+                                      allowedDays: [1, 2, 3, 4, 5],
+                                      strictMode: false,
+                                    },
+                              );
+                            }
+                          }}
+                          className="text-xs px-2 py-1 rounded-lg"
+                          style={{
+                            background: isEditing
+                              ? "rgba(14,165,233,0.2)"
+                              : "rgba(255,255,255,0.07)",
+                            color: isEditing ? "#38bdf8" : "#94a3b8",
+                          }}
+                        >
+                          {isEditing
+                            ? "Kapat"
+                            : restr
+                              ? "Düzenle"
+                              : "+ Kısıtla"}
+                        </button>
+                        {restr && !isEditing && (
+                          <button
+                            type="button"
+                            data-ocid={`profile.time_restriction.${cat}.delete_button`}
+                            onClick={() => {
+                              const list = (
+                                profileForm.categoryTimeRestrictions ??
+                                company?.categoryTimeRestrictions ??
+                                []
+                              ).filter((r) => r.category !== cat);
+                              setProfileForm((f) => ({
+                                ...f,
+                                categoryTimeRestrictions: list,
+                              }));
+                            }}
+                            className="text-xs px-2 py-1 rounded-lg text-red-400"
+                            style={{ background: "rgba(239,68,68,0.1)" }}
+                          >
+                            Kaldır
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {isEditing && (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div>
+                            <span className="text-xs text-slate-400">
+                              Başlangıç
+                            </span>
+                            <input
+                              type="time"
+                              data-ocid="profile.restriction_start.input"
+                              value={restrictionForm.allowedStart}
+                              onChange={(e) =>
+                                setRestrictionForm((f) => ({
+                                  ...f,
+                                  allowedStart: e.target.value,
+                                }))
+                              }
+                              className="ml-2 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-white text-xs focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <span className="text-xs text-slate-400">
+                              Bitiş
+                            </span>
+                            <input
+                              type="time"
+                              data-ocid="profile.restriction_end.input"
+                              value={restrictionForm.allowedEnd}
+                              onChange={(e) =>
+                                setRestrictionForm((f) => ({
+                                  ...f,
+                                  allowedEnd: e.target.value,
+                                }))
+                              }
+                              className="ml-2 px-2 py-1 rounded-lg bg-white/5 border border-white/15 text-white text-xs focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {DAY_LABELS.map((day, di) => (
+                            <button
+                              key={day}
+                              type="button"
+                              data-ocid={`profile.restriction_day.${di + 1}.toggle`}
+                              onClick={() => {
+                                const days =
+                                  restrictionForm.allowedDays.includes(di)
+                                    ? restrictionForm.allowedDays.filter(
+                                        (d) => d !== di,
+                                      )
+                                    : [...restrictionForm.allowedDays, di];
+                                setRestrictionForm((f) => ({
+                                  ...f,
+                                  allowedDays: days,
+                                }));
+                              }}
+                              className="px-2 py-1 rounded-lg text-xs font-medium"
+                              style={{
+                                background:
+                                  restrictionForm.allowedDays.includes(di)
+                                    ? "rgba(14,165,233,0.25)"
+                                    : "rgba(255,255,255,0.07)",
+                                color: restrictionForm.allowedDays.includes(di)
+                                  ? "#38bdf8"
+                                  : "#64748b",
+                                border: restrictionForm.allowedDays.includes(di)
+                                  ? "1px solid rgba(14,165,233,0.4)"
+                                  : "1px solid transparent",
+                              }}
+                            >
+                              {day}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            data-ocid="profile.strict_mode.checkbox"
+                            id={`strict_${cat}`}
+                            checked={restrictionForm.strictMode}
+                            onChange={(e) =>
+                              setRestrictionForm((f) => ({
+                                ...f,
+                                strictMode: e.target.checked,
+                              }))
+                            }
+                            className="rounded"
+                          />
+                          <label
+                            htmlFor={`strict_${cat}`}
+                            className="text-xs text-slate-400"
+                          >
+                            Katı mod (giriş tamamen engelle, uyarı gösterme)
+                          </label>
+                        </div>
+                        <button
+                          type="button"
+                          data-ocid="profile.restriction_save.button"
+                          onClick={() => {
+                            const newRestr = {
+                              category: cat,
+                              ...restrictionForm,
+                            };
+                            const list = [
+                              ...(
+                                profileForm.categoryTimeRestrictions ??
+                                company?.categoryTimeRestrictions ??
+                                []
+                              ).filter((r) => r.category !== cat),
+                              newRestr,
+                            ];
+                            setProfileForm((f) => ({
+                              ...f,
+                              categoryTimeRestrictions: list,
+                            }));
+                            setEditingRestriction(null);
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                          style={{
+                            background:
+                              "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                          }}
+                        >
+                          Kaydet
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
             <button
               type="button"
               data-ocid="badge_validity.save_button"
@@ -3547,6 +4785,181 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             >
               {t(lang, "updateProfile")}
             </button>
+
+            {/* Badge Fields */}
+            {(() => {
+              const ALL_BADGE_FIELDS = [
+                { key: "name", label: "Ad Soyad" },
+                { key: "idNumber", label: "TC Kimlik No" },
+                { key: "phone", label: "Telefon" },
+                { key: "company", label: "Şirket" },
+                { key: "department", label: "Departman" },
+                { key: "floor", label: "Kat" },
+                { key: "vehiclePlate", label: "Araç Plakası" },
+                { key: "visitReason", label: "Ziyaret Nedeni" },
+                { key: "category", label: "Kategori" },
+                { key: "arrivalTime", label: "Geliş Saati" },
+              ];
+              const currentFields = profileForm.badgeFields ?? [
+                "name",
+                "company",
+                "arrivalTime",
+                "category",
+              ];
+              const toggle = (key: string) => {
+                const updated = currentFields.includes(key)
+                  ? currentFields.filter((f) => f !== key)
+                  : [...currentFields, key];
+                setProfileForm((f) => ({ ...f, badgeFields: updated }));
+              };
+              return (
+                <div
+                  className="mt-6 p-5 rounded-2xl"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <h3 className="text-white font-semibold mb-4">
+                    🏷️ Rozet Alanları
+                  </h3>
+                  <p className="text-slate-400 text-xs mb-3">
+                    Ziyaretçi rozetinde hangi alanların görüneceğini seçin.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {ALL_BADGE_FIELDS.map(({ key, label }) => {
+                      const active = currentFields.includes(key);
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          data-ocid={`profile.badge_field_${key}.toggle`}
+                          onClick={() => toggle(key)}
+                          className="px-3 py-1.5 rounded-full text-xs font-medium transition-all"
+                          style={{
+                            background: active
+                              ? "rgba(14,165,233,0.25)"
+                              : "rgba(255,255,255,0.07)",
+                            border: active
+                              ? "1.5px solid rgba(14,165,233,0.6)"
+                              : "1px solid rgba(255,255,255,0.12)",
+                            color: active ? "#38bdf8" : "#94a3b8",
+                          }}
+                        >
+                          {active ? "✓ " : ""}
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Parking Management */}
+            {(() => {
+              const spaces: ParkingSpace[] = company?.parkingSpaces ?? [];
+              const addSpace = () => {
+                if (!newParkingLabel.trim()) return;
+                const newSpace: ParkingSpace = {
+                  id: generateId(),
+                  label: newParkingLabel.trim(),
+                  occupied: false,
+                };
+                const fresh = findCompanyById(session.companyId);
+                if (fresh) {
+                  saveCompany({
+                    ...fresh,
+                    parkingSpaces: [...(fresh.parkingSpaces ?? []), newSpace],
+                  });
+                  setNewParkingLabel("");
+                  reload();
+                }
+              };
+              const removeSpace = (id: string) => {
+                const fresh = findCompanyById(session.companyId);
+                if (fresh) {
+                  saveCompany({
+                    ...fresh,
+                    parkingSpaces: (fresh.parkingSpaces ?? []).filter(
+                      (s) => s.id !== id,
+                    ),
+                  });
+                  reload();
+                }
+              };
+              const occupied = spaces.filter((s) => s.occupied).length;
+              return (
+                <div
+                  className="mt-6 p-5 rounded-2xl"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-white font-semibold">
+                      🚗 Otopark Yönetimi
+                    </h3>
+                    <span className="text-xs text-slate-400">
+                      {occupied}/{spaces.length} dolu
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {spaces.map((sp, i) => (
+                      <div
+                        key={sp.id}
+                        data-ocid={`profile.parking_space.${i + 1}`}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium"
+                        style={{
+                          background: sp.occupied
+                            ? "rgba(239,68,68,0.15)"
+                            : "rgba(34,197,94,0.15)",
+                          border: `1px solid ${sp.occupied ? "rgba(239,68,68,0.35)" : "rgba(34,197,94,0.35)"}`,
+                          color: sp.occupied ? "#f87171" : "#4ade80",
+                        }}
+                      >
+                        {sp.label}
+                        <button
+                          type="button"
+                          data-ocid={`profile.parking_delete.${i + 1}`}
+                          onClick={() => removeSpace(sp.id)}
+                          className="ml-1 opacity-60 hover:opacity-100 text-xs"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    {spaces.length === 0 && (
+                      <p className="text-slate-500 text-xs">
+                        Otopark alanı tanımlanmamış
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      data-ocid="profile.parking_label.input"
+                      value={newParkingLabel}
+                      onChange={(e) => setNewParkingLabel(e.target.value)}
+                      placeholder="Örn: A-01, B-12"
+                      className="flex-1 px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                      onKeyDown={(e) => e.key === "Enter" && addSpace()}
+                    />
+                    <button
+                      type="button"
+                      data-ocid="profile.parking_add.button"
+                      onClick={addSpace}
+                      className="px-4 py-2 rounded-xl text-white text-sm font-medium"
+                      style={{
+                        background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                      }}
+                    >
+                      Ekle
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Department Management */}
             <div
