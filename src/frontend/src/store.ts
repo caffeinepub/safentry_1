@@ -624,3 +624,127 @@ export function saveStaffMessage(msg: StaffMessage) {
     JSON.stringify([...list, msg].slice(-500)),
   );
 }
+
+// ─── Security Incidents ────────────────────────────────────────────────────────
+export function getIncidents(
+  companyId: string,
+): import("./types").SecurityIncident[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_incidents_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveIncident(inc: import("./types").SecurityIncident) {
+  const list = getIncidents(inc.companyId).filter((x) => x.id !== inc.id);
+  localStorage.setItem(
+    `safentry_incidents_${inc.companyId}`,
+    JSON.stringify([inc, ...list]),
+  );
+}
+export function deleteIncident(companyId: string, id: string) {
+  const list = getIncidents(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_incidents_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Pre-Registrations ─────────────────────────────────────────────────────────
+export function getPreRegs(
+  companyId: string,
+): import("./types").PreRegistration[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_preregs_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function savePreReg(pr: import("./types").PreRegistration) {
+  const list = getPreRegs(pr.companyId).filter((x) => x.token !== pr.token);
+  localStorage.setItem(
+    `safentry_preregs_${pr.companyId}`,
+    JSON.stringify([...list, pr]),
+  );
+}
+export function findPreRegByToken(
+  token: string,
+): import("./types").PreRegistration | null {
+  const companies = getCompanies();
+  for (const c of companies) {
+    const pr = getPreRegs(c.companyId).find((p) => p.token === token);
+    if (pr) return pr;
+  }
+  return null;
+}
+
+// ─── Queue ─────────────────────────────────────────────────────────────────────
+function getTodayQueueKey(companyId: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `safentry_queue_${companyId}_${today}`;
+}
+export function getQueue(companyId: string): import("./types").QueueEntry[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(getTodayQueueKey(companyId)) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function addToQueue(entry: import("./types").QueueEntry) {
+  const list = getQueue(entry.companyId);
+  localStorage.setItem(
+    getTodayQueueKey(entry.companyId),
+    JSON.stringify([...list, entry]),
+  );
+}
+export function removeFromQueue(companyId: string, visitorId: string) {
+  const list = getQueue(companyId).filter((x) => x.visitorId !== visitorId);
+  localStorage.setItem(getTodayQueueKey(companyId), JSON.stringify(list));
+}
+export function getNextQueueNo(companyId: string): number {
+  const list = getQueue(companyId);
+  return list.length === 0 ? 1 : Math.max(...list.map((x) => x.queueNo)) + 1;
+}
+
+// ─── Kiosk Approval Status ─────────────────────────────────────────────────────
+export function setKioskApprovalStatus(
+  visitorId: string,
+  status: "approved" | "rejected",
+  reason?: string,
+) {
+  const key = `safentry_kiosk_status_${visitorId}`;
+  localStorage.setItem(key, JSON.stringify({ status, reason: reason ?? "" }));
+  // auto-cleanup after 5 minutes
+  setTimeout(() => localStorage.removeItem(key), 5 * 60 * 1000);
+}
+export function getKioskApprovalStatus(
+  visitorId: string,
+): { status: "approved" | "rejected"; reason: string } | null {
+  try {
+    const raw = localStorage.getItem(`safentry_kiosk_status_${visitorId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Department Quota Check ────────────────────────────────────────────────────
+export function getDeptTodayVisitorCount(
+  companyId: string,
+  deptName: string,
+): number {
+  const today = new Date();
+  return getVisitors(companyId).filter((v) => {
+    if (v.department !== deptName) return false;
+    if (v.status === "departed") return false;
+    const vd = new Date(v.arrivalTime);
+    return (
+      vd.getFullYear() === today.getFullYear() &&
+      vd.getMonth() === today.getMonth() &&
+      vd.getDate() === today.getDate()
+    );
+  }).length;
+}

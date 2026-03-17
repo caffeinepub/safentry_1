@@ -44,6 +44,7 @@ export interface Department {
   name: string;
   floor: string;
   capacity: number;
+  dailyQuota?: number; // 0 = unlimited
 }
 
 export interface ContractorPermit {
@@ -249,7 +250,8 @@ export type AppScreen =
   | "kiosk"
   | "verify"
   | "invite"
-  | "appointment-confirm";
+  | "appointment-confirm"
+  | "prereg";
 
 export interface ParkingSpace {
   id: string;
@@ -268,4 +270,36 @@ export interface ApprovedVisitor {
   category?: string;
   badgeValidDays?: number;
   badgeIssuedAt?: number;
+}
+
+export interface SecurityIncident {
+  id: string;
+  companyId: string;
+  title: string;
+  description: string;
+  location?: string;
+  severity: "low" | "medium" | "high" | "critical";
+  loggedBy: string;
+  timestamp: number;
+}
+
+export interface PreRegistration {
+  token: string;
+  companyId: string;
+  appointmentId?: string;
+  name: string;
+  tc: string;
+  phone: string;
+  company: string;
+  purpose: string;
+  status: "pending" | "used";
+  createdAt: number;
+}
+
+export interface QueueEntry {
+  queueNo: number;
+  visitorId: string;
+  visitorName: string;
+  waitingSince: number;
+  companyId: string;
 }

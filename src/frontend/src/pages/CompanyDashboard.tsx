@@ -37,6 +37,7 @@ import {
   clearSession,
   deleteApprovedVisitor,
   deleteDepartment,
+  deleteIncident,
   deletePermit,
   findApprovedByIdNumber,
   findCompanyById,
@@ -48,6 +49,8 @@ import {
   getCompanyDepartments,
   getCompanyFloors,
   getDepartments,
+  getDeptTodayVisitorCount,
+  getIncidents,
   getKioskContent,
   getLockdown,
   getPermits,
@@ -65,6 +68,7 @@ import {
   saveApprovedVisitor,
   saveCompany,
   saveDepartment,
+  saveIncident,
   saveInviteCode,
   saveKioskContent,
   savePermit,
@@ -87,6 +91,7 @@ import type {
   ExitQuestion,
   ParkingSpace,
   ScreeningQuestion,
+  SecurityIncident,
   Staff,
   Visitor,
   MeetingTemplate as _MeetingTemplate,
@@ -4896,6 +4901,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                       <p className="text-white font-semibold">{d.name}</p>
                       <p className="text-slate-400 text-xs mt-0.5">
                         📍 {d.floor} &bull; 👥 Kapasite: {d.capacity}
+                        {d.dailyQuota
+                          ? ` • 📋 Günlük Kota: ${getDeptTodayVisitorCount(session.companyId, d.name)}/${d.dailyQuota}`
+                          : ""}
                       </p>
                       {(() => {
                         const occ = visitors.filter(

@@ -7,18 +7,26 @@ import { LANGUAGES, getLang, t } from "../i18n";
 import {
   addAlertHistory,
   addNotification,
+  addToQueue,
   findCompanyById,
+  findPreRegByToken,
   getCustomCategories,
+  getDepartments,
+  getDeptTodayVisitorCount,
+  getKioskApprovalStatus,
   getKioskContent,
   getLockdown,
+  getNextQueueNo,
   getStaffByCompany,
   getVisitorPins,
   getVisitors,
   isBlacklisted,
+  savePreReg,
   saveVisitor,
 } from "../store";
 import type { AppScreen, Visitor } from "../types";
 import { generateId, generateVisitorId } from "../utils";
+import { validateTcId } from "../utils/tcValidation";
 
 const KIOSK_PENDING_KEY = "safentry_kiosk_pending";
 
@@ -80,6 +88,12 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
 
   const [countdown, setCountdown] = useState(60);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [queueNo, setQueueNo] = useState<number | null>(null);
+  const [currentVisitorId, setCurrentVisitorId] = useState<string | null>(null);
+  const [approvalStatus, setApprovalStatus] = useState<
+    "waiting" | "approved" | "rejected"
+  >("waiting");
+  const [rejectionReason, setRejectionReason] = useState<string>("");
 
   // QR Scanner
   const [showQrScanner, setShowQrScanner] = useState(false);
@@ -104,6 +118,26 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   useEffect(() => {
     if (qrScanner.qrResults.length > 0) {
       const code = qrScanner.qrResults[0].data;
+      // Try to match against pre-registrations
+      const preReg = findPreRegByToken(code);
+      if (
+        preReg &&
+        preReg.companyId === companyId &&
+        preReg.status !== "used"
+      ) {
+        setForm((f) => ({
+          ...f,
+          name: preReg.name,
+          idNumber: preReg.tc,
+          phone: preReg.phone,
+          visitReason: preReg.purpose,
+        }));
+        savePreReg({ ...preReg, status: "used" });
+        setShowQrScanner(false);
+        qrScanner.stopScanning();
+        setScreen("form");
+        return;
+      }
       // Try to match against appointments
       const raw = localStorage.getItem("safentry_appointments") ?? "[]";
       try {
@@ -168,7 +202,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   // Waiting screen countdown
   useEffect(() => {
     if (screen === "waiting") {
-      setCountdown(60);
+      setCountdown(120);
       countdownRef.current = setInterval(() => {
         setCountdown((c) => {
           if (c <= 1) {
@@ -185,9 +219,36 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     }
   }, [screen, resetToWelcome]);
 
+  // Approval status polling
+  useEffect(() => {
+    if (screen !== "waiting" || !currentVisitorId) return;
+    setApprovalStatus("waiting");
+    const poll = setInterval(() => {
+      const status = getKioskApprovalStatus(currentVisitorId);
+      if (status) {
+        clearInterval(poll);
+        if (status.status === "approved") {
+          setApprovalStatus("approved");
+          setTimeout(() => resetToWelcome(), 5000);
+        } else {
+          setApprovalStatus("rejected");
+          setRejectionReason(status.reason || "");
+          setTimeout(() => resetToWelcome(), 6000);
+        }
+      }
+    }, 3000);
+    return () => clearInterval(poll);
+  }, [screen, currentVisitorId, resetToWelcome]);
+
   const submitForm = () => {
     if (!form.name || !form.idNumber || !form.phone) {
       setFormError("Lütfen zorunlu alanları doldurun.");
+      return;
+    }
+    if (form.idNumber.length === 11 && !validateTcId(form.idNumber)) {
+      setFormError(
+        "Geçersiz TC Kimlik Numarası. Lütfen kontrol edip tekrar deneyin.",
+      );
       return;
     }
     if (!form.ndaAccepted) {
@@ -249,6 +310,33 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       specialNeeds: form.specialNeeds !== "Yok" ? form.specialNeeds : undefined,
       visitorPhoto: form.visitorPhoto || undefined,
     };
+    // Check department quota
+    if (visitor.department) {
+      const depts = getDepartments(companyId);
+      const dept = depts.find((d) => d.name === visitor.department);
+      if (dept?.dailyQuota && dept.dailyQuota > 0) {
+        const used = getDeptTodayVisitorCount(companyId, dept.name);
+        if (used >= dept.dailyQuota) {
+          setFormError(
+            `${dept.name} departmanı günlük kotaya ulaştı (${dept.dailyQuota} ziyaretçi). Lütfen güvenlik personeliyle görüşün.`,
+          );
+          return;
+        }
+      }
+    }
+
+    // Assign queue number
+    const nextQueueNo = getNextQueueNo(companyId);
+    addToQueue({
+      queueNo: nextQueueNo,
+      visitorId,
+      visitorName: visitor.name,
+      waitingSince: now,
+      companyId,
+    });
+    setQueueNo(nextQueueNo);
+    setCurrentVisitorId(visitorId);
+
     // Save to pending localStorage instead of directly saving
     const pending = JSON.parse(localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]");
     pending.push({ ...visitor, _submittedAt: now });
@@ -644,39 +732,97 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
         <div
           className="max-w-md w-full text-center p-12 rounded-3xl"
           style={{
-            background: "rgba(14,165,233,0.07)",
-            border: "1.5px solid rgba(14,165,233,0.35)",
+            background:
+              approvalStatus === "approved"
+                ? "rgba(34,197,94,0.07)"
+                : approvalStatus === "rejected"
+                  ? "rgba(239,68,68,0.07)"
+                  : "rgba(14,165,233,0.07)",
+            border: `1.5px solid ${approvalStatus === "approved" ? "rgba(34,197,94,0.35)" : approvalStatus === "rejected" ? "rgba(239,68,68,0.35)" : "rgba(14,165,233,0.35)"}`,
           }}
         >
-          {/* Animated spinner */}
-          <div className="flex justify-center mb-8">
-            <div
-              className="w-20 h-20 rounded-full border-4 border-t-transparent animate-spin"
-              style={{
-                borderColor: "rgba(14,165,233,0.3)",
-                borderTopColor: "#0ea5e9",
-              }}
-            />
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-3">
-            Hoş Geldiniz, <span style={{ color: "#0ea5e9" }}>{form.name}</span>!
-          </h2>
-          <p className="text-slate-300 text-base mb-2">
-            Bilgileriniz alındı, güvenlik onayı bekleniyor...
-          </p>
-          <p className="text-slate-500 text-sm mb-8">
-            Lütfen güvenlik görevlisi sizi onaylayana kadar bekleyin.
-          </p>
-          <div
-            className="inline-flex items-center gap-2 px-5 py-3 rounded-full text-sm font-medium"
-            style={{
-              background: "rgba(245,158,11,0.15)",
-              color: "#f59e0b",
-              border: "1px solid rgba(245,158,11,0.3)",
-            }}
-          >
-            ⏱ {countdown} saniye sonra sıfırlanacak
-          </div>
+          {approvalStatus === "approved" ? (
+            <>
+              <div className="text-6xl mb-6 animate-bounce">✅</div>
+              <h2 className="text-2xl font-bold text-white mb-3">
+                Giriş Onaylandı!
+              </h2>
+              <p className="text-green-400 text-base mb-2">
+                Güvenlik personeliniz sizi karşılamak için yolda.
+              </p>
+              <p className="text-slate-500 text-sm">Lütfen bekleyiniz...</p>
+            </>
+          ) : approvalStatus === "rejected" ? (
+            <>
+              <div className="text-6xl mb-6">❌</div>
+              <h2 className="text-2xl font-bold text-white mb-3">
+                Giriş Reddedildi
+              </h2>
+              {rejectionReason && (
+                <p className="text-red-400 text-base mb-2">{rejectionReason}</p>
+              )}
+              <p className="text-slate-400 text-sm mb-4">
+                Lütfen güvenlik personeliyle iletişime geçin.
+              </p>
+            </>
+          ) : (
+            <>
+              {/* Animated spinner */}
+              <div className="flex justify-center mb-8">
+                <div
+                  className="w-20 h-20 rounded-full border-4 border-t-transparent animate-spin"
+                  style={{
+                    borderColor: "rgba(14,165,233,0.3)",
+                    borderTopColor: "#0ea5e9",
+                  }}
+                />
+              </div>
+              <h2 className="text-2xl font-bold text-white mb-3">
+                Hoş Geldiniz,{" "}
+                <span style={{ color: "#0ea5e9" }}>{form.name}</span>!
+              </h2>
+              {queueNo !== null && (
+                <div
+                  className="inline-flex items-center gap-3 px-6 py-4 rounded-2xl mb-4"
+                  style={{
+                    background: "rgba(245,158,11,0.12)",
+                    border: "1.5px solid rgba(245,158,11,0.3)",
+                  }}
+                >
+                  <span
+                    className="text-4xl font-black"
+                    style={{ color: "#f59e0b" }}
+                  >
+                    {queueNo}
+                  </span>
+                  <div className="text-left">
+                    <p className="text-amber-300 font-semibold text-sm">
+                      Sıra Numaranız
+                    </p>
+                    <p className="text-amber-200/60 text-xs">
+                      Tahmini bekleme: ~{queueNo * 3} dk
+                    </p>
+                  </div>
+                </div>
+              )}
+              <p className="text-slate-300 text-base mb-2">
+                Bilgileriniz alındı, güvenlik onayı bekleniyor...
+              </p>
+              <p className="text-slate-500 text-sm mb-8">
+                Lütfen güvenlik görevlisi sizi onaylayana kadar bekleyin.
+              </p>
+              <div
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-full text-sm font-medium"
+                style={{
+                  background: "rgba(245,158,11,0.15)",
+                  color: "#f59e0b",
+                  border: "1px solid rgba(245,158,11,0.3)",
+                }}
+              >
+                ⏱ {countdown} saniye sonra sıfırlanacak
+              </div>
+            </>
+          )}
         </div>
       </div>
     );

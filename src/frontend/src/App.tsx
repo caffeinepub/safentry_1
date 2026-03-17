@@ -11,6 +11,7 @@ import CompanyLogin from "./pages/CompanyLogin";
 import CompanyRegister from "./pages/CompanyRegister";
 import KioskMode from "./pages/KioskMode";
 import LanguageSelect from "./pages/LanguageSelect";
+import PreRegPage from "./pages/PreRegPage";
 import StaffDashboard from "./pages/StaffDashboard";
 import StaffLogin from "./pages/StaffLogin";
 import StaffRegister from "./pages/StaffRegister";
@@ -31,6 +32,13 @@ function getInviteToken(): string | null {
   return match ? match[1] : null;
 }
 
+// Check if current URL is a pre-registration link
+function getPreRegToken(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/prereg\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
 export default function App() {
   const [, forceRender] = useState(0);
   const refresh = () => forceRender((x) => x + 1);
@@ -38,10 +46,12 @@ export default function App() {
   const hasLang = !!localStorage.getItem("safentry_lang");
   const session = getSession();
   const inviteToken = getInviteToken();
+  const preRegToken = getPreRegToken();
 
   const getInitialScreen = (): AppScreen => {
     if (confirmToken) return "appointment-confirm";
     if (inviteToken) return "invite";
+    if (preRegToken) return "prereg";
     if (!hasLang) return "language";
     if (!session) return "welcome";
     return session.type === "company" ? "company-dashboard" : "staff-dashboard";
@@ -129,6 +139,13 @@ export default function App() {
           token={confirmToken ?? ""}
           onNavigate={navigate}
         />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "prereg")
+    return (
+      <>
+        <PreRegPage token={preRegToken ?? ""} onNavigate={navigate} />
         <Toaster richColors position="top-right" />
       </>
     );

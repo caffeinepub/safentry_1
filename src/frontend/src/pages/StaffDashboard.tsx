@@ -29,6 +29,7 @@ import {
   addAlertHistory,
   addNotification,
   clearSession,
+  deleteIncident,
   findApprovedByIdNumber,
   findCompanyById,
   findPermitByIdNumber,
@@ -40,6 +41,9 @@ import {
   getCompanyDepartments,
   getCompanyFloors,
   getCustomCategories,
+  getDepartments,
+  getDeptTodayVisitorCount,
+  getIncidents,
   getInvitations,
   getLockdown,
   getSession,
@@ -48,14 +52,17 @@ import {
   getVisitors,
   isBlacklisted,
   refreshSession,
+  removeFromQueue,
   resetStaffCode,
   saveAppointment,
   saveCompany,
+  saveIncident,
   saveInvitation,
   saveSession,
   saveStaff,
   saveStaffMessage,
   saveVisitor,
+  setKioskApprovalStatus,
 } from "../store";
 import type {
   AlertHistoryEntry,
@@ -66,6 +73,7 @@ import type {
   ContractorPermit,
   ExitQuestion,
   Invitation,
+  SecurityIncident,
   Staff,
   Visitor,
 } from "../types";
@@ -78,6 +86,7 @@ import {
   hoursSince,
 } from "../utils";
 import { printFormalDocument } from "../utils/formalDocument";
+import { validateTcId } from "../utils/tcValidation";
 import { generateVisitorBadgePDF } from "../utils/visitorBadge";
 
 const LABEL_COLORS: Record<string, string> = {
@@ -145,7 +154,8 @@ type Tab =
   | "invitations"
   | "gorevler"
   | "mycalendar"
-  | "messages";
+  | "messages"
+  | "incidents";
 
 const EMPTY_FORM = {
   name: "",
@@ -352,6 +362,13 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Feature 5: Staff Tasks
   const [taskTab, setTaskTab] = useState<"all" | "mine" | "done">("all");
+  const [incidents, setIncidents] = useState<SecurityIncident[]>([]);
+  const [incidentForm, setIncidentForm] = useState({
+    title: "",
+    description: "",
+    location: "",
+    severity: "medium" as SecurityIncident["severity"],
+  });
   const [taskForm, setTaskForm] = useState({
     title: "",
     description: "",
@@ -496,6 +513,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]",
     );
     setKioskPending(all.filter((v) => v.companyId === session.companyId));
+  }, [session.companyId]);
+
+  const reloadIncidents = useCallback(() => {
+    setIncidents(getIncidents(session.companyId));
   }, [session.companyId]);
 
   const reload = useCallback(() => {
@@ -769,6 +790,26 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         "Bu alan zorunludur — lütfen ad soyad, TC/pasaport, telefon ve ev sahibi alanlarını doldurun.",
       );
       return;
+    }
+    if (form.idNumber.length === 11 && !validateTcId(form.idNumber)) {
+      setFormError(
+        "Geçersiz TC Kimlik Numarası. Lütfen kontrol edip tekrar deneyin.",
+      );
+      return;
+    }
+    // Department quota check
+    if (form.department) {
+      const depts = getDepartments(session.companyId);
+      const dept = depts.find((d) => d.name === form.department);
+      if (dept?.dailyQuota && dept.dailyQuota > 0) {
+        const used = getDeptTodayVisitorCount(session.companyId, dept.name);
+        if (used >= dept.dailyQuota) {
+          setFormError(
+            `${dept.name} departmanı günlük kotaya ulaştı (${dept.dailyQuota}/${dept.dailyQuota} ziyaretçi).`,
+          );
+          return;
+        }
+      }
     }
     if (!form.department || !form.floor) {
       setFormError("Departman ve kat seçimi zorunludur.");
@@ -1257,22 +1298,32 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     );
     const updated = all.filter((x) => x.visitorId !== v.visitorId);
     localStorage.setItem(KIOSK_PENDING_KEY, JSON.stringify(updated));
+    setKioskApprovalStatus(v.visitorId, "approved");
+    removeFromQueue(session.companyId, v.visitorId);
+    toast.success(`${v.name} giriş için onaylandı`);
     reload();
   };
 
-  const rejectKioskVisitor = (v: KioskPendingVisitor) => {
+  const rejectKioskVisitor = (v: KioskPendingVisitor, reason?: string) => {
     addAuditLog(
       session.companyId,
       staff?.name ?? "Personel",
       session.staffId ?? "",
       "kiosk_rejected",
-      `${v.name} kiosk başvurusu reddedildi`,
+      `${v.name} kiosk başvurusu reddedildi${reason ? `: ${reason}` : ""}`,
     );
     const all: KioskPendingVisitor[] = JSON.parse(
       localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]",
     );
     const updated = all.filter((x) => x.visitorId !== v.visitorId);
     localStorage.setItem(KIOSK_PENDING_KEY, JSON.stringify(updated));
+    setKioskApprovalStatus(
+      v.visitorId,
+      "rejected",
+      reason || "Güvenlik tarafından reddedildi",
+    );
+    removeFromQueue(session.companyId, v.visitorId);
+    toast.error(`${v.name} girişi reddedildi`);
     reload();
   };
 
@@ -3273,6 +3324,24 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 </button>
               ))}
             </div>
+            {kioskPending.length > 0 && (
+              <span
+                className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold text-white animate-pulse"
+                style={{ background: "#f59e0b" }}
+                title="Kiosk onayı bekleyen ziyaretçi"
+              >
+                {kioskPending.length}
+              </span>
+            )}
+            <button
+              type="button"
+              title="Güvenlik Olayı Kaydet"
+              onClick={() => setTab("incidents")}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-red-400 border border-red-500/30 hover:bg-red-900/20 transition-colors"
+              data-ocid="staff.quick_incident.button"
+            >
+              🚨
+            </button>
             <NotificationCenter companyId={session.companyId} />
             <button
               type="button"
@@ -4485,7 +4554,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                           <button
                             type="button"
                             data-ocid={`kiosk.approval.cancel_button.${i + 1}`}
-                            onClick={() => rejectKioskVisitor(v)}
+                            onClick={() => {
+                              const reason = window.prompt(
+                                "Reddetme nedeni (isteğe bağlı):",
+                              );
+                              rejectKioskVisitor(v, reason ?? undefined);
+                            }}
                             className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 border border-red-500/30 hover:bg-red-900/20"
                           >
                             Reddet
@@ -6572,6 +6646,278 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   Gönder
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* INCIDENTS TAB */}
+          {tab === "incidents" && (
+            <div data-ocid="incidents.section" className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-white font-bold text-lg">
+                  🚨 Güvenlik Olayları
+                </h2>
+              </div>
+              {/* Quick log form */}
+              <div
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(239,68,68,0.07)",
+                  border: "1.5px solid rgba(239,68,68,0.2)",
+                }}
+              >
+                <h3 className="text-red-400 font-semibold text-sm mb-4">
+                  ➕ Yeni Olay Kaydet
+                </h3>
+                <div className="space-y-3">
+                  <input
+                    data-ocid="incident.title.input"
+                    value={incidentForm.title}
+                    onChange={(e) =>
+                      setIncidentForm((f) => ({ ...f, title: e.target.value }))
+                    }
+                    placeholder="Olay başlığı"
+                    className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-red-400"
+                  />
+                  <textarea
+                    data-ocid="incident.description.textarea"
+                    value={incidentForm.description}
+                    onChange={(e) =>
+                      setIncidentForm((f) => ({
+                        ...f,
+                        description: e.target.value,
+                      }))
+                    }
+                    placeholder="Olay açıklaması..."
+                    rows={3}
+                    className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-red-400 resize-none"
+                  />
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      data-ocid="incident.location.input"
+                      value={incidentForm.location}
+                      onChange={(e) =>
+                        setIncidentForm((f) => ({
+                          ...f,
+                          location: e.target.value,
+                        }))
+                      }
+                      placeholder="Konum (isteğe bağlı)"
+                      className="px-3 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-red-400"
+                    />
+                    <select
+                      data-ocid="incident.severity.select"
+                      value={incidentForm.severity}
+                      onChange={(e) =>
+                        setIncidentForm((f) => ({
+                          ...f,
+                          severity: e.target
+                            .value as SecurityIncident["severity"],
+                        }))
+                      }
+                      className="px-3 py-2.5 rounded-xl bg-[#0a0f1e] border border-white/15 text-white text-sm focus:outline-none focus:border-red-400"
+                    >
+                      <option value="low">🟢 Düşük</option>
+                      <option value="medium">🟡 Orta</option>
+                      <option value="high">🟠 Yüksek</option>
+                      <option value="critical">🔴 Kritik</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    data-ocid="incident.submit_button"
+                    onClick={() => {
+                      if (!incidentForm.title.trim()) {
+                        toast.error("Olay başlığı zorunludur");
+                        return;
+                      }
+                      const inc: SecurityIncident = {
+                        id: generateId(),
+                        companyId: session.companyId,
+                        title: incidentForm.title.trim(),
+                        description: incidentForm.description.trim(),
+                        location: incidentForm.location.trim() || undefined,
+                        severity: incidentForm.severity,
+                        loggedBy: staff?.name ?? "Personel",
+                        timestamp: Date.now(),
+                      };
+                      saveIncident(inc);
+                      setIncidentForm({
+                        title: "",
+                        description: "",
+                        location: "",
+                        severity: "medium",
+                      });
+                      reloadIncidents();
+                      toast.success("Olay kaydedildi");
+                    }}
+                    className="w-full py-2.5 rounded-xl text-sm font-semibold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#ef4444,#dc2626)",
+                    }}
+                  >
+                    Olayı Kaydet
+                  </button>
+                </div>
+              </div>
+
+              {/* Incidents list */}
+              {incidents.length === 0 ? (
+                <div
+                  data-ocid="incidents.empty_state"
+                  className="text-center py-12 text-slate-500 text-sm"
+                >
+                  <div className="text-4xl mb-3">🛡️</div>
+                  <p className="font-medium text-slate-400 mb-1">
+                    Kayıtlı olay yok
+                  </p>
+                  <p>Güvenlik olaylarını yukarıdaki formdan kaydedin.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {incidents.map((inc, i) => {
+                    const severityColors: Record<
+                      SecurityIncident["severity"],
+                      {
+                        bg: string;
+                        border: string;
+                        text: string;
+                        label: string;
+                      }
+                    > = {
+                      low: {
+                        bg: "rgba(34,197,94,0.08)",
+                        border: "rgba(34,197,94,0.3)",
+                        text: "#22c55e",
+                        label: "🟢 Düşük",
+                      },
+                      medium: {
+                        bg: "rgba(245,158,11,0.08)",
+                        border: "rgba(245,158,11,0.3)",
+                        text: "#f59e0b",
+                        label: "🟡 Orta",
+                      },
+                      high: {
+                        bg: "rgba(249,115,22,0.08)",
+                        border: "rgba(249,115,22,0.3)",
+                        text: "#f97316",
+                        label: "🟠 Yüksek",
+                      },
+                      critical: {
+                        bg: "rgba(239,68,68,0.10)",
+                        border: "rgba(239,68,68,0.4)",
+                        text: "#ef4444",
+                        label: "🔴 Kritik",
+                      },
+                    };
+                    const sc = severityColors[inc.severity];
+                    return (
+                      <div
+                        key={inc.id}
+                        data-ocid={`incidents.item.${i + 1}`}
+                        className="p-4 rounded-2xl"
+                        style={{
+                          background: sc.bg,
+                          border: `1.5px solid ${sc.border}`,
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span
+                                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                                style={{
+                                  background: sc.border,
+                                  color: sc.text,
+                                }}
+                              >
+                                {sc.label}
+                              </span>
+                              {inc.location && (
+                                <span className="text-slate-500 text-xs">
+                                  📍 {inc.location}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-white font-semibold text-sm">
+                              {inc.title}
+                            </p>
+                            {inc.description && (
+                              <p className="text-slate-400 text-xs mt-1 leading-relaxed">
+                                {inc.description}
+                              </p>
+                            )}
+                            <p className="text-slate-600 text-xs mt-2">
+                              {inc.loggedBy} —{" "}
+                              {new Date(inc.timestamp).toLocaleString("tr-TR")}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            data-ocid={`incidents.delete_button.${i + 1}`}
+                            onClick={() => {
+                              deleteIncident(session.companyId, inc.id);
+                              reloadIncidents();
+                              toast.success("Olay silindi");
+                            }}
+                            className="text-slate-600 hover:text-red-400 transition-colors text-xs px-2 py-1 rounded-lg hover:bg-red-900/20"
+                          >
+                            Sil
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Export button */}
+              {incidents.length > 0 && (
+                <button
+                  type="button"
+                  data-ocid="incidents.export_button"
+                  onClick={() => {
+                    const rows = [
+                      [
+                        "Tarih",
+                        "Başlık",
+                        "Açıklama",
+                        "Konum",
+                        "Ciddiyet",
+                        "Kaydeden",
+                      ],
+                      ...incidents.map((inc) => [
+                        new Date(inc.timestamp).toLocaleString("tr-TR"),
+                        inc.title,
+                        inc.description,
+                        inc.location ?? "",
+                        inc.severity,
+                        inc.loggedBy,
+                      ]),
+                    ];
+                    const csv = rows
+                      .map((r) =>
+                        r
+                          .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+                          .join(","),
+                      )
+                      .join("\n");
+                    const blob = new Blob([csv], { type: "text/csv" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "olay_raporu.csv";
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="w-full py-2.5 rounded-xl text-sm font-medium text-slate-300 transition-colors hover:text-white"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  📥 Olay Raporu İndir (CSV)
+                </button>
+              )}
             </div>
           )}
 

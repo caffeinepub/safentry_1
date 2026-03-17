@@ -1,36 +1,32 @@
-# Safentry v28
+# Safentry
 
 ## Current State
-Safentry is a frontend-only corporate visitor management system (v27) with localStorage persistence. It has extensive features across company and staff dashboards including visitor registration, blacklist, appointments, kiosk mode, notifications, audit checklists, shift planning, PIN-based fast entry, visitor segmentation analytics, and kiosk content customization.
+V28 is live. The app is a multi-tenant corporate visitor management system with comprehensive features: visitor registration, blacklist, kiosk mode, appointments, notifications, audit trail, messaging, lobby display, shift planning, security checklists, comment management, fast re-entry PIN, segmentation analytics, kiosk content customization, pre-registration links, queue management, departmental capacity, etc.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Visitor Self Check-out** -- Kiosk mode gets a "Check Out" flow: visitor enters their PIN or scans their badge QR to self check-out without staff involvement.
-2. **Floor/Area-based Capacity** -- In addition to building-wide capacity, admin can define areas/floors with individual capacity limits; current occupancy per area shown in company dashboard.
-3. **Audit Trail (simulated)** -- A dedicated log panel in company dashboard recording critical actions (blacklist add/remove, emergency mode toggle, data deletion, capacity changes) with timestamp, actor, and action description.
-4. **Personal Staff Calendar** -- Each staff member sees only their own appointments in a personal calendar view within the staff dashboard (separate from the company-wide appointment calendar).
-5. **Appointment Confirmation Page (shareable link)** -- When creating an appointment, a shareable confirmation link is generated; opening it shows a clean read-only page with appointment details for the visitor.
-6. **Internal Messaging between Security Staff** -- A simple in-app message/note feed within the staff dashboard; staff can post short messages visible to all staff of the same company (stored in localStorage per company).
+1. **Ziyaretçi ön kayıt (pre-registration)** -- When personnel creates an appointment, a shareable pre-registration form link is generated. Visitor fills in their details before arriving. When they reach the kiosk, their info is pre-filled and they just confirm.
+2. **Bekleme sırası / sıra numarası** -- Queue number system on kiosk. When multiple visitors are waiting, each gets a queue number and estimated wait time (based on 3 min avg per visitor). Queue status visible on lobby display.
+3. **Güvenlik olay kaydı** -- Independent security incident log separate from blacklist and emergency mode. Security personnel can log incidents: "unauthorized entry attempt at Gate B", "suspicious vehicle". Each incident logged with date/time/personnel. Viewable/reportable from company admin panel.
+4. **Departman bazlı ziyaretçi kotası** -- Per-department daily visitor limit. Admin sets max visitors per department. When limit reached, new visitors to that department are blocked. Displayed in department management.
+5. **TC kimlik geçerlilik kontrolü** -- Turkish ID number (TC Kimlik No) validation using the official Luhn-like algorithm (11-digit check). Show format error before submission if invalid.
+6. **Kiosk → personel aktif onay akışı** -- When visitor completes kiosk form, create a pending approval request visible in staff dashboard with Accept/Reject buttons. Staff gets notification. Only after acceptance does visitor status become "active". Rejected visitors get a message on kiosk screen.
 
 ### Modify
-- KioskMode: add self check-out option alongside existing visitor registration
-- CompanyDashboard: add audit trail tab and floor/area capacity management
-- StaffDashboard: add personal calendar tab and internal messaging tab
-- Appointment creation: generate shareable confirmation link
-- Store: add helper functions for audit log entries, area capacities, staff messages
+- KioskMode: Add queue number display, pre-registration lookup, TC validation, active approval waiting screen
+- CompanyDashboard: Add security incidents tab, department quota management
+- StaffDashboard: Add active approval queue with Accept/Reject, pre-registration link generation on appointments
+- Store/types: Add incident records, queue state, department quotas, pre-registration records, pending approvals
 
 ### Remove
 - Nothing removed
 
 ## Implementation Plan
-1. Add audit trail data structures and logging helper to store.ts
-2. Add area/floor capacity data structures and helpers to store.ts
-3. Add staff messages data structures and helpers to store.ts
-4. Add appointment confirmation link generation and read-only confirmation page
-5. Add self check-out flow to KioskMode
-6. Add audit trail tab to CompanyDashboard
-7. Add floor/area capacity management UI to CompanyDashboard
-8. Add personal calendar tab to StaffDashboard
-9. Add internal messaging tab to StaffDashboard
-10. Wire audit logging calls at key action points (blacklist, emergency, deletion)
+1. Extend types.ts with: SecurityIncident, VisitorPreReg, PendingApproval, queue state
+2. Extend store.ts with CRUD functions for new data types
+3. Add TC validation utility function
+4. Update KioskMode: queue system, pre-reg lookup, TC validation, approval waiting screen
+5. Update StaffDashboard: active approval queue tab/section, pre-reg link on appointments
+6. Update CompanyDashboard: security incidents tab, department quota fields
+7. Update lobby display to show queue status
