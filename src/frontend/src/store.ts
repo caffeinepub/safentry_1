@@ -1,6 +1,7 @@
 import type {
   Announcement,
   Appointment,
+  BelongingsItem,
   BlacklistEntry,
   CategoryTimeRestriction,
   Company,
@@ -747,4 +748,28 @@ export function getDeptTodayVisitorCount(
       vd.getDate() === today.getDate()
     );
   }).length;
+}
+
+// ─── Belongings ────────────────────────────────────────────────────────────────
+export function getBelongings(companyId: string): BelongingsItem[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_belongings_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveBelonging(b: BelongingsItem) {
+  const list = getBelongings(b.companyId).filter((x) => x.id !== b.id);
+  localStorage.setItem(
+    `safentry_belongings_${b.companyId}`,
+    JSON.stringify([...list, b]),
+  );
+}
+export function getVisitorBelongings(
+  companyId: string,
+  visitorId: string,
+): BelongingsItem[] {
+  return getBelongings(companyId).filter((b) => b.visitorId === visitorId);
 }

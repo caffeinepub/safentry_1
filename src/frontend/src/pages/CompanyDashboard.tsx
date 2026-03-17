@@ -8,6 +8,7 @@ import {
   ShieldOff,
   Users,
 } from "lucide-react";
+import React from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
   Bar,
@@ -45,6 +46,7 @@ import {
   getAnnouncements,
   getAppointments,
   getApprovedVisitors,
+  getBelongings,
   getBlacklist,
   getCompanyDepartments,
   getCompanyFloors,
@@ -66,6 +68,7 @@ import {
   saveAnnouncement,
   saveAppointment,
   saveApprovedVisitor,
+  saveBelonging,
   saveCompany,
   saveDepartment,
   saveIncident,
@@ -83,6 +86,7 @@ import type {
   Appointment,
   ApprovedVisitor,
   AuditLog,
+  BelongingsItem,
   BlacklistEntry,
   CategoryTimeRestriction,
   Company,
@@ -160,7 +164,8 @@ type Tab =
   | "profile"
   | "shifts"
   | "checklists"
-  | "reviews";
+  | "reviews"
+  | "belongings";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -182,6 +187,341 @@ function getLast7DaysData(visitors: Visitor[]) {
     days.push({ date: dateStr, count });
   }
   return days;
+}
+
+// ─── BelongingsPanel Component ─────────────────────────────────────────────────
+function BelongingsPanel({
+  companyId,
+  staffList,
+  visitors,
+  saveBelonging: saveBelongingFn,
+  getBelongings: getBelongingsFn,
+}: {
+  companyId: string;
+  staffList: Staff[];
+  visitors: Visitor[];
+  saveBelonging: (b: BelongingsItem) => void;
+  getBelongings: (companyId: string) => BelongingsItem[];
+}) {
+  const [filter, setFilter] = React.useState<"active" | "returned">("active");
+  const [tick, setTick] = React.useState(0);
+  const allBelongings = getBelongingsFn(companyId);
+  const shown =
+    filter === "active"
+      ? allBelongings.filter((b) => !b.returnedAt)
+      : allBelongings.filter((b) => b.returnedAt);
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-4">
+        {(["active", "returned"] as const).map((f) => (
+          <button
+            key={f}
+            type="button"
+            data-ocid={`belongings.${f}.tab`}
+            onClick={() => setFilter(f)}
+            className="px-4 py-2 rounded-xl text-sm font-medium transition-all"
+            style={
+              filter === f
+                ? {
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    color: "#fff",
+                  }
+                : { background: "rgba(255,255,255,0.05)", color: "#94a3b8" }
+            }
+          >
+            {f === "active"
+              ? `📦 Aktif (${allBelongings.filter((b) => !b.returnedAt).length})`
+              : `✅ İade Edildi (${allBelongings.filter((b) => b.returnedAt).length})`}
+          </button>
+        ))}
+      </div>
+      {shown.length === 0 ? (
+        <div
+          data-ocid="belongings.empty_state"
+          className="text-center py-12 text-slate-500"
+        >
+          <div className="text-4xl mb-3">📦</div>
+          <p className="text-sm">Kayıt bulunamadı.</p>
+        </div>
+      ) : (
+        <div className="space-y-3" data-ocid="belongings.list">
+          {shown.map((b, i) => {
+            const v = visitors.find((x) => x.visitorId === b.visitorId);
+            const takenByStaff = staffList.find((s) => s.staffId === b.takenBy);
+            return (
+              <div
+                key={b.id}
+                data-ocid={`belongings.item.${i + 1}`}
+                className="p-4 rounded-2xl flex items-start justify-between gap-4"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1.5px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-white font-semibold text-sm">
+                      {b.visitorName}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                      style={{
+                        background: "rgba(245,158,11,0.2)",
+                        color: "#f59e0b",
+                      }}
+                    >
+                      {b.itemType}
+                    </span>
+                    {b.quantity > 1 && (
+                      <span className="text-slate-400 text-xs">
+                        ×{b.quantity}
+                      </span>
+                    )}
+                  </div>
+                  {b.description && (
+                    <p className="text-slate-400 text-xs mb-1">
+                      {b.description}
+                    </p>
+                  )}
+                  <p className="text-slate-500 text-xs">
+                    Alındı: {new Date(b.takenAt).toLocaleString("tr-TR")} ·{" "}
+                    {takenByStaff?.name ?? b.takenBy}
+                    {b.returnedAt &&
+                      ` · İade: ${new Date(b.returnedAt).toLocaleString("tr-TR")}`}
+                  </p>
+                  {v && (
+                    <p className="text-slate-500 text-xs">
+                      Ziyaretçi durumu:{" "}
+                      {v.status === "active" ? "Binada" : "Ayrıldı"}
+                    </p>
+                  )}
+                </div>
+                {!b.returnedAt && (
+                  <button
+                    type="button"
+                    data-ocid={`belongings.return_button.${i + 1}`}
+                    onClick={() => {
+                      saveBelongingFn({ ...b, returnedAt: Date.now() });
+                      setTick((t) => t + 1);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white shrink-0"
+                    style={{
+                      background: "rgba(34,197,94,0.2)",
+                      border: "1px solid rgba(34,197,94,0.4)",
+                    }}
+                  >
+                    ✅ İade Alındı
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <span className="hidden">{tick}</span>
+    </div>
+  );
+}
+
+// ─── CategoryFieldsEditor Component ────────────────────────────────────────────
+const DEFAULT_CAT_FIELDS: Record<
+  string,
+  { id: string; label: string; required: boolean }[]
+> = {
+  Müteahhit: [
+    { id: "cat_f1", label: "İş İzni / Sertifika No", required: true },
+  ],
+  Teslimat: [{ id: "cat_f2", label: "Sipariş / İrsaliye No", required: false }],
+  Mülakat: [{ id: "cat_f3", label: "Başvurulan Pozisyon", required: false }],
+  "Teknik Destek": [
+    { id: "cat_f4", label: "Arıza / İş Emri No", required: false },
+  ],
+};
+
+function CategoryFieldsEditor({
+  companyId,
+  reload,
+}: { companyId: string; reload: () => void }) {
+  const [selectedCat, setSelectedCat] = React.useState("Müteahhit");
+  const [newLabel, setNewLabel] = React.useState("");
+  const [newRequired, setNewRequired] = React.useState(false);
+
+  const company = findCompanyById(companyId);
+  const categoryFields = company?.categoryFields ?? DEFAULT_CAT_FIELDS;
+  const categories = company?.customCategories?.length
+    ? company.customCategories
+    : [
+        "Misafir",
+        "Müteahhit",
+        "Teslimat",
+        "Mülakat",
+        "Tedarikçi",
+        "Teknik Destek",
+        "Diğer",
+      ];
+  const fields = categoryFields[selectedCat] ?? [];
+
+  const save = (
+    newFields: Record<
+      string,
+      { id: string; label: string; required: boolean }[]
+    >,
+  ) => {
+    const fresh = findCompanyById(companyId);
+    if (fresh) {
+      saveCompany({ ...fresh, categoryFields: newFields });
+      reload();
+    }
+  };
+
+  return (
+    <div
+      className="p-5 rounded-2xl"
+      style={{
+        background: "rgba(255,255,255,0.03)",
+        border: "1px solid rgba(255,255,255,0.1)",
+      }}
+    >
+      <h3 className="text-white font-semibold mb-1">
+        🏷️ Kategoriye Özel Alanlar
+      </h3>
+      <p className="text-slate-500 text-xs mb-4">
+        Her ziyaretçi kategorisi için ek form alanları tanımlayın.
+      </p>
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {categories.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            data-ocid="profile.catfield_cat.tab"
+            onClick={() => setSelectedCat(cat)}
+            className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+            style={
+              selectedCat === cat
+                ? {
+                    background: "rgba(14,165,233,0.25)",
+                    border: "1px solid rgba(14,165,233,0.5)",
+                    color: "#38bdf8",
+                  }
+                : {
+                    background: "rgba(255,255,255,0.05)",
+                    color: "#94a3b8",
+                    border: "1px solid transparent",
+                  }
+            }
+          >
+            {cat}
+          </button>
+        ))}
+      </div>
+      {fields.length === 0 ? (
+        <p className="text-slate-500 text-sm mb-3">
+          Bu kategori için özel alan tanımlanmamış.
+        </p>
+      ) : (
+        <div className="space-y-2 mb-3">
+          {fields.map((cf, i) => (
+            <div
+              key={cf.id}
+              className="flex items-center justify-between p-2 rounded-xl"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div>
+                <span className="text-white text-sm">{cf.label}</span>
+                {cf.required && (
+                  <span className="ml-2 text-red-400 text-xs">Zorunlu</span>
+                )}
+              </div>
+              <button
+                type="button"
+                data-ocid={`profile.catfield_delete.${i + 1}`}
+                onClick={() => {
+                  const updated = {
+                    ...categoryFields,
+                    [selectedCat]: fields.filter((f) => f.id !== cf.id),
+                  };
+                  save(updated);
+                }}
+                className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded"
+                style={{ background: "rgba(239,68,68,0.1)" }}
+              >
+                Sil
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 items-center flex-wrap">
+        <input
+          data-ocid="profile.catfield_label.input"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          onKeyDown={(e) =>
+            e.key === "Enter" &&
+            newLabel.trim() &&
+            (() => {
+              const updated = {
+                ...categoryFields,
+                [selectedCat]: [
+                  ...fields,
+                  {
+                    id: `cat_${Date.now()}`,
+                    label: newLabel.trim(),
+                    required: newRequired,
+                  },
+                ],
+              };
+              save(updated);
+              setNewLabel("");
+            })()
+          }
+          placeholder="Alan adı..."
+          className="flex-1 px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+        />
+        <label className="flex items-center gap-1 text-slate-300 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            data-ocid="profile.catfield_required.checkbox"
+            checked={newRequired}
+            onChange={(e) => setNewRequired(e.target.checked)}
+            className="w-3 h-3"
+          />
+          Zorunlu
+        </label>
+        <button
+          type="button"
+          data-ocid="profile.catfield_add.button"
+          onClick={() => {
+            if (!newLabel.trim()) return;
+            const updated = {
+              ...categoryFields,
+              [selectedCat]: [
+                ...fields,
+                {
+                  id: `cat_${Date.now()}`,
+                  label: newLabel.trim(),
+                  required: newRequired,
+                },
+              ],
+            };
+            save(updated);
+            setNewLabel("");
+          }}
+          className="px-3 py-2 rounded-xl text-white text-sm font-medium"
+          style={{
+            background: "rgba(14,165,233,0.2)",
+            border: "1px solid rgba(14,165,233,0.4)",
+          }}
+        >
+          Ekle
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
@@ -998,6 +1338,10 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "shifts", label: "📅 Vardiya Planı" },
     { key: "checklists", label: "✅ Denetim Çeklistleri" },
     { key: "reviews", label: "💬 Yorumlar" },
+    {
+      key: "belongings",
+      label: `📦 Emanetler (${getBelongings(session.companyId).filter((b) => !b.returnedAt).length})`,
+    },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -5638,6 +5982,29 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         )}
 
+        {tab === "belongings" && (
+          <div>
+            <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+              <div>
+                <h2 className="text-white font-bold text-xl">
+                  📦 Emanet Takibi
+                </h2>
+                <p className="text-slate-400 text-sm mt-0.5">
+                  Ziyaretçilerden alınan eşya ve dokümanlar
+                </p>
+              </div>
+            </div>
+
+            {/* Filter buttons */}
+            <BelongingsPanel
+              companyId={session.companyId}
+              staffList={staffList}
+              visitors={visitors}
+              saveBelonging={saveBelonging}
+              getBelongings={getBelongings}
+            />
+          </div>
+        )}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -6845,6 +7212,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               )}
             </div>
 
+            {/* Kategoriye Özel Alanlar */}
+            <CategoryFieldsEditor
+              companyId={session.companyId}
+              reload={reload}
+            />
             {/* Custom Form Fields */}
             <div
               className="p-5 rounded-2xl"

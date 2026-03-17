@@ -1,32 +1,33 @@
-# Safentry
+# Safentry v29
 
 ## Current State
-V28 is live. The app is a multi-tenant corporate visitor management system with comprehensive features: visitor registration, blacklist, kiosk mode, appointments, notifications, audit trail, messaging, lobby display, shift planning, security checklists, comment management, fast re-entry PIN, segmentation analytics, kiosk content customization, pre-registration links, queue management, departmental capacity, etc.
+Safentry is a multi-tenant corporate visitor management frontend (v28). Data persists in localStorage. All major visitor management features are implemented. Camera component exists and is used for visitor photo in registration form. QR code component exists (useQRScanner hook). Custom fields exist per company but are not category-specific. No belongings tracking. No QR badge verification scan. No host appointment approval flow.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Ziyaretçi ön kayıt (pre-registration)** -- When personnel creates an appointment, a shareable pre-registration form link is generated. Visitor fills in their details before arriving. When they reach the kiosk, their info is pre-filled and they just confirm.
-2. **Bekleme sırası / sıra numarası** -- Queue number system on kiosk. When multiple visitors are waiting, each gets a queue number and estimated wait time (based on 3 min avg per visitor). Queue status visible on lobby display.
-3. **Güvenlik olay kaydı** -- Independent security incident log separate from blacklist and emergency mode. Security personnel can log incidents: "unauthorized entry attempt at Gate B", "suspicious vehicle". Each incident logged with date/time/personnel. Viewable/reportable from company admin panel.
-4. **Departman bazlı ziyaretçi kotası** -- Per-department daily visitor limit. Admin sets max visitors per department. When limit reached, new visitors to that department are blocked. Displayed in department management.
-5. **TC kimlik geçerlilik kontrolü** -- Turkish ID number (TC Kimlik No) validation using the official Luhn-like algorithm (11-digit check). Show format error before submission if invalid.
-6. **Kiosk → personel aktif onay akışı** -- When visitor completes kiosk form, create a pending approval request visible in staff dashboard with Accept/Reject buttons. Staff gets notification. Only after acceptance does visitor status become "active". Rejected visitors get a message on kiosk screen.
+- **Dinamik ziyaret formu**: Category-specific extra fields. When visitor category is selected (e.g., "Teknik Destek", "Teslimat", "Mülakat"), additional relevant fields appear (e.g., work order number for technical support, delivery order for delivery, position for interviews). Define per-category fields in Company Profile, display in visitor registration form.
+- **Emanet / eşya teslim takibi**: When checking in a visitor, record confiscated/held items (phone, laptop, badge, bag, etc.) with item type, description, and quantity. On departure, mark items as returned. Active visitor card shows item count. Company Dashboard has a "Emanetler" view.
+- **QR rozet tarama / doğrulama**: Staff can scan a visitor's QR badge using the camera. Uses useQRScanner hook to read the QR code, looks up the visitor, shows their status (active/departed/blacklisted). Accessible via a "QR Tara" button in Staff Dashboard.
+- **Host randevu onay akışı**: When an appointment is created for a host (personnel), that host sees a "Bekleyen Onaylar" tab/section in their Staff Dashboard. They can Accept or Reject each pending appointment. Appointment status changes accordingly. Rejected appointments can include a reason.
 
 ### Modify
-- KioskMode: Add queue number display, pre-registration lookup, TC validation, active approval waiting screen
-- CompanyDashboard: Add security incidents tab, department quota management
-- StaffDashboard: Add active approval queue with Accept/Reject, pre-registration link generation on appointments
-- Store/types: Add incident records, queue state, department quotas, pre-registration records, pending approvals
+- types.ts: Add `categoryFields` to Company, add `BelongingsItem` interface, add `hostApprovalStatus` to Appointment.
+- store.ts: Add belongings CRUD functions.
+- StaffDashboard.tsx: Add QR scan modal, belongings tracking in visitor registration/departure, host approval section.
+- CompanyDashboard.tsx: Add Emanetler view, category fields configuration in Profile.
 
 ### Remove
-- Nothing removed
+- Nothing removed.
 
 ## Implementation Plan
-1. Extend types.ts with: SecurityIncident, VisitorPreReg, PendingApproval, queue state
-2. Extend store.ts with CRUD functions for new data types
-3. Add TC validation utility function
-4. Update KioskMode: queue system, pre-reg lookup, TC validation, approval waiting screen
-5. Update StaffDashboard: active approval queue tab/section, pre-reg link on appointments
-6. Update CompanyDashboard: security incidents tab, department quota fields
-7. Update lobby display to show queue status
+1. Extend types.ts: Add `categoryFields` (Record<string, {id,label,required}[]>) to Company; add `BelongingsItem` interface; add `hostApprovalStatus?: 'pending'|'approved'|'rejected'` and `hostRejectionReason?` to Appointment.
+2. Extend store.ts: Add getBelongings/saveBelonging/returnBelonging functions.
+3. StaffDashboard.tsx:
+   - Dynamic form: when category changes, show category-specific fields defined in company.categoryFields[category].
+   - Belongings: in registration modal add "Emanet Kayıt" section to record held items; in departure/visitor card show items with return button.
+   - QR scan: add "QR Tara" button in toolbar; modal with camera QR scanner; on scan show visitor info.
+   - Host approval: add "Onay Bekleyenler" badge on Randevular tab; inside tab show pending appointments where hostStaffId == currentStaff; accept/reject buttons.
+4. CompanyDashboard.tsx:
+   - Category fields config: in Profil tab, section to define per-category extra fields.
+   - Emanetler tab: list all active belongings across visitors, filter by status.

@@ -23,6 +23,7 @@ import { ChecklistModal } from "../components/SecurityChecklist";
 import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { getLang, t } from "../i18n";
+import { useQRScanner } from "../qr-code/useQRScanner";
 
 import {
   type StaffMessage,
@@ -34,10 +35,12 @@ import {
   findCompanyById,
   findPermitByIdNumber,
   findStaffById,
+  findVisitorByCode,
   getAlertHistory,
   getAllStaff,
   getAppointments,
   getApprovedVisitors,
+  getBelongings,
   getCompanyDepartments,
   getCompanyFloors,
   getCustomCategories,
@@ -49,12 +52,14 @@ import {
   getSession,
   getStaffByCompany,
   getStaffMessages,
+  getVisitorBelongings,
   getVisitors,
   isBlacklisted,
   refreshSession,
   removeFromQueue,
   resetStaffCode,
   saveAppointment,
+  saveBelonging,
   saveCompany,
   saveIncident,
   saveInvitation,
@@ -69,6 +74,7 @@ import type {
   AppScreen,
   Appointment,
   ApprovedVisitor,
+  BelongingsItem,
   Company,
   ContractorPermit,
   ExitQuestion,
@@ -496,6 +502,25 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     null,
   );
   const [rejectReason, setRejectReason] = useState("");
+
+  // QR Scanner
+  const [showQrScan, setShowQrScan] = useState(false);
+  const [qrScanResultVisitor, setQrScanResultVisitor] = useState<
+    Visitor | null | "notfound"
+  >(null);
+  const qrScanner = useQRScanner({
+    facingMode: "environment",
+  });
+
+  // Belongings tracking
+  const [belongingsForm, setBelongingsForm] = useState<
+    { id: string; itemType: string; description: string; quantity: number }[]
+  >([]);
+
+  // Host approval
+  const [apptRejectId, setApptRejectId] = useState<string | null>(null);
+  const [apptRejectReason, setApptRejectReason] = useState("");
+
   // Bulk exit state
   const [bulkExitModalOpen, setBulkExitModalOpen] = useState(false);
   // Visitor profile state
@@ -1017,6 +1042,21 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     if (!pendingVisitorData) return;
     const visitor = pendingVisitorData;
     saveVisitor(visitor);
+    // Save belongings
+    for (const b of belongingsForm) {
+      saveBelonging({
+        id: generateId(),
+        companyId: session.companyId,
+        visitorId: visitor.visitorId,
+        visitorName: visitor.name,
+        itemType: b.itemType,
+        description: b.description || undefined,
+        quantity: b.quantity,
+        takenAt: Date.now(),
+        takenBy: session.staffId ?? "",
+      });
+    }
+    setBelongingsForm([]);
     addAuditLog(
       session.companyId,
       staff?.name ?? "Personel",
@@ -1196,6 +1236,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       setApptError("Lütfen zorunlu alanları doldurun.");
       return;
     }
+    const hostStaffMatch = staffList.find((s) => s.name === apptForm.hostName);
     const baseAppt: Appointment = {
       id: generateId(),
       companyId: session.companyId,
@@ -1210,6 +1251,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       createdBy: session.staffId ?? "",
       createdAt: Date.now(),
       backupContact: apptForm.backupContact || undefined,
+      hostStaffId: hostStaffMatch?.staffId,
+      hostApprovalStatus: hostStaffMatch ? "pending" : undefined,
     };
     saveAppointment(baseAppt);
     // Generate shareable confirmation link
@@ -1599,7 +1642,17 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       `${t(lang, "activeVisitors")} (${activeVisitors.length})${kioskPending.length > 0 ? ` 🔔${kioskPending.length}` : ""}`,
     ],
     ["inside", `🏢 Şu An Binada (${insideVisitors.length})`],
-    ["appointments", `📅 Randevular (${todayAppointments.length})`],
+    (() => {
+      const myPendingApprovals = appointments.filter(
+        (a) =>
+          a.hostStaffId === session.staffId &&
+          a.hostApprovalStatus === "pending",
+      ).length;
+      return [
+        "appointments" as Tab,
+        `📅 Randevular (${todayAppointments.length})${myPendingApprovals > 0 ? ` ⏳${myPendingApprovals}` : ""}`,
+      ] as [Tab, string];
+    })(),
     ["preregistered", t(lang, "preregistered")],
     ["history", "📜 Geçmiş"],
     [
@@ -2156,6 +2209,51 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 </p>
               </div>
 
+              {/* Belongings return step */}
+              {(() => {
+                const vBelongings = exitModalVisitor
+                  ? getVisitorBelongings(
+                      session.companyId,
+                      exitModalVisitor.visitorId,
+                    ).filter((b) => !b.returnedAt)
+                  : [];
+                if (vBelongings.length === 0) return null;
+                return (
+                  <div className="my-4 p-4 rounded-xl border border-amber-500/40 bg-amber-900/15">
+                    <p className="text-amber-400 font-semibold text-sm mb-2">
+                      📦 Emanet İadesi ({vBelongings.length} kalem)
+                    </p>
+                    <div className="space-y-2">
+                      {vBelongings.map((b) => (
+                        <label
+                          key={b.id}
+                          className="flex items-center gap-2 cursor-pointer"
+                        >
+                          <input
+                            data-ocid="exit.belonging_return.checkbox"
+                            type="checkbox"
+                            className="w-4 h-4 accent-[#f59e0b]"
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                saveBelonging({
+                                  ...b,
+                                  returnedAt: Date.now(),
+                                  returnedBy: session.staffId ?? "",
+                                });
+                              }
+                            }}
+                          />
+                          <span className="text-slate-200 text-sm">
+                            {b.itemType}
+                            {b.description ? ` — ${b.description}` : ""} (×
+                            {b.quantity})
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {/* Equipment return step */}
               {exitModalVisitor?.equipment && (
                 <div className="my-4 p-4 rounded-xl border border-amber-500/40 bg-amber-900/15">
@@ -3379,6 +3477,19 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             >
               📓
             </button>
+            <button
+              type="button"
+              data-ocid="staff_dashboard.qr_scan.button"
+              onClick={() => {
+                setShowQrScan(true);
+                setQrScanResultVisitor(null);
+              }}
+              title="QR Rozet Tara"
+              className="relative p-2 rounded-xl transition-all hover:bg-white/10"
+              style={{ color: "#0ea5e9" }}
+            >
+              🔍
+            </button>
             <LangSwitcher onChange={onRefresh} />
             <button
               type="button"
@@ -4122,6 +4233,51 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     />
                   </div>
                 ))}
+                {/* Category-specific fields */}
+                {(() => {
+                  const catFields =
+                    findCompanyById(session.companyId)?.categoryFields?.[
+                      form.category
+                    ] ?? [];
+                  if (catFields.length === 0) return null;
+                  return (
+                    <div
+                      className="p-4 rounded-xl"
+                      style={{
+                        background: "rgba(14,165,233,0.04)",
+                        border: "1px solid rgba(14,165,233,0.2)",
+                      }}
+                    >
+                      <p className="text-[#0ea5e9] text-xs font-semibold mb-3">
+                        🏷️ {form.category} — Kategori Alanları
+                      </p>
+                      <div className="space-y-3">
+                        {catFields.map((cf) => (
+                          <div key={cf.id}>
+                            <p className="text-slate-300 text-sm mb-1">
+                              {cf.label}
+                              {cf.required && " *"}
+                            </p>
+                            <input
+                              data-ocid="register.category_field.input"
+                              value={form.customFieldValues[cf.id] ?? ""}
+                              onChange={(e) =>
+                                setForm((f) => ({
+                                  ...f,
+                                  customFieldValues: {
+                                    ...f.customFieldValues,
+                                    [cf.id]: e.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* Accessibility needs */}
                 <div>
                   <p className="text-slate-300 text-sm mb-1 block">
@@ -4250,6 +4406,135 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 </div>
               </div>
               <div className="mt-4 space-y-4">
+                {/* Belongings Tracking */}
+                <div
+                  className="p-4 rounded-xl"
+                  style={{
+                    background: "rgba(245,158,11,0.04)",
+                    border: "1.5px solid rgba(245,158,11,0.2)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-amber-400 font-semibold text-sm">
+                      📦 Emanet Kaydı
+                    </h4>
+                    <button
+                      type="button"
+                      data-ocid="register.add_belonging.button"
+                      onClick={() =>
+                        setBelongingsForm((prev) => [
+                          ...prev,
+                          {
+                            id: `b_${Date.now()}`,
+                            itemType: "Telefon",
+                            description: "",
+                            quantity: 1,
+                          } as {
+                            id: string;
+                            itemType: string;
+                            description: string;
+                            quantity: number;
+                          },
+                        ])
+                      }
+                      className="px-2 py-1 rounded-lg text-xs text-white font-medium"
+                      style={{
+                        background: "rgba(245,158,11,0.2)",
+                        border: "1px solid rgba(245,158,11,0.4)",
+                      }}
+                    >
+                      + Ekle
+                    </button>
+                  </div>
+                  {belongingsForm.length === 0 ? (
+                    <p className="text-slate-500 text-xs">
+                      Emanet alınmadıysa boş bırakın.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {belongingsForm.map((item, idx) => (
+                        <div
+                          key={item.id}
+                          className="flex gap-2 items-center flex-wrap"
+                        >
+                          <select
+                            data-ocid={`register.belonging_type.${idx + 1}`}
+                            value={item.itemType}
+                            onChange={(e) =>
+                              setBelongingsForm((prev) =>
+                                prev.map((b, i) =>
+                                  i === idx
+                                    ? { ...b, itemType: e.target.value }
+                                    : b,
+                                ),
+                              )
+                            }
+                            className="px-3 py-2 rounded-lg bg-[#0f1729] border border-white/20 text-white text-sm focus:outline-none"
+                          >
+                            {[
+                              "Telefon",
+                              "Laptop",
+                              "Kimlik Kartı",
+                              "Çanta",
+                              "Diğer",
+                            ].map((t) => (
+                              <option
+                                key={t}
+                                value={t}
+                                className="bg-[#0f1729]"
+                              >
+                                {t}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            data-ocid={`register.belonging_desc.${idx + 1}`}
+                            value={item.description}
+                            onChange={(e) =>
+                              setBelongingsForm((prev) =>
+                                prev.map((b, i) =>
+                                  i === idx
+                                    ? { ...b, description: e.target.value }
+                                    : b,
+                                ),
+                              )
+                            }
+                            placeholder="Açıklama"
+                            className="flex-1 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white text-sm focus:outline-none min-w-0"
+                          />
+                          <input
+                            data-ocid={`register.belonging_qty.${idx + 1}`}
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) =>
+                              setBelongingsForm((prev) =>
+                                prev.map((b, i) =>
+                                  i === idx
+                                    ? { ...b, quantity: +e.target.value || 1 }
+                                    : b,
+                                ),
+                              )
+                            }
+                            className="w-16 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            data-ocid={`register.belonging_remove.${idx + 1}`}
+                            onClick={() =>
+                              setBelongingsForm((prev) =>
+                                prev.filter((_, i) => i !== idx),
+                              )
+                            }
+                            className="text-red-400 hover:text-red-300 text-sm px-2"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {/* Screening Questions */}
                 {screeningQuestions.length > 0 && (
                   <div
@@ -5167,6 +5452,126 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           {/* APPOINTMENTS TAB */}
           {tab === "appointments" && (
             <div>
+              {/* Host Approval Section */}
+              {(() => {
+                const pendingForMe = appointments.filter(
+                  (a) =>
+                    a.hostStaffId === session.staffId &&
+                    a.hostApprovalStatus === "pending",
+                );
+                if (pendingForMe.length === 0) return null;
+                return (
+                  <div
+                    className="mb-6 p-4 rounded-2xl"
+                    style={{
+                      background: "rgba(245,158,11,0.07)",
+                      border: "1.5px solid rgba(245,158,11,0.3)",
+                    }}
+                  >
+                    <h4 className="text-amber-400 font-bold text-sm mb-3">
+                      ⏳ Onayınızı Bekleyen Randevular ({pendingForMe.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {pendingForMe.map((a) => (
+                        <div
+                          key={a.id}
+                          className="p-3 rounded-xl flex flex-col gap-2"
+                          style={{
+                            background: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                          }}
+                        >
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div>
+                              <span className="text-white font-semibold text-sm">
+                                {a.visitorName}
+                              </span>
+                              <span className="text-slate-400 text-xs ml-2">
+                                {a.appointmentDate} {a.appointmentTime} —{" "}
+                                {a.purpose}
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                data-ocid="appointments.host_approve.button"
+                                onClick={() => {
+                                  saveAppointment({
+                                    ...a,
+                                    hostApprovalStatus: "approved",
+                                    status: "approved",
+                                  });
+                                  reload();
+                                  toast.success(
+                                    `"${a.visitorName}" randevusu onaylandı`,
+                                  );
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                                style={{
+                                  background: "rgba(34,197,94,0.25)",
+                                  border: "1px solid rgba(34,197,94,0.4)",
+                                }}
+                              >
+                                ✅ Onayla
+                              </button>
+                              <button
+                                type="button"
+                                data-ocid="appointments.host_reject.button"
+                                onClick={() => {
+                                  setApptRejectId(a.id);
+                                  setApptRejectReason("");
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400"
+                                style={{
+                                  background: "rgba(239,68,68,0.1)",
+                                  border: "1px solid rgba(239,68,68,0.3)",
+                                }}
+                              >
+                                ❌ Reddet
+                              </button>
+                            </div>
+                          </div>
+                          {apptRejectId === a.id && (
+                            <div className="flex gap-2 mt-1">
+                              <input
+                                data-ocid="appointments.reject_reason.input"
+                                value={apptRejectReason}
+                                onChange={(e) =>
+                                  setApptRejectReason(e.target.value)
+                                }
+                                placeholder="Red nedeni..."
+                                className="flex-1 px-3 py-2 rounded-lg text-sm text-white bg-white/10 border border-white/20 focus:outline-none"
+                              />
+                              <button
+                                type="button"
+                                data-ocid="appointments.confirm_reject.button"
+                                onClick={() => {
+                                  saveAppointment({
+                                    ...a,
+                                    hostApprovalStatus: "rejected",
+                                    hostRejectionReason: apptRejectReason,
+                                    status: "cancelled",
+                                  });
+                                  setApptRejectId(null);
+                                  reload();
+                                  toast.error("Randevu reddedildi");
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                                style={{
+                                  background: "rgba(239,68,68,0.3)",
+                                  border: "1px solid rgba(239,68,68,0.5)",
+                                }}
+                              >
+                                Gönder
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {/* Sub-tabs + View toggle */}
               <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
                 <div className="flex gap-2">
@@ -5412,8 +5817,45 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                                   >
                                     {appt.status === "approved"
                                       ? "✓ Onaylandı"
-                                      : "Bekliyor"}
+                                      : appt.status === "cancelled"
+                                        ? "İptal"
+                                        : "Bekliyor"}
                                   </span>
+                                  {appt.hostApprovalStatus === "approved" && (
+                                    <span
+                                      className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                                      style={{
+                                        background: "rgba(34,197,94,0.15)",
+                                        color: "#22c55e",
+                                      }}
+                                    >
+                                      ✅ Host Onayladı
+                                    </span>
+                                  )}
+                                  {appt.hostApprovalStatus === "rejected" && (
+                                    <span
+                                      className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                                      style={{
+                                        background: "rgba(239,68,68,0.15)",
+                                        color: "#f87171",
+                                      }}
+                                      title={appt.hostRejectionReason}
+                                    >
+                                      ❌ Host Reddetti
+                                    </span>
+                                  )}
+                                  {appt.hostApprovalStatus === "pending" &&
+                                    appt.hostStaffId && (
+                                      <span
+                                        className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                                        style={{
+                                          background: "rgba(245,158,11,0.15)",
+                                          color: "#fbbf24",
+                                        }}
+                                      >
+                                        ⏳ Host Onayı Bekleniyor
+                                      </span>
+                                    )}
                                   {isOverdue && (
                                     <span
                                       className="px-2 py-0.5 rounded-full text-xs font-bold"
@@ -7580,6 +8022,197 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       </div>
 
       {/* Feature 1: Shift Note Write Modal */}
+
+      {/* QR Scanner Modal */}
+      {showQrScan && (
+        <div
+          data-ocid="qr_scan.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(14,165,233,0.4)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-bold text-lg">
+                🔍 QR Rozet Tarama
+              </h3>
+              <button
+                type="button"
+                data-ocid="qr_scan.close_button"
+                onClick={() => {
+                  setShowQrScan(false);
+                  qrScanner.stopScanning();
+                  setQrScanResultVisitor(null);
+                }}
+                className="text-slate-400 hover:text-white text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            {!qrScanResultVisitor ? (
+              <>
+                <div
+                  className="relative rounded-xl overflow-hidden bg-black mb-4"
+                  style={{ aspectRatio: "4/3" }}
+                >
+                  <video
+                    ref={qrScanner.videoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                  />
+                  <canvas ref={qrScanner.canvasRef} className="hidden" />
+                  {!qrScanner.isActive && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <p className="text-slate-400 text-sm">
+                        Kamera bekleniyor...
+                      </p>
+                    </div>
+                  )}
+                  {qrScanner.isActive && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-48 h-48 border-2 border-[#0ea5e9] rounded-xl opacity-70" />
+                    </div>
+                  )}
+                </div>
+                {qrScanner.error && (
+                  <p className="text-red-400 text-sm mb-3">
+                    {(qrScanner.error as { message?: string })?.message ??
+                      String(qrScanner.error)}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  data-ocid="qr_scan.start_button"
+                  onClick={async () => {
+                    qrScanner.clearResults();
+                    await qrScanner.startScanning();
+                  }}
+                  disabled={qrScanner.isScanning}
+                  className="w-full py-3 rounded-xl text-white font-semibold text-sm mb-2 disabled:opacity-50"
+                  style={{
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                  }}
+                >
+                  {qrScanner.isScanning
+                    ? "⏳ Taranıyor..."
+                    : "📷 Taramayı Başlat"}
+                </button>
+                {qrScanner.qrResults.length > 0 &&
+                  (() => {
+                    const code = qrScanner.qrResults[0].data;
+                    qrScanner.stopScanning();
+                    const found = findVisitorByCode(code, session.companyId);
+                    setQrScanResultVisitor(found ?? "notfound");
+                    return null;
+                  })()}
+              </>
+            ) : qrScanResultVisitor === "notfound" ? (
+              <div
+                className="p-4 rounded-xl mb-4"
+                style={{
+                  background: "rgba(245,158,11,0.1)",
+                  border: "1px solid rgba(245,158,11,0.3)",
+                }}
+              >
+                <p className="text-amber-400 font-bold text-center">
+                  ⚠️ Ziyaretçi bulunamadı
+                </p>
+                <p className="text-slate-400 text-sm text-center mt-1">
+                  Bu QR koda ait kayıt mevcut değil.
+                </p>
+              </div>
+            ) : (
+              <div
+                className="p-4 rounded-xl mb-4"
+                style={{
+                  background: isBlacklisted(
+                    session.companyId,
+                    qrScanResultVisitor.idNumber,
+                  )
+                    ? "rgba(239,68,68,0.1)"
+                    : qrScanResultVisitor.status === "active"
+                      ? "rgba(34,197,94,0.1)"
+                      : "rgba(255,255,255,0.05)",
+                  border: `1px solid ${isBlacklisted(session.companyId, qrScanResultVisitor.idNumber) ? "rgba(239,68,68,0.3)" : qrScanResultVisitor.status === "active" ? "rgba(34,197,94,0.3)" : "rgba(255,255,255,0.1)"}`,
+                }}
+              >
+                {isBlacklisted(
+                  session.companyId,
+                  qrScanResultVisitor.idNumber,
+                ) && (
+                  <p className="text-red-400 font-bold text-sm mb-2">
+                    🚨 KARA LİSTE UYARISI
+                  </p>
+                )}
+                <p className="text-white font-bold text-lg">
+                  {qrScanResultVisitor.name}
+                </p>
+                <p className="text-slate-300 text-sm mt-1">
+                  {qrScanResultVisitor.status === "active"
+                    ? "✅ Binada"
+                    : "🚪 Ayrıldı"}
+                  {" · "}
+                  {new Date(qrScanResultVisitor.arrivalTime).toLocaleTimeString(
+                    "tr-TR",
+                    { hour: "2-digit", minute: "2-digit" },
+                  )}{" "}
+                  girişi
+                </p>
+                <p className="text-slate-400 text-xs mt-1">
+                  Host:{" "}
+                  {staffList.find(
+                    (s) => s.staffId === qrScanResultVisitor.hostStaffId,
+                  )?.name ?? qrScanResultVisitor.hostStaffId}
+                  {qrScanResultVisitor.category &&
+                    ` · ${qrScanResultVisitor.category}`}
+                </p>
+              </div>
+            )}
+            <div className="flex gap-3">
+              {qrScanResultVisitor && (
+                <button
+                  type="button"
+                  data-ocid="qr_scan.retry.button"
+                  onClick={() => {
+                    setQrScanResultVisitor(null);
+                    qrScanner.clearResults();
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                >
+                  🔄 Tekrar Tara
+                </button>
+              )}
+              <button
+                type="button"
+                data-ocid="qr_scan.close_button"
+                onClick={() => {
+                  setShowQrScan(false);
+                  qrScanner.stopScanning();
+                  setQrScanResultVisitor(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {shiftNoteModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"

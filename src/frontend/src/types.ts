@@ -119,6 +119,10 @@ export interface Company {
   categoryColors?: Record<string, string>;
   categoryMaxStay?: Record<string, number>;
   meetingTemplates?: MeetingTemplate[];
+  categoryFields?: Record<
+    string,
+    { id: string; label: string; required: boolean }[]
+  >;
 }
 
 export interface Staff {
@@ -218,6 +222,9 @@ export interface Appointment {
   backupContact?: string;
   recurrence?: "none" | "weekly" | "monthly";
   recurrenceEndDate?: string;
+  hostStaffId?: string;
+  hostApprovalStatus?: "pending" | "approved" | "rejected";
+  hostRejectionReason?: string;
 }
 
 export interface AuditLog {
@@ -302,4 +309,18 @@ export interface QueueEntry {
   visitorName: string;
   waitingSince: number;
   companyId: string;
+}
+
+export interface BelongingsItem {
+  id: string;
+  companyId: string;
+  visitorId: string;
+  visitorName: string;
+  itemType: string;
+  description?: string;
+  quantity: number;
+  takenAt: number;
+  returnedAt?: number;
+  takenBy: string;
+  returnedBy?: string;
 }
