@@ -1,36 +1,36 @@
-# Safentry v23
+# Safentry v28
 
 ## Current State
-Safentry is a frontend-only multi-tenant corporate visitor management system (v22). Features include visitor registration, blacklist, appointments, kiosk mode, QR entry, badge printing, emergency mode, GDPR/KVKK reports, satisfaction ratings, daily summaries, badge customization, parking tracking, approved visitor list, full data export, and kiosk language selection. All data persists in localStorage.
+Safentry is a frontend-only corporate visitor management system (v27) with localStorage persistence. It has extensive features across company and staff dashboards including visitor registration, blacklist, appointments, kiosk mode, notifications, audit checklists, shift planning, PIN-based fast entry, visitor segmentation analytics, and kiosk content customization.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Notification center** -- Bell icon in header with unread count badge. Panel lists events: kiosk approvals pending, over-capacity warnings, blacklist hits, badge expiry alerts. Each notification has timestamp, type icon, and dismiss action. Mark all read button.
-2. **Department/floor management** -- Admin panel new tab "Departmanlar". CRUD for departments (name, floor, capacity). Visitor registration form's department dropdown becomes dynamic from this list.
-3. **Time-restricted access** -- In category management, each visitor category can have allowed time window (start/end time, days of week). During registration, if visitor category is outside allowed window, show warning and block entry.
-4. **Contractor work permit tracking** -- New tab "İş İzinleri" in company panel. Contractors (müteahhit category) must have work permit number, expiry date, insurance info. On registration, system checks if permit is valid. Expiring permits (within 7 days) show amber badge. Expired permits block entry.
-5. **Visitor waiting SLA tracking** -- Kiosk-submitted visitors get a "waiting since" timestamp. Personnel panel shows waiting duration for pending kiosk approvals. Stats panel shows average response time. SLA breach threshold (configurable, default 10 min) triggers notification.
+1. **Visitor Self Check-out** -- Kiosk mode gets a "Check Out" flow: visitor enters their PIN or scans their badge QR to self check-out without staff involvement.
+2. **Floor/Area-based Capacity** -- In addition to building-wide capacity, admin can define areas/floors with individual capacity limits; current occupancy per area shown in company dashboard.
+3. **Audit Trail (simulated)** -- A dedicated log panel in company dashboard recording critical actions (blacklist add/remove, emergency mode toggle, data deletion, capacity changes) with timestamp, actor, and action description.
+4. **Personal Staff Calendar** -- Each staff member sees only their own appointments in a personal calendar view within the staff dashboard (separate from the company-wide appointment calendar).
+5. **Appointment Confirmation Page (shareable link)** -- When creating an appointment, a shareable confirmation link is generated; opening it shows a clean read-only page with appointment details for the visitor.
+6. **Internal Messaging between Security Staff** -- A simple in-app message/note feed within the staff dashboard; staff can post short messages visible to all staff of the same company (stored in localStorage per company).
 
 ### Modify
-- Header component: add notification bell with badge
-- Category management: add time restriction fields
-- Kiosk flow: capture waiting start timestamp
-- Stats panel: add average SLA response time metric
-- Visitor registration form: use dynamic departments list
+- KioskMode: add self check-out option alongside existing visitor registration
+- CompanyDashboard: add audit trail tab and floor/area capacity management
+- StaffDashboard: add personal calendar tab and internal messaging tab
+- Appointment creation: generate shareable confirmation link
+- Store: add helper functions for audit log entries, area capacities, staff messages
 
 ### Remove
 - Nothing removed
 
 ## Implementation Plan
-1. Add notifications state to localStorage (array of notification objects with id, type, message, timestamp, read, companyCode)
-2. Create NotificationCenter component (bell icon + dropdown panel) integrated into both CompanyDashboard and StaffDashboard headers
-3. Add department management tab in CompanyDashboard with CRUD UI
-4. Update visitor registration form to use dynamic departments from localStorage
-5. Add time window fields to category editor in CompanyDashboard
-6. Add time-restriction check in visitor registration logic
-7. Create contractor work permit tab in CompanyDashboard with permit records
-8. Add permit validation check on visitor registration for müteahhit category
-9. Update kiosk submission to store waiting start timestamp
-10. Add SLA display in StaffDashboard kiosk approval queue
-11. Add SLA average metric to stats panel
+1. Add audit trail data structures and logging helper to store.ts
+2. Add area/floor capacity data structures and helpers to store.ts
+3. Add staff messages data structures and helpers to store.ts
+4. Add appointment confirmation link generation and read-only confirmation page
+5. Add self check-out flow to KioskMode
+6. Add audit trail tab to CompanyDashboard
+7. Add floor/area capacity management UI to CompanyDashboard
+8. Add personal calendar tab to StaffDashboard
+9. Add internal messaging tab to StaffDashboard
+10. Wire audit logging calls at key action points (blacklist, emergency, deletion)

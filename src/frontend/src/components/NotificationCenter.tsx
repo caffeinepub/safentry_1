@@ -18,6 +18,8 @@ const TYPE_ICONS: Record<SentryNotification["type"], string> = {
   badge_expiry: "🏷️",
   permit_expiry: "📋",
   sla_breach: "⏱️",
+  warning: "⚠️",
+  info: "ℹ️",
 };
 
 const TYPE_COLORS: Record<SentryNotification["type"], string> = {
@@ -27,6 +29,8 @@ const TYPE_COLORS: Record<SentryNotification["type"], string> = {
   badge_expiry: "#a855f7",
   permit_expiry: "#f97316",
   sla_breach: "#f59e0b",
+  warning: "#f59e0b",
+  info: "#38bdf8",
 };
 
 function relativeTime(ts: number): string {

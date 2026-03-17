@@ -197,3 +197,23 @@ body {
     display: none !important;
   }
 }
+
+/* Statistics PDF print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body > * {
+    display: none;
+  }
+  #statistics-print-section {
+    display: block !important;
+    color: black;
+    background: white;
+  }
+  #statistics-print-section * {
+    color: black !important;
+    background: white !important;
+    border-color: #ccc !important;
+  }
+}

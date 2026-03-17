@@ -537,3 +537,90 @@ export function removeCategoryTimeRestriction(
     ),
   });
 }
+
+// ─── Visitor PINs ──────────────────────────────────────────────────────────────
+export function getVisitorPins(companyId: string): Record<string, string> {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_visitor_pins_${companyId}`) || "{}",
+    );
+  } catch {
+    return {};
+  }
+}
+export function saveVisitorPin(companyId: string, tc: string, pin: string) {
+  const pins = getVisitorPins(companyId);
+  pins[tc] = pin;
+  localStorage.setItem(
+    `safentry_visitor_pins_${companyId}`,
+    JSON.stringify(pins),
+  );
+}
+export function removeVisitorPin(companyId: string, tc: string) {
+  const pins = getVisitorPins(companyId);
+  delete pins[tc];
+  localStorage.setItem(
+    `safentry_visitor_pins_${companyId}`,
+    JSON.stringify(pins),
+  );
+}
+
+// ─── Kiosk Content ────────────────────────────────────────────────────────────
+export interface KioskContent {
+  welcomeTitle?: string;
+  subtitle?: string;
+  visitorNameLabel?: string;
+  companyLabel?: string;
+  visitReasonLabel?: string;
+}
+export function getKioskContent(
+  companyId: string,
+): Record<string, KioskContent> {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_kiosk_content_${companyId}`) || "{}",
+    );
+  } catch {
+    return {};
+  }
+}
+export function saveKioskContent(
+  companyId: string,
+  lang: string,
+  content: KioskContent,
+) {
+  const all = getKioskContent(companyId);
+  all[lang] = content;
+  localStorage.setItem(
+    `safentry_kiosk_content_${companyId}`,
+    JSON.stringify(all),
+  );
+}
+
+// ─── Staff Messages ────────────────────────────────────────────────────────────
+export interface StaffMessage {
+  id: string;
+  authorName: string;
+  authorId: string;
+  content: string;
+  createdAt: number;
+  companyId: string;
+}
+
+export function getStaffMessages(companyId: string): StaffMessage[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_staff_messages_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function saveStaffMessage(msg: StaffMessage) {
+  const list = getStaffMessages(msg.companyId);
+  localStorage.setItem(
+    `safentry_staff_messages_${msg.companyId}`,
+    JSON.stringify([...list, msg].slice(-500)),
+  );
+}

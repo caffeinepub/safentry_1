@@ -29,7 +29,9 @@ export interface SentryNotification {
     | "capacity_warning"
     | "badge_expiry"
     | "permit_expiry"
-    | "sla_breach";
+    | "sla_breach"
+    | "warning"
+    | "info";
   message: string;
   createdAt: number;
   read: boolean;
@@ -113,6 +115,9 @@ export interface Company {
   parkingSpaces?: ParkingSpace[];
   slaThreshold?: number; // minutes, default 10
   categoryTimeRestrictions?: CategoryTimeRestriction[];
+  categoryColors?: Record<string, string>;
+  categoryMaxStay?: Record<string, number>;
+  meetingTemplates?: MeetingTemplate[];
 }
 
 export interface Staff {
@@ -164,6 +169,18 @@ export interface Visitor {
   screeningAnswers?: { questionId: string; question: string; answer: string }[];
   privateNote?: string;
   parkingSpace?: string;
+  groupId?: string;
+}
+
+export interface MeetingTemplate {
+  id: string;
+  name: string;
+  dayOfWeek: number; // 0=Sun, 1=Mon, ...6=Sat
+  time: string; // "HH:MM"
+  hostStaffId: string;
+  purpose: string;
+  notes?: string;
+  visitorName?: string;
 }
 
 export interface BlacklistEntry {
@@ -231,7 +248,8 @@ export type AppScreen =
   | "staff-dashboard"
   | "kiosk"
   | "verify"
-  | "invite";
+  | "invite"
+  | "appointment-confirm";
 
 export interface ParkingSpace {
   id: string;
@@ -248,4 +266,6 @@ export interface ApprovedVisitor {
   phone?: string;
   visitReason?: string;
   category?: string;
+  badgeValidDays?: number;
+  badgeIssuedAt?: number;
 }

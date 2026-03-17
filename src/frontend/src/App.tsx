@@ -5,6 +5,7 @@ import InvitePage from "./pages/InvitePage";
 import { clearSession, getSession } from "./store";
 import type { AppScreen } from "./types";
 
+import AppointmentConfirmPage from "./pages/AppointmentConfirmPage";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import CompanyLogin from "./pages/CompanyLogin";
 import CompanyRegister from "./pages/CompanyRegister";
@@ -15,6 +16,13 @@ import StaffLogin from "./pages/StaffLogin";
 import StaffRegister from "./pages/StaffRegister";
 import Verify from "./pages/Verify";
 import Welcome from "./pages/Welcome";
+
+// Check if current URL is a confirm link
+function getConfirmToken(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/confirm\/([a-zA-Z0-9+/=]+)$/);
+  return match ? match[1] : null;
+}
 
 // Check if current URL is an invite link
 function getInviteToken(): string | null {
@@ -32,6 +40,7 @@ export default function App() {
   const inviteToken = getInviteToken();
 
   const getInitialScreen = (): AppScreen => {
+    if (confirmToken) return "appointment-confirm";
     if (inviteToken) return "invite";
     if (!hasLang) return "language";
     if (!session) return "welcome";
@@ -40,6 +49,7 @@ export default function App() {
 
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
   const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
+  const confirmToken = getConfirmToken();
   const [currentInviteToken, setCurrentInviteToken] = useState<string | null>(
     inviteToken,
   );
@@ -112,5 +122,15 @@ export default function App() {
   if (screen === "kiosk")
     return <KioskMode companyId={kioskCompanyId ?? ""} onNavigate={navigate} />;
   if (screen === "verify") return <Verify onNavigate={navigate} />;
+  if (screen === "appointment-confirm")
+    return (
+      <>
+        <AppointmentConfirmPage
+          token={confirmToken ?? ""}
+          onNavigate={navigate}
+        />
+        <Toaster richColors position="top-right" />
+      </>
+    );
   return null;
 }

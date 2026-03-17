@@ -9,8 +9,11 @@ import {
   addNotification,
   findCompanyById,
   getCustomCategories,
+  getKioskContent,
   getLockdown,
   getStaffByCompany,
+  getVisitorPins,
+  getVisitors,
   isBlacklisted,
   saveVisitor,
 } from "../store";
@@ -51,14 +54,24 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   const [kioskLang, setKioskLang] = useState(getLang());
   const lang = kioskLang;
   const company = findCompanyById(companyId);
+  const kioskContentAll = getKioskContent(companyId);
+  const kioskContent = kioskContentAll[kioskLang] ?? {};
   const staffList = getStaffByCompany(companyId);
   const categories = getCustomCategories(companyId);
   const customFields = company?.customFields ?? [];
 
-  const [screen, setScreen] = useState<"welcome" | "form" | "waiting">(
-    "welcome",
-  );
+  const [screen, setScreen] = useState<
+    "welcome" | "form" | "waiting" | "pin" | "checkout" | "checkout-success"
+  >("welcome");
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [pinTc, setPinTc] = useState("");
+  const [pinCode, setPinCode] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [checkoutTc, setCheckoutTc] = useState("");
+  const [checkoutFound, setCheckoutFound] = useState<
+    import("../types").Visitor | null
+  >(null);
+  const [checkoutError, setCheckoutError] = useState("");
   const [customFieldValues, setCustomFieldValues] = useState<
     Record<string, string>
   >({});
@@ -325,13 +338,21 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
         >
           <div className="text-6xl mb-6">👋</div>
           <div className="text-4xl font-bold text-white mb-2">
-            <span style={{ color: "#0ea5e9" }}>Safe</span>ntry
+            {kioskContent.welcomeTitle ? (
+              kioskContent.welcomeTitle
+            ) : (
+              <>
+                <span style={{ color: "#0ea5e9" }}>Safe</span>ntry
+              </>
+            )}
           </div>
           {company && (
             <p className="text-slate-400 text-lg mb-2">{company.name}</p>
           )}
           <p className="text-slate-400 mb-2">
-            {company?.kioskWelcomeMessage || "Ziyaretçi kaydı için dokunun"}
+            {kioskContent.subtitle ||
+              company?.kioskWelcomeMessage ||
+              "Ziyaretçi kaydı için dokunun"}
           </p>
           <p className="text-slate-600 text-sm mb-4">
             Lütfen aşağıdaki seçeneklerden birini seçin
@@ -427,6 +448,42 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                   📷 QR ile Giriş
                 </button>
               )}
+              <button
+                type="button"
+                data-ocid="kiosk.pin_login.button"
+                onClick={() => {
+                  setPinTc("");
+                  setPinCode("");
+                  setPinError("");
+                  setScreen("pin");
+                }}
+                className="w-full py-3 rounded-2xl font-semibold text-sm transition-opacity hover:opacity-90"
+                style={{
+                  background: "rgba(20,184,166,0.15)",
+                  border: "1.5px solid rgba(20,184,166,0.4)",
+                  color: "#2dd4bf",
+                }}
+              >
+                🔑 PIN ile Hızlı Giriş
+              </button>
+              <button
+                type="button"
+                data-ocid="kiosk.checkout.button"
+                onClick={() => {
+                  setCheckoutTc("");
+                  setCheckoutFound(null);
+                  setCheckoutError("");
+                  setScreen("checkout");
+                }}
+                className="w-full py-3 rounded-2xl font-semibold text-sm transition-opacity hover:opacity-90"
+                style={{
+                  background: "rgba(239,68,68,0.12)",
+                  border: "1.5px solid rgba(239,68,68,0.35)",
+                  color: "#f87171",
+                }}
+              >
+                🚪 Çıkış Yap
+              </button>
             </div>
           )}
         </div>
@@ -434,6 +491,144 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
         <p className="mt-8 text-slate-600 text-xs">
           {IDLE_TIMEOUT / 1000} saniye işlem yapılmazsa otomatik sıfırlanır
         </p>
+      </div>
+    );
+  }
+
+  // PIN login screen
+  if (screen === "pin") {
+    const handlePinLogin = () => {
+      if (!pinTc.trim() || !pinCode.trim()) {
+        setPinError("TC ve PIN giriniz.");
+        return;
+      }
+      const pins = getVisitorPins(companyId);
+      if (pins[pinTc] !== pinCode) {
+        setPinError("TC veya PIN hatalı.");
+        setPinCode("");
+        return;
+      }
+      // Find last visit of this person
+      const allVisits = getVisitors(companyId)
+        .filter((v) => v.idNumber === pinTc)
+        .sort((a, b) => b.arrivalTime - a.arrivalTime);
+      const lastVisit = allVisits[0];
+      if (lastVisit) {
+        setForm({
+          ...EMPTY_FORM,
+          name: lastVisit.name,
+          idNumber: lastVisit.idNumber,
+          phone: lastVisit.phone || "",
+          visitReason: lastVisit.visitReason || "",
+          category: lastVisit.category || "Misafir",
+          vehiclePlate: lastVisit.vehiclePlate || "",
+        });
+      } else {
+        setForm((f) => ({ ...f, idNumber: pinTc }));
+      }
+      setPinError("");
+      setScreen("form");
+    };
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.pin_screen"
+      >
+        <div
+          className="max-w-sm w-full p-8 rounded-3xl text-center"
+          style={{
+            background: "rgba(20,184,166,0.07)",
+            border: "1.5px solid rgba(20,184,166,0.35)",
+          }}
+        >
+          <div className="text-4xl mb-4">🔑</div>
+          <h2 className="text-white font-bold text-xl mb-2">PIN ile Giriş</h2>
+          <p className="text-slate-400 text-sm mb-6">
+            TC Kimlik No ve PIN'inizi girin
+          </p>
+          <div className="space-y-3 mb-4">
+            <input
+              data-ocid="kiosk.pin_tc.input"
+              value={pinTc}
+              onChange={(e) => setPinTc(e.target.value)}
+              placeholder="TC Kimlik No (11 hane)"
+              maxLength={11}
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-mono text-center text-lg focus:outline-none focus:border-teal-400"
+            />
+            <input
+              data-ocid="kiosk.pin_code.input"
+              value={pinCode}
+              onChange={(e) => setPinCode(e.target.value)}
+              placeholder="4 haneli PIN"
+              maxLength={4}
+              type="tel"
+              className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-mono text-center text-2xl tracking-widest focus:outline-none focus:border-teal-400"
+            />
+            {/* Numeric keypad */}
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"].map(
+                (k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => {
+                      if (!k) return;
+                      if (k === "⌫") {
+                        setPinCode((p) => p.slice(0, -1));
+                        return;
+                      }
+                      setPinCode((p) => (p.length < 4 ? p + k : p));
+                    }}
+                    className="py-3 rounded-xl font-bold text-white text-lg transition-all hover:opacity-80"
+                    style={{
+                      background: k ? "rgba(255,255,255,0.08)" : "transparent",
+                      border: k ? "1px solid rgba(255,255,255,0.12)" : "none",
+                    }}
+                  >
+                    {k}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+          {pinError && (
+            <div
+              className="mb-4 px-3 py-2 rounded-xl text-sm"
+              style={{
+                background: "rgba(239,68,68,0.1)",
+                color: "#f87171",
+                border: "1px solid rgba(239,68,68,0.3)",
+              }}
+              data-ocid="kiosk.pin_error.error_state"
+            >
+              {pinError}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              data-ocid="kiosk.pin_cancel.button"
+              onClick={() => setScreen("welcome")}
+              className="flex-1 py-3 rounded-xl text-slate-400 hover:text-white transition-colors"
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              İptal
+            </button>
+            <button
+              type="button"
+              data-ocid="kiosk.pin_submit.button"
+              onClick={handlePinLogin}
+              className="flex-1 py-3 rounded-xl font-bold text-white transition-opacity hover:opacity-90"
+              style={{ background: "linear-gradient(135deg,#0d9488,#0f766e)" }}
+            >
+              Giriş
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -482,6 +677,170 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
           >
             ⏱ {countdown} saniye sonra sıfırlanacak
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Self checkout screen
+  if (screen === "checkout") {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.checkout_screen"
+      >
+        <button
+          type="button"
+          data-ocid="kiosk.checkout.back_button"
+          onClick={() => setScreen("welcome")}
+          className="absolute top-6 left-6 px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          ← Geri
+        </button>
+        <div
+          className="w-full max-w-sm p-8 rounded-3xl"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1.5px solid rgba(239,68,68,0.3)",
+          }}
+        >
+          <div className="text-center mb-6">
+            <div className="text-5xl mb-3">🚪</div>
+            <h2 className="text-2xl font-bold text-white mb-1">Kıendı Çıkış</h2>
+            <p className="text-slate-400 text-sm">
+              TC kimlik numaranız ile Çıkış yapın
+            </p>
+          </div>
+          <div className="space-y-4">
+            <input
+              data-ocid="kiosk.checkout.tc_input"
+              type="text"
+              value={checkoutTc}
+              onChange={(e) => {
+                setCheckoutTc(e.target.value);
+                setCheckoutError("");
+                setCheckoutFound(null);
+              }}
+              placeholder="TC Kimlik No"
+              className="w-full px-4 py-3 rounded-xl text-white text-center text-lg font-mono outline-none"
+              style={{
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+              maxLength={11}
+            />
+            {checkoutError && (
+              <p
+                data-ocid="kiosk.checkout.error_state"
+                className="text-red-400 text-sm text-center"
+              >
+                {checkoutError}
+              </p>
+            )}
+            {checkoutFound && (
+              <div
+                data-ocid="kiosk.checkout.confirm_panel"
+                className="p-4 rounded-2xl text-center"
+                style={{
+                  background: "rgba(34,197,94,0.08)",
+                  border: "1px solid rgba(34,197,94,0.3)",
+                }}
+              >
+                <p className="text-green-400 font-semibold">
+                  {checkoutFound.name}
+                </p>
+                <p className="text-slate-400 text-sm mt-1">
+                  Giriş:{" "}
+                  {new Date(checkoutFound.arrivalTime).toLocaleTimeString(
+                    "tr-TR",
+                  )}
+                </p>
+                <button
+                  type="button"
+                  data-ocid="kiosk.checkout.confirm_button"
+                  onClick={() => {
+                    if (!checkoutFound) return;
+                    const updated = {
+                      ...checkoutFound,
+                      status: "departed" as const,
+                      departureTime: Date.now(),
+                    };
+                    const { saveVisitor } = require("../store");
+                    saveVisitor(updated);
+                    setCheckoutFound(null);
+                    setCheckoutTc("");
+                    setScreen("checkout-success");
+                    setTimeout(() => setScreen("welcome"), 4000);
+                  }}
+                  className="mt-3 w-full py-3 rounded-xl font-semibold text-white"
+                  style={{
+                    background: "linear-gradient(135deg,#ef4444,#dc2626)",
+                  }}
+                >
+                  Evet, Çıkış Yap
+                </button>
+              </div>
+            )}
+            {!checkoutFound && (
+              <button
+                type="button"
+                data-ocid="kiosk.checkout.search_button"
+                onClick={() => {
+                  const visitors = getVisitors(companyId);
+                  const found = visitors.find(
+                    (v) => v.idNumber === checkoutTc && v.status === "active",
+                  );
+                  if (found) {
+                    setCheckoutFound(found);
+                    setCheckoutError("");
+                  } else {
+                    setCheckoutError(
+                      "Aktif ziyaretçi bulunamadı. Lütfen TC numaranız kontrol edin.",
+                    );
+                  }
+                }}
+                className="w-full py-3 rounded-xl font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                Sorgula
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Self checkout success screen
+  if (screen === "checkout-success") {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.checkout_success_screen"
+      >
+        <div
+          className="w-full max-w-sm p-10 rounded-3xl text-center"
+          style={{
+            background: "rgba(34,197,94,0.07)",
+            border: "1.5px solid rgba(34,197,94,0.3)",
+          }}
+        >
+          <div className="text-6xl mb-4">✅</div>
+          <h2 className="text-2xl font-bold text-white mb-2">
+            Çıkış Kaydedildi
+          </h2>
+          <p className="text-slate-400">İyi günler dileriz!</p>
+          <p className="text-slate-500 text-sm mt-3">
+            Ekran otomatik kapanacak...
+          </p>
         </div>
       </div>
     );
