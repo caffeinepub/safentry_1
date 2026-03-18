@@ -1,33 +1,33 @@
-# Safentry v29
+# Safentry
 
 ## Current State
-Safentry is a multi-tenant corporate visitor management frontend (v28). Data persists in localStorage. All major visitor management features are implemented. Camera component exists and is used for visitor photo in registration form. QR code component exists (useQRScanner hook). Custom fields exist per company but are not category-specific. No belongings tracking. No QR badge verification scan. No host appointment approval flow.
+V39 is live. The system is a feature-complete frontend-only visitor management platform with localStorage persistence. It supports company/personnel code-based auth, visitor registration, kiosk mode, QR badges, blacklist, statistics, and many advanced workflows. All data is stored in localStorage.
 
 ## Requested Changes (Diff)
 
 ### Add
-- **Dinamik ziyaret formu**: Category-specific extra fields. When visitor category is selected (e.g., "Teknik Destek", "Teslimat", "Mülakat"), additional relevant fields appear (e.g., work order number for technical support, delivery order for delivery, position for interviews). Define per-category fields in Company Profile, display in visitor registration form.
-- **Emanet / eşya teslim takibi**: When checking in a visitor, record confiscated/held items (phone, laptop, badge, bag, etc.) with item type, description, and quantity. On departure, mark items as returned. Active visitor card shows item count. Company Dashboard has a "Emanetler" view.
-- **QR rozet tarama / doğrulama**: Staff can scan a visitor's QR badge using the camera. Uses useQRScanner hook to read the QR code, looks up the visitor, shows their status (active/departed/blacklisted). Accessible via a "QR Tara" button in Staff Dashboard.
-- **Host randevu onay akışı**: When an appointment is created for a host (personnel), that host sees a "Bekleyen Onaylar" tab/section in their Staff Dashboard. They can Accept or Reject each pending appointment. Appointment status changes accordingly. Rejected appointments can include a reason.
+1. **Bulk CSV Visitor Import** -- A "CSV Yükle" button in the StaffDashboard visitor registration area and in CompanyDashboard. User uploads a CSV file with columns: name, tc, phone, company, category, hostPersonnel, appointmentDate. Rows are validated and bulk-imported as pre-registered visitors/appointments. A preview table shows before confirming. Download a template CSV button included.
+2. **Visitor Self-Service Pre-Registration Portal** -- A new standalone page `/self-prereg/:companyCode` that any visitor can open on their phone. Shows company name, a registration form (name, TC, phone, visit purpose, host personnel name, date/time). On submit, creates a pre-registration entry that appears in the staff dashboard approval queue. Generates a QR code for the visitor to show at arrival. Personnel can share the link from their dashboard.
+3. **Accessibility improvements (WCAG)** -- High contrast mode toggle in the top menu (saves to localStorage). All interactive elements get proper aria-labels. Focus ring styles made visible. Skip-to-content link. Color contrast improved for text on dark backgrounds. Screen reader friendly form labels.
 
 ### Modify
-- types.ts: Add `categoryFields` to Company, add `BelongingsItem` interface, add `hostApprovalStatus` to Appointment.
-- store.ts: Add belongings CRUD functions.
-- StaffDashboard.tsx: Add QR scan modal, belongings tracking in visitor registration/departure, host approval section.
-- CompanyDashboard.tsx: Add Emanetler view, category fields configuration in Profile.
+- CompanyDashboard: Add CSV import button in visitors/appointments area; add "Self-Reg Portal Link" copy button in profile or header.
+- StaffDashboard: Add CSV import button; add share link for self-reg portal.
+- App.tsx: Add route handling for `/self-prereg/:companyCode`.
+- types.ts: Add `SelfPreRegEntry` type if needed.
+- store.ts: Add functions for self-prereg entries and CSV import.
+- index.css / App: High contrast mode class toggle.
 
 ### Remove
 - Nothing removed.
 
 ## Implementation Plan
-1. Extend types.ts: Add `categoryFields` (Record<string, {id,label,required}[]>) to Company; add `BelongingsItem` interface; add `hostApprovalStatus?: 'pending'|'approved'|'rejected'` and `hostRejectionReason?` to Appointment.
-2. Extend store.ts: Add getBelongings/saveBelonging/returnBelonging functions.
-3. StaffDashboard.tsx:
-   - Dynamic form: when category changes, show category-specific fields defined in company.categoryFields[category].
-   - Belongings: in registration modal add "Emanet Kayıt" section to record held items; in departure/visitor card show items with return button.
-   - QR scan: add "QR Tara" button in toolbar; modal with camera QR scanner; on scan show visitor info.
-   - Host approval: add "Onay Bekleyenler" badge on Randevular tab; inside tab show pending appointments where hostStaffId == currentStaff; accept/reject buttons.
-4. CompanyDashboard.tsx:
-   - Category fields config: in Profil tab, section to define per-category extra fields.
-   - Emanetler tab: list all active belongings across visitors, filter by status.
+1. Update types.ts with SelfPreRegEntry type.
+2. Update store.ts with getSelfPreRegEntries, saveSelfPreRegEntry functions.
+3. Create SelfPreRegPage.tsx -- standalone visitor self-registration portal.
+4. Create CsvImportModal.tsx -- CSV upload, preview, validate, bulk import.
+5. Update App.tsx to route `/self-prereg/:companyCode`.
+6. Update CompanyDashboard to show CSV import button and self-reg portal share link.
+7. Update StaffDashboard to show CSV import button and self-reg portal share link.
+8. Add high contrast mode toggle in the top navigation/header of both dashboards.
+9. Add WCAG aria-labels, visible focus rings, skip-to-content link in global CSS.

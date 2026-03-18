@@ -1,7 +1,12 @@
 import { useState } from "react";
 import LangSwitcher from "../components/LangSwitcher";
 import { getLang, t } from "../i18n";
-import { findStaffById, purgeExpiredVisitors, saveSession } from "../store";
+import {
+  addStaffSession,
+  findStaffById,
+  purgeExpiredVisitors,
+  saveSession,
+} from "../store";
 import type { AppScreen } from "../types";
 
 interface Props {
@@ -25,6 +30,8 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
       return;
     }
     purgeExpiredVisitors(companyId);
+    const sessionId =
+      Math.random().toString(36).slice(2) + Date.now().toString(36);
     saveSession({
       type: "staff",
       companyId,
@@ -32,6 +39,14 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
       staffRole: staff.role,
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
+    addStaffSession({
+      id: sessionId,
+      companyId,
+      staffId,
+      staffName: staff.name,
+      loginTime: Date.now(),
+    });
+    localStorage.setItem(`safentry_current_session_id_${staffId}`, sessionId);
     onNavigate("staff-dashboard");
   };
 

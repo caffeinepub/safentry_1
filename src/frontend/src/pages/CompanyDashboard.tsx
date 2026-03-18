@@ -14,6 +14,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -21,43 +22,63 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { addAuditLog, getAuditLogs } from "../auditLog";
+import BranchManager from "../components/BranchManager";
 import ConfirmModal from "../components/ConfirmModal";
+import CsvImportModal from "../components/CsvImportModal";
 import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
 import NotificationCenter from "../components/NotificationCenter";
+import ParkingManager from "../components/ParkingManager";
+import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistHistoryPanel } from "../components/SecurityChecklist";
 import SegmentationAnalysis from "../components/SegmentationAnalysis";
 import ShiftCalendar from "../components/ShiftCalendar";
 import VisitorComments from "../components/VisitorComments";
+import VisitorHeatmap from "../components/VisitorHeatmap";
+import WorkingCalendar from "../components/WorkingCalendar";
 import { getLang, t } from "../i18n";
 
 import {
   addAlertHistory,
+  addGatePassLog,
   addNotification,
   addToBlacklist,
   clearSession,
   deleteApprovedVisitor,
   deleteDepartment,
   deleteIncident,
+  deleteMeetingRoom,
   deletePermit,
+  deleteScheduledReport,
   findApprovedByIdNumber,
   findCompanyById,
   getAlertHistory,
   getAnnouncements,
   getAppointments,
+  getApprovalChainConfig,
   getApprovedVisitors,
+  getBadgeReprintLogs,
   getBelongings,
   getBlacklist,
+  getBlacklistAppeals,
+  getBranches,
   getCompanyDepartments,
   getCompanyFloors,
   getDepartments,
   getDeptTodayVisitorCount,
+  getGatePassLogs,
+  getHostReviews,
   getIncidents,
   getKioskContent,
   getLockdown,
+  getMeetingRooms,
   getPermits,
+  getScheduledReports,
   getSession,
   getStaffByCompany,
+  getStaffPhoto,
+  getUnreturnedCards,
+  getVisitorFeedback,
   getVisitorPins,
   getVisitors,
   refreshSession,
@@ -67,37 +88,52 @@ import {
   resetStaffCode,
   saveAnnouncement,
   saveAppointment,
+  saveApprovalChainConfig,
   saveApprovedVisitor,
   saveBelonging,
+  saveBlacklistAppeal,
   saveCompany,
   saveDepartment,
   saveIncident,
   saveInviteCode,
   saveKioskContent,
+  saveMeetingRoom,
   savePermit,
+  saveScheduledReport,
   saveStaff,
   saveVisitor,
+  saveVisitorFeedback,
   saveVisitorPin,
   setLockdown,
+  updateBlacklistAppeal,
+  updateVisitorFeedback,
 } from "../store";
 import type {
   AlertHistoryEntry,
   AppScreen,
   Appointment,
+  ApprovalChainConfig,
   ApprovedVisitor,
   AuditLog,
+  BadgeReprintLog,
   BelongingsItem,
+  BlacklistAppeal,
   BlacklistEntry,
   CategoryTimeRestriction,
   Company,
   ContractorPermit,
   Department,
   ExitQuestion,
+  GatePassLog,
+  HostReview,
+  MeetingRoom,
   ParkingSpace,
+  ScheduledReport,
   ScreeningQuestion,
   SecurityIncident,
   Staff,
   Visitor,
+  VisitorFeedback,
   MeetingTemplate as _MeetingTemplate,
 } from "../types";
 import {
@@ -165,7 +201,20 @@ type Tab =
   | "shifts"
   | "checklists"
   | "reviews"
-  | "belongings";
+  | "belongings"
+  | "branches"
+  | "workcalendar"
+  | "kvkkrequests"
+  | "gatelogs"
+  | "meetingrooms"
+  | "badgelogs"
+  | "cardtracking"
+  | "hostreviews"
+  | "headcount"
+  | "appeals"
+  | "scheduledreports"
+  | "feedback"
+  | "parking";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -524,11 +573,1093 @@ function CategoryFieldsEditor({
   );
 }
 
+function AppealsTab({
+  companyId,
+  staffName,
+}: { companyId: string; staffName: string }) {
+  const [appeals, setAppeals] = React.useState<BlacklistAppeal[]>(() =>
+    getBlacklistAppeals(companyId),
+  );
+  const [reviewNote, setReviewNote] = React.useState<Record<string, string>>(
+    {},
+  );
+
+  const refresh = () => setAppeals(getBlacklistAppeals(companyId));
+
+  const handleApprove = (appeal: BlacklistAppeal) => {
+    const updated: BlacklistAppeal = {
+      ...appeal,
+      status: "approved",
+      reviewedAt: Date.now(),
+      reviewedBy: staffName,
+      reviewNote: reviewNote[appeal.id] || "",
+    };
+    updateBlacklistAppeal(updated);
+    // Remove from blacklist
+    removeFromBlacklist(companyId, appeal.tcNumber);
+    refresh();
+    toast.success("İtiraz onaylandı, kara listeden çıkarıldı");
+  };
+
+  const handleReject = (appeal: BlacklistAppeal) => {
+    if (!reviewNote[appeal.id]?.trim()) {
+      toast.error("Red gerekçesi zorunludur");
+      return;
+    }
+    const updated: BlacklistAppeal = {
+      ...appeal,
+      status: "rejected",
+      reviewedAt: Date.now(),
+      reviewedBy: staffName,
+      reviewNote: reviewNote[appeal.id],
+    };
+    updateBlacklistAppeal(updated);
+    refresh();
+    toast.success("İtiraz reddedildi");
+  };
+
+  const pending = appeals.filter((a) => a.status === "pending");
+  const reviewed = appeals.filter((a) => a.status !== "pending");
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-white font-semibold mb-3">
+          ⏳ Bekleyen İtirazlar ({pending.length})
+        </h3>
+        {pending.length === 0 ? (
+          <div
+            data-ocid="appeals.empty_state"
+            className="text-center py-12 text-slate-500"
+          >
+            Bekleyen itiraz yok
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {pending.map((appeal, i) => (
+              <div
+                key={appeal.id}
+                data-ocid={`appeals.item.${i + 1}`}
+                className="p-5 rounded-2xl space-y-3"
+                style={{
+                  background: "rgba(245,158,11,0.08)",
+                  border: "1.5px solid rgba(245,158,11,0.25)",
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-white font-semibold font-mono">
+                      {appeal.tcNumber}
+                    </span>
+                    <span className="ml-3 text-xs text-slate-400">
+                      Ref: {appeal.id.slice(-8).toUpperCase()}
+                    </span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    {new Date(appeal.submittedAt).toLocaleDateString("tr-TR")}
+                  </span>
+                </div>
+                <p className="text-slate-300 text-sm leading-relaxed">
+                  {appeal.appealReason}
+                </p>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="İnceleme notu (red için zorunlu)..."
+                    value={reviewNote[appeal.id] ?? ""}
+                    onChange={(e) =>
+                      setReviewNote((n) => ({
+                        ...n,
+                        [appeal.id]: e.target.value,
+                      }))
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-ocid={`appeals.confirm_button.${i + 1}`}
+                    onClick={() => handleApprove(appeal)}
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{
+                      background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                    }}
+                  >
+                    ✓ Onayla
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid={`appeals.delete_button.${i + 1}`}
+                    onClick={() => handleReject(appeal)}
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold transition-opacity hover:opacity-90"
+                    style={{
+                      background: "rgba(239,68,68,0.2)",
+                      border: "1px solid rgba(239,68,68,0.4)",
+                      color: "#f87171",
+                    }}
+                  >
+                    ✕ Reddet
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {reviewed.length > 0 && (
+        <div>
+          <h3 className="text-white font-semibold mb-3">
+            📋 İncelenen İtirazlar ({reviewed.length})
+          </h3>
+          <div className="space-y-2">
+            {reviewed.map((appeal, i) => (
+              <div
+                key={appeal.id}
+                data-ocid={`appeals.reviewed.item.${i + 1}`}
+                className="flex items-center justify-between p-4 rounded-xl"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div>
+                  <span className="text-white font-mono text-sm">
+                    {appeal.tcNumber}
+                  </span>
+                  {appeal.reviewNote && (
+                    <p className="text-slate-400 text-xs mt-0.5">
+                      {appeal.reviewNote}
+                    </p>
+                  )}
+                </div>
+                <span
+                  className="text-xs px-2 py-1 rounded-lg"
+                  style={{
+                    background:
+                      appeal.status === "approved"
+                        ? "rgba(34,197,94,0.15)"
+                        : "rgba(239,68,68,0.15)",
+                    color: appeal.status === "approved" ? "#4ade80" : "#f87171",
+                  }}
+                >
+                  {appeal.status === "approved"
+                    ? "✓ Onaylandı"
+                    : "✕ Reddedildi"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const REPORT_TYPES: Record<string, string> = {
+  visitors_summary: "Ziyaretçi Özeti",
+  blacklist_activity: "Kara Liste Aktivitesi",
+  contractor_compliance: "Müteahhit Uyum",
+};
+const FREQ_LABELS: Record<string, string> = {
+  daily: "Günlük",
+  weekly: "Haftalık",
+  monthly: "Aylık",
+};
+
+function ScheduledReportsTab({
+  companyId,
+  visitors,
+  blacklist,
+  permits,
+}: {
+  companyId: string;
+  visitors: Visitor[];
+  blacklist: BlacklistEntry[];
+  permits: ContractorPermit[];
+}) {
+  const [reports, setReports] = React.useState<ScheduledReport[]>(() =>
+    getScheduledReports(companyId),
+  );
+  const [form, setForm] = React.useState({
+    name: "",
+    frequency: "weekly" as ScheduledReport["frequency"],
+    reportType: "visitors_summary" as ScheduledReport["reportType"],
+    dayOfWeek: 1,
+    dayOfMonth: 1,
+  });
+  const [reportModal, setReportModal] = React.useState<ScheduledReport | null>(
+    null,
+  );
+
+  const refresh = () => setReports(getScheduledReports(companyId));
+
+  const handleAdd = () => {
+    if (!form.name.trim()) {
+      toast.error("Rapor adı zorunludur");
+      return;
+    }
+    const r: ScheduledReport = {
+      ...form,
+      id: Math.random().toString(36).slice(2),
+      companyId,
+      enabled: true,
+      createdAt: Date.now(),
+    };
+    saveScheduledReport(r);
+    refresh();
+    setForm({
+      name: "",
+      frequency: "weekly",
+      reportType: "visitors_summary",
+      dayOfWeek: 1,
+      dayOfMonth: 1,
+    });
+    toast.success("Zamanlı rapor eklendi");
+  };
+
+  const handleDelete = (id: string) => {
+    deleteScheduledReport(companyId, id);
+    refresh();
+    toast.success("Rapor silindi");
+  };
+
+  const generateReport = (r: ScheduledReport) => {
+    setReportModal(r);
+    saveScheduledReport({ ...r, lastGeneratedAt: Date.now() });
+    refresh();
+  };
+
+  const renderReportContent = (r: ScheduledReport) => {
+    if (r.reportType === "visitors_summary") {
+      const last7 = visitors.filter(
+        (v) => Date.now() - v.createdAt < 7 * 24 * 3600000,
+      );
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Toplam Ziyaretçi (7 gün)", value: last7.length },
+              {
+                label: "Aktif Ziyaretçi",
+                value: visitors.filter((v) => v.status === "active").length,
+              },
+              {
+                label: "Ayrılan (7 gün)",
+                value: last7.filter((v) => v.status === "departed").length,
+              },
+              {
+                label: "Ort. Kalış (dk)",
+                value: Math.round(
+                  last7
+                    .filter((v) => v.departureTime)
+                    .reduce(
+                      (s, v) => s + (v.departureTime! - v.arrivalTime) / 60000,
+                      0,
+                    ) / (last7.filter((v) => v.departureTime).length || 1),
+                ),
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="p-3 rounded-xl text-center"
+                style={{ background: "rgba(14,165,233,0.1)" }}
+              >
+                <p className="text-[#0ea5e9] font-bold text-xl">{item.value}</p>
+                <p className="text-slate-400 text-xs">{item.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    if (r.reportType === "blacklist_activity") {
+      return (
+        <div className="space-y-2">
+          <p className="text-slate-300 text-sm">
+            Kara listede {blacklist.length} kayıt
+          </p>
+          {blacklist.slice(0, 5).map((b) => (
+            <div
+              key={b.idNumber}
+              className="flex justify-between p-2 rounded-lg"
+              style={{ background: "rgba(239,68,68,0.08)" }}
+            >
+              <span className="text-white font-mono text-sm">{b.idNumber}</span>
+              <span className="text-slate-400 text-xs">
+                {b.reasonCategory ?? "Genel"}
+              </span>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    if (r.reportType === "contractor_compliance") {
+      const expired = permits.filter(
+        (p) => new Date(p.expiryDate) < new Date(),
+      );
+      const expiring = permits.filter((p) => {
+        const d = new Date(p.expiryDate);
+        const diff = d.getTime() - Date.now();
+        return diff > 0 && diff < 30 * 24 * 3600000;
+      });
+      return (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Toplam İzin", value: permits.length, color: "#0ea5e9" },
+              {
+                label: "Süresi Dolmuş",
+                value: expired.length,
+                color: "#ef4444",
+              },
+              {
+                label: "30 Gün İçinde Dolacak",
+                value: expiring.length,
+                color: "#f59e0b",
+              },
+              {
+                label: "Geçerli",
+                value: permits.length - expired.length,
+                color: "#22c55e",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="p-3 rounded-xl text-center"
+                style={{ background: "rgba(255,255,255,0.05)" }}
+              >
+                <p className="font-bold text-xl" style={{ color: item.color }}>
+                  {item.value}
+                </p>
+                <p className="text-slate-400 text-xs">{item.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Add form */}
+      <div
+        className="p-5 rounded-2xl"
+        style={{
+          background: "rgba(14,165,233,0.06)",
+          border: "1.5px solid rgba(14,165,233,0.2)",
+        }}
+      >
+        <h3 className="text-white font-semibold mb-4">➕ Yeni Zamanlı Rapor</h3>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <input
+            data-ocid="scheduledreports.name.input"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Rapor adı"
+            className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+          />
+          <select
+            data-ocid="scheduledreports.type.select"
+            value={form.reportType}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                reportType: e.target.value as ScheduledReport["reportType"],
+              }))
+            }
+            className="px-3 py-2 rounded-xl bg-[#0f1729] border border-white/15 text-white text-sm focus:outline-none"
+          >
+            <option value="visitors_summary">Ziyaretçi Özeti</option>
+            <option value="blacklist_activity">Kara Liste Aktivitesi</option>
+            <option value="contractor_compliance">Müteahhit Uyum</option>
+          </select>
+          <select
+            data-ocid="scheduledreports.frequency.select"
+            value={form.frequency}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                frequency: e.target.value as ScheduledReport["frequency"],
+              }))
+            }
+            className="px-3 py-2 rounded-xl bg-[#0f1729] border border-white/15 text-white text-sm focus:outline-none"
+          >
+            <option value="daily">Günlük</option>
+            <option value="weekly">Haftalık</option>
+            <option value="monthly">Aylık</option>
+          </select>
+          {form.frequency === "weekly" && (
+            <select
+              value={form.dayOfWeek}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, dayOfWeek: Number(e.target.value) }))
+              }
+              className="px-3 py-2 rounded-xl bg-[#0f1729] border border-white/15 text-white text-sm focus:outline-none"
+            >
+              {[
+                "Pazar",
+                "Pazartesi",
+                "Salı",
+                "Çarşamba",
+                "Perşembe",
+                "Cuma",
+                "Cumartesi",
+              ].map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          )}
+          {form.frequency === "monthly" && (
+            <select
+              value={form.dayOfMonth}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, dayOfMonth: Number(e.target.value) }))
+              }
+              className="px-3 py-2 rounded-xl bg-[#0f1729] border border-white/15 text-white text-sm focus:outline-none"
+            >
+              {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>
+                  {d}. gün
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <button
+          type="button"
+          data-ocid="scheduledreports.submit_button"
+          onClick={handleAdd}
+          className="mt-3 px-5 py-2 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+        >
+          Rapor Ekle
+        </button>
+      </div>
+
+      {/* List */}
+      {reports.length === 0 ? (
+        <div
+          data-ocid="scheduledreports.empty_state"
+          className="text-center py-12 text-slate-500"
+        >
+          Henüz zamanlı rapor yok
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {reports.map((r, i) => (
+            <div
+              key={r.id}
+              data-ocid={`scheduledreports.item.${i + 1}`}
+              className="flex items-center justify-between p-4 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1.5px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <div className="flex-1">
+                <p className="text-white font-semibold text-sm">{r.name}</p>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  {FREQ_LABELS[r.frequency]} • {REPORT_TYPES[r.reportType]}
+                  {r.lastGeneratedAt && (
+                    <span className="ml-2">
+                      • Son:{" "}
+                      {new Date(r.lastGeneratedAt).toLocaleDateString("tr-TR")}
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-ocid={`scheduledreports.primary_button.${i + 1}`}
+                  onClick={() => generateReport(r)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{
+                    background: "rgba(14,165,233,0.2)",
+                    border: "1px solid rgba(14,165,233,0.4)",
+                    color: "#38bdf8",
+                  }}
+                >
+                  Şimdi Oluştur
+                </button>
+                <button
+                  type="button"
+                  data-ocid={`scheduledreports.delete_button.${i + 1}`}
+                  onClick={() => handleDelete(r.id)}
+                  className="px-2 py-1.5 rounded-lg text-xs text-red-400 hover:text-red-300 transition-colors"
+                  style={{ background: "rgba(239,68,68,0.1)" }}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Report Modal */}
+      {reportModal && (
+        <div
+          data-ocid="scheduledreports.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+        >
+          <div
+            className="w-full max-w-lg p-6 rounded-2xl"
+            style={{
+              background: "#1e293b",
+              border: "1.5px solid rgba(14,165,233,0.3)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-white font-bold text-lg">
+                📊 {reportModal.name}
+              </h3>
+              <button
+                type="button"
+                data-ocid="scheduledreports.close_button"
+                onClick={() => setReportModal(null)}
+                className="text-slate-400 hover:text-white text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-slate-400 text-xs mb-4">
+              {REPORT_TYPES[reportModal.reportType]} •{" "}
+              {FREQ_LABELS[reportModal.frequency]} •{" "}
+              {new Date().toLocaleDateString("tr-TR")}
+            </p>
+            {renderReportContent(reportModal)}
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="mt-5 w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+            >
+              🖨️ Yazdır
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeadcountTab({ companyId }: { companyId: string }) {
+  const [visitors, setVisitors] = React.useState<Visitor[]>([]);
+
+  React.useEffect(() => {
+    const load = () =>
+      setVisitors(getVisitors(companyId).filter((v) => v.status === "active"));
+    load();
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
+  }, [companyId]);
+
+  const activeVisitors = visitors.filter((v) => v.status === "active");
+
+  const byFloor: Record<string, Visitor[]> = {};
+  for (const v of activeVisitors) {
+    const floor = v.floor || "Belirtilmemiş";
+    if (!byFloor[floor]) byFloor[floor] = [];
+    byFloor[floor].push(v);
+  }
+
+  const handlePrint = () => {
+    const lines = activeVisitors.map(
+      (v) =>
+        `${v.name} | ${v.category ?? "—"} | ${v.floor ?? "—"} | Giriş: ${new Date(v.arrivalTime).toLocaleString("tr-TR")}`,
+    );
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(
+      `<html><head><title>Anlık Headcount</title></head><body><h2>Şu An Binada: ${activeVisitors.length} Kişi</h2><pre>${lines.join("\n")}</pre></body></html>`,
+    );
+    win.document.close();
+    win.print();
+  };
+
+  return (
+    <div data-ocid="headcount.section">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="font-bold text-3xl" style={{ color: "#0ea5e9" }}>
+            Şu An Binada: {activeVisitors.length} Kişi
+          </h2>
+          <p className="text-slate-400 text-sm mt-1">
+            Her 30 saniyede otomatik güncellenir
+          </p>
+        </div>
+        <button
+          type="button"
+          data-ocid="headcount.primary_button"
+          onClick={handlePrint}
+          className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+          style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+        >
+          🖨️ Yazdır
+        </button>
+      </div>
+
+      {activeVisitors.length === 0 ? (
+        <div
+          data-ocid="headcount.empty_state"
+          className="text-center py-12 text-slate-500"
+        >
+          <div className="text-4xl mb-2">🏢</div>
+          <p>Şu anda binada aktif ziyaretçi yok.</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(byFloor).map(([floor, floorVisitors]) => (
+            <div
+              key={floor}
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold mb-4">
+                🏢 {floor}
+                <span
+                  className="ml-2 px-2 py-0.5 rounded-full text-xs"
+                  style={{
+                    background: "rgba(14,165,233,0.2)",
+                    color: "#38bdf8",
+                  }}
+                >
+                  {floorVisitors.length} kişi
+                </span>
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {floorVisitors.map((v) => (
+                  <div
+                    key={v.visitorId}
+                    className="flex items-center gap-3 p-3 rounded-xl"
+                    style={{
+                      background:
+                        v.label === "vip"
+                          ? "rgba(245,158,11,0.12)"
+                          : "rgba(255,255,255,0.04)",
+                      border:
+                        v.label === "vip"
+                          ? "1px solid rgba(245,158,11,0.4)"
+                          : "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
+                      style={{
+                        background: "rgba(14,165,233,0.2)",
+                        color: "#38bdf8",
+                      }}
+                    >
+                      {v.name.slice(0, 1)}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-white text-sm font-medium truncate">
+                        {v.label === "vip" && <span className="mr-1">⭐</span>}
+                        {v.name}
+                      </p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {v.category && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: "rgba(255,255,255,0.08)",
+                              color: "#94a3b8",
+                            }}
+                          >
+                            {v.category}
+                          </span>
+                        )}
+                        <span className="text-xs text-slate-500">
+                          {new Date(v.arrivalTime).toLocaleTimeString("tr-TR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedbackTab({
+  companyId,
+  company,
+}: { companyId: string; company: Company | null }) {
+  const [feedbacks, setFeedbacks] = React.useState<VisitorFeedback[]>(() =>
+    getVisitorFeedback(companyId),
+  );
+  const [filterCat, setFilterCat] = React.useState<string>("all");
+  const [filterStatus, setFilterStatus] = React.useState<string>("all");
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const [adminNoteInput, setAdminNoteInput] = React.useState<
+    Record<string, string>
+  >({});
+
+  const reload = () => setFeedbacks(getVisitorFeedback(companyId));
+
+  const feedbackLink = `${window.location.origin}/feedback/${company?.loginCode ?? ""}`;
+
+  const filtered = feedbacks.filter((f) => {
+    if (filterCat !== "all" && f.category !== filterCat) return false;
+    if (filterStatus !== "all" && f.status !== filterStatus) return false;
+    return true;
+  });
+
+  const catLabel: Record<string, string> = {
+    complaint: "Şikayet",
+    suggestion: "Öneri",
+    compliment: "Memnuniyet",
+  };
+  const catColor: Record<string, string> = {
+    complaint: "#ef4444",
+    suggestion: "#0ea5e9",
+    compliment: "#22c55e",
+  };
+  const statusLabel: Record<string, string> = {
+    new: "Yeni",
+    reviewed: "İncelendi",
+    resolved: "Çözüldü",
+  };
+  const statusColor: Record<string, string> = {
+    new: "#f59e0b",
+    reviewed: "#0ea5e9",
+    resolved: "#22c55e",
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="text-white font-bold text-lg">💬 Geri Bildirimler</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-slate-400 text-xs">Paylaşılabilir link:</span>
+          <button
+            type="button"
+            data-ocid="feedback.share.button"
+            onClick={() => {
+              navigator.clipboard?.writeText(feedbackLink).catch(() => {
+                const ta = document.createElement("textarea");
+                ta.value = feedbackLink;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand("copy");
+                document.body.removeChild(ta);
+              });
+              toast.success("Geri bildirim linki kopyalandı");
+            }}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+            style={{
+              background: "rgba(14,165,233,0.2)",
+              border: "1px solid rgba(14,165,233,0.4)",
+            }}
+          >
+            📋 Linki Kopyala
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
+        {["all", "complaint", "suggestion", "compliment"].map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            data-ocid={`feedback.filter_cat_${cat}.button`}
+            onClick={() => setFilterCat(cat)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{
+              background:
+                filterCat === cat
+                  ? "rgba(14,165,233,0.25)"
+                  : "rgba(255,255,255,0.05)",
+              border: `1px solid ${filterCat === cat ? "rgba(14,165,233,0.5)" : "rgba(255,255,255,0.1)"}`,
+              color: filterCat === cat ? "#0ea5e9" : "#94a3b8",
+            }}
+          >
+            {cat === "all" ? "Tümü" : catLabel[cat]}
+          </button>
+        ))}
+        <div className="w-px bg-white/10 mx-1" />
+        {["all", "new", "reviewed", "resolved"].map((st) => (
+          <button
+            key={st}
+            type="button"
+            data-ocid={`feedback.filter_status_${st}.button`}
+            onClick={() => setFilterStatus(st)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={{
+              background:
+                filterStatus === st
+                  ? "rgba(245,158,11,0.2)"
+                  : "rgba(255,255,255,0.05)",
+              border: `1px solid ${filterStatus === st ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.1)"}`,
+              color: filterStatus === st ? "#f59e0b" : "#94a3b8",
+            }}
+          >
+            {st === "all" ? "Tüm Durumlar" : statusLabel[st]}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div
+          data-ocid="feedback.empty_state"
+          className="text-center py-12 text-slate-500"
+        >
+          <div className="text-4xl mb-3">💬</div>
+          <p className="font-medium">Henüz geri bildirim yok</p>
+          <p className="text-sm mt-1">
+            Ziyaretçiler linki kullanarak geri bildirim gönderebilir
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((fb, idx) => {
+            const isExpanded = expandedId === fb.id;
+            return (
+              <button
+                type="button"
+                key={fb.id}
+                data-ocid={`feedback.item.${idx + 1}`}
+                className="p-4 rounded-2xl cursor-pointer text-left w-full"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: `1px solid ${fb.status === "new" ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.08)"}`,
+                }}
+                onClick={() => setExpandedId(isExpanded ? null : fb.id)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-bold"
+                      style={{
+                        background: `${catColor[fb.category]}22`,
+                        color: catColor[fb.category],
+                        border: `1px solid ${catColor[fb.category]}44`,
+                      }}
+                    >
+                      {catLabel[fb.category]}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-xs font-bold"
+                      style={{
+                        background: `${statusColor[fb.status]}22`,
+                        color: statusColor[fb.status],
+                        border: `1px solid ${statusColor[fb.status]}44`,
+                      }}
+                    >
+                      {statusLabel[fb.status]}
+                    </span>
+                    {fb.isAnonymous ? (
+                      <span className="text-slate-500 text-xs">Anonim</span>
+                    ) : (
+                      <span className="text-slate-400 text-xs">
+                        {fb.visitorName || "İsimsiz"}
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-slate-500 text-xs shrink-0">
+                    {new Date(fb.submittedAt).toLocaleDateString("tr-TR")}
+                  </span>
+                </div>
+                <p className="text-slate-300 text-sm mt-2 line-clamp-2">
+                  {fb.message}
+                </p>
+
+                {isExpanded && (
+                  <div
+                    className="mt-4 pt-4 space-y-4"
+                    style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <p className="text-white text-sm">{fb.message}</p>
+
+                    {/* Admin Note */}
+                    <div>
+                      <p className="text-slate-400 text-xs block mb-1">
+                        Dahili Not
+                      </p>
+                      <textarea
+                        className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none resize-none"
+                        style={{
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          minHeight: "64px",
+                        }}
+                        placeholder="Dahili notunuzu yazın..."
+                        value={adminNoteInput[fb.id] ?? (fb.adminNote || "")}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onChange={(e) =>
+                          setAdminNoteInput((prev) => ({
+                            ...prev,
+                            [fb.id]: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+
+                    {/* Status change */}
+                    <div
+                      className="flex flex-wrap gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {(["new", "reviewed", "resolved"] as const).map((st) => (
+                        <button
+                          key={st}
+                          type="button"
+                          data-ocid={`feedback.status_${st}.button`}
+                          onClick={() => {
+                            const updated = {
+                              ...fb,
+                              status: st,
+                              adminNote: adminNoteInput[fb.id] ?? fb.adminNote,
+                            };
+                            updateVisitorFeedback(updated);
+                            reload();
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          style={{
+                            background:
+                              fb.status === st
+                                ? `${statusColor[st]}33`
+                                : "rgba(255,255,255,0.05)",
+                            border: `1px solid ${fb.status === st ? `${statusColor[st]}66` : "rgba(255,255,255,0.1)"}`,
+                            color:
+                              fb.status === st ? statusColor[st] : "#94a3b8",
+                          }}
+                        >
+                          {statusLabel[st]}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        data-ocid="feedback.save_note.button"
+                        onClick={() => {
+                          const updated = {
+                            ...fb,
+                            adminNote: adminNoteInput[fb.id] ?? fb.adminNote,
+                          };
+                          updateVisitorFeedback(updated);
+                          reload();
+                          toast.success("Not kaydedildi");
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{
+                          background: "rgba(14,165,233,0.25)",
+                          border: "1px solid rgba(14,165,233,0.4)",
+                        }}
+                      >
+                        💾 Kaydet
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
   const company = findCompanyById(session.companyId)!;
   const [tab, setTab] = useState<Tab>("visitors");
+  const [sarIdInput, setSarIdInput] = useState("");
+  const [sarRequests, setSarRequests] = useState<
+    {
+      id: string;
+      idNumber: string;
+      name: string;
+      status: "pending" | "approved" | "rejected";
+      createdAt: number;
+    }[]
+  >(() => {
+    try {
+      const s = getSession();
+      if (!s) return [];
+      return JSON.parse(
+        localStorage.getItem(`sarRequests_${s.companyId}`) || "[]",
+      );
+    } catch {
+      return [];
+    }
+  });
+
+  const saveSarRequests = (reqs: typeof sarRequests) => {
+    const s = getSession();
+    if (!s) return;
+    localStorage.setItem(`sarRequests_${s.companyId}`, JSON.stringify(reqs));
+    setSarRequests(reqs);
+  };
+
+  const submitSarRequest = () => {
+    if (!sarIdInput.trim()) return;
+    const existing = sarRequests.find(
+      (r) => r.idNumber === sarIdInput.trim() && r.status === "pending",
+    );
+    if (existing) {
+      toast.error("Bu TC için zaten bekleyen bir talep var.");
+      return;
+    }
+    const visitorMatch = visitors.find((v) => v.idNumber === sarIdInput.trim());
+    const newReq = {
+      id: `sar_${Date.now()}`,
+      idNumber: sarIdInput.trim(),
+      name: visitorMatch?.name ?? sarIdInput.trim(),
+      status: "pending" as const,
+      createdAt: Date.now(),
+    };
+    saveSarRequests([...sarRequests, newReq]);
+    setSarIdInput("");
+    toast.success("KVKK talebi oluşturuldu.");
+  };
+
+  const approveSarRequest = (id: string, idNumber: string) => {
+    // Delete all visitor records with this ID
+    const toDelete = visitors.filter((v) => v.idNumber === idNumber);
+    for (const v of toDelete) {
+      saveVisitor({
+        ...v,
+        status: "departed",
+        departureTime: v.departureTime ?? Date.now(),
+      });
+    }
+    const updated = sarRequests.map((r) =>
+      r.id === id ? { ...r, status: "approved" as const } : r,
+    );
+    saveSarRequests(updated);
+    toast.success(`${toDelete.length} kayıt silindi. Talep onaylandı.`);
+    reload();
+  };
+
+  const rejectSarRequest = (id: string) => {
+    const updated = sarRequests.map((r) =>
+      r.id === id ? { ...r, status: "rejected" as const } : r,
+    );
+    saveSarRequests(updated);
+    toast.info("Talep reddedildi.");
+  };
   const [blReportFilter, setBlReportFilter] = useState<
     "all" | "blocked" | "cleared"
   >("all");
@@ -536,6 +1667,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     "all" | "active" | "departed"
   >("all");
   const [visitorSearch, setVisitorSearch] = useState("");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [timeFilter, setTimeFilter] = useState<
     "today" | "week" | "month" | "all"
   >("today");
@@ -589,6 +1721,28 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     getLockdown(getSession()!.companyId),
   );
   const [lockdownConfirm, setLockdownConfirm] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [highContrast, setHighContrast] = useState(
+    () => localStorage.getItem("safentry_high_contrast") === "1",
+  );
+  const toggleHighContrast = () => {
+    const next = !highContrast;
+    setHighContrast(next);
+    if (next) {
+      localStorage.setItem("safentry_high_contrast", "1");
+      document.body.classList.add("high-contrast");
+    } else {
+      localStorage.removeItem("safentry_high_contrast");
+      document.body.classList.remove("high-contrast");
+    }
+  };
+  // Apply persisted high contrast on mount
+  if (
+    typeof window !== "undefined" &&
+    localStorage.getItem("safentry_high_contrast") === "1"
+  ) {
+    document.body.classList.add("high-contrast");
+  }
   const [selectedStaffPerf, setSelectedStaffPerf] = useState<{
     name: string;
     total: number;
@@ -610,6 +1764,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [profileForm, setProfileForm] = useState<Partial<Company>>(
     company ?? {},
   );
+  // Working hours summary modal
+  const [mesaiOzetiOpen, setMesaiOzetiOpen] = useState(false);
+
   // Onboarding banner
   const onboardingDismissKey = `safentry_onboarding_dismissed_${session.companyId}`;
   const [onboardingDismissed, setOnboardingDismissed] = useState(
@@ -666,11 +1823,6 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [reinviteOpen, setReinviteOpen] = useState(false);
   const [reinviteVisitorData, setReinviteVisitorData] =
     useState<Visitor | null>(null);
-  const [reinviteDate, setReinviteDate] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
-  const [reinviteTime, setReinviteTime] = useState("10:00");
-  const [reinvitePurpose, setReinvitePurpose] = useState("");
 
   // Approved visitors state
   const [approvedVisitors, setApprovedVisitors] = useState<ApprovedVisitor[]>(
@@ -714,6 +1866,27 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   // Parking state
   const [newParkingLabel, setNewParkingLabel] = useState("");
 
+  // New feature states
+  const [gatePassLogs, setGatePassLogs] = useState<GatePassLog[]>(() =>
+    getGatePassLogs(session.companyId),
+  );
+  const [meetingRooms, setMeetingRooms] = useState<MeetingRoom[]>(() =>
+    getMeetingRooms(session.companyId),
+  );
+  const [badgeReprintLogs, setBadgeReprintLogs] = useState<BadgeReprintLog[]>(
+    () => getBadgeReprintLogs(session.companyId),
+  );
+  const [meetingRoomForm, setMeetingRoomForm] = useState({
+    name: "",
+    floor: "",
+    capacity: "10",
+    branchId: "",
+  });
+  const [editMeetingRoom, setEditMeetingRoom] = useState<MeetingRoom | null>(
+    null,
+  );
+  const [showMeetingRoomForm, setShowMeetingRoomForm] = useState(false);
+
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
     setStaffList(getStaffByCompany(session.companyId));
@@ -723,6 +1896,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     setApprovedVisitors(getApprovedVisitors(session.companyId));
     setDepartments(getDepartments(session.companyId));
     setPermits(getPermits(session.companyId));
+    setGatePassLogs(getGatePassLogs(session.companyId));
+    setMeetingRooms(getMeetingRooms(session.companyId));
+    setBadgeReprintLogs(getBadgeReprintLogs(session.companyId));
     refreshSession();
   }, [session.companyId]);
 
@@ -944,6 +2120,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     setAnnouncements(getAnnouncements(session.companyId));
   };
 
+  const [approvalChainCfg, setApprovalChainCfg] = React.useState(() =>
+    getApprovalChainConfig(session.companyId),
+  );
   const saveProfile = () => {
     if (!company) return;
     saveCompany({ ...company, ...profileForm });
@@ -1137,30 +2316,6 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     reload();
   };
 
-  // Re-invite helper
-  const submitReinvite = () => {
-    if (!reinviteVisitorData) return;
-    const appt: Appointment = {
-      id: Math.random().toString(36).substring(2, 9),
-      companyId: session.companyId,
-      visitorName: reinviteVisitorData.name,
-      visitorId: reinviteVisitorData.idNumber,
-      hostName:
-        staffList.find((s) => s.staffId === reinviteVisitorData.hostStaffId)
-          ?.name ?? "",
-      appointmentDate: reinviteDate,
-      appointmentTime: reinviteTime,
-      purpose: reinvitePurpose || reinviteVisitorData.visitReason,
-      status: "pending",
-      createdBy: session.companyId,
-      createdAt: Date.now(),
-    };
-    saveAppointment(appt);
-    setReinviteOpen(false);
-    setReinviteVisitorData(null);
-    reload();
-  };
-
   const removeScreeningQuestion = (id: string) => {
     const fresh = findCompanyById(session.companyId);
     if (!fresh) return;
@@ -1296,6 +2451,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         if (!h?.name.toLowerCase().includes(filterPersonnel.toLowerCase()))
           return false;
       }
+      if (branchFilter !== "all") {
+        if ((v.customFieldValues?.branch ?? "") !== branchFilter) return false;
+      }
       return true;
     });
 
@@ -1342,6 +2500,34 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       key: "belongings",
       label: `📦 Emanetler (${getBelongings(session.companyId).filter((b) => !b.returnedAt).length})`,
     },
+    { key: "branches", label: "🏢 Şubeler" },
+    { key: "workcalendar", label: "📅 Çalışma Takvimi" },
+    { key: "kvkkrequests", label: "🔐 KVKK Talepleri" },
+    { key: "gatelogs", label: "🚪 Geçiş Logu" },
+    {
+      key: "meetingrooms",
+      label: `🏛️ Toplantı Odaları (${meetingRooms.length})`,
+    },
+    { key: "badgelogs", label: `🖨️ Rozet Logları (${badgeReprintLogs.length})` },
+    {
+      key: "cardtracking",
+      label: `💳 Kart Takibi (${getUnreturnedCards(session.companyId).length})`,
+    },
+    {
+      key: "hostreviews",
+      label: `⭐ Host Değerlendirmeleri (${getHostReviews(session.companyId).length})`,
+    },
+    { key: "headcount", label: "👥 Anlık Headcount" },
+    {
+      key: "appeals",
+      label: `⚖️ İtirazlar (${getBlacklistAppeals(session.companyId).filter((a) => a.status === "pending").length})`,
+    },
+    { key: "scheduledreports", label: "📅 Zamanlanmış Raporlar" },
+    {
+      key: "feedback",
+      label: `💬 Geri Bildirimler (${getVisitorFeedback(session.companyId).filter((x) => x.status === "new").length})`,
+    },
+    { key: "parking", label: "🅿️ Otopark" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -1571,7 +2757,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     findCompanyById(session.companyId)?.customFields ?? [];
 
   return (
-    <div className="min-h-screen" style={{ background: "#0a0f1e" }}>
+    <div
+      id="main-content"
+      className="min-h-screen"
+      style={{ background: "#0a0f1e" }}
+    >
       <ConfirmModal
         open={confirmOpen}
         onConfirm={confirmAction}
@@ -1721,6 +2911,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                               {v.visitReason}
                             </div>
                           )}
+                          {v.uploadedDocuments &&
+                            v.uploadedDocuments.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1">
+                                <span className="text-[#0ea5e9] text-xs">
+                                  📎 {v.uploadedDocuments.length} belge
+                                </span>
+                              </div>
+                            )}
                         </div>
                         <div className="text-right">
                           {v.departureTime && (
@@ -1828,6 +3026,49 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         </div>
         <div className="flex items-center gap-3">
           <NotificationCenter companyId={session.companyId} />
+          <button
+            type="button"
+            data-ocid="company_dashboard.self_reg_portal.button"
+            onClick={() => {
+              const loginCode =
+                findCompanyById(session.companyId)?.loginCode ?? "";
+              copyToClipboard(
+                `${window.location.origin}/self-prereg/${loginCode}`,
+              );
+              toast.success("Self-Reg portal linki kopyalandı");
+            }}
+            title="Self-Reg Portal Linki Kopyala"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-purple-300 border border-purple-500/30 hover:bg-purple-900/20 transition-colors"
+            aria-label="Self-Reg Portal Linki Kopyala"
+          >
+            🔗 Self-Reg
+          </button>
+          <button
+            type="button"
+            data-ocid="company_dashboard.csv_import.open_modal_button"
+            onClick={() => setShowCsvImport(true)}
+            title="CSV ile Toplu Ziyaretçi Aktar"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-green-300 border border-green-500/30 hover:bg-green-900/20 transition-colors"
+            aria-label="CSV ile Toplu Ziyaretçi Aktar"
+          >
+            📥 CSV Aktar
+          </button>
+          <button
+            type="button"
+            data-ocid="company_dashboard.high_contrast.toggle"
+            onClick={toggleHighContrast}
+            title={highContrast ? "Normal Görünüm" : "Yüksek Kontrast"}
+            className="p-2 rounded-xl transition-all hover:bg-white/10"
+            style={{ color: highContrast ? "#facc15" : "#94a3b8" }}
+            aria-label={
+              highContrast
+                ? "Normal görünüme geç"
+                : "Yüksek kontrast moduna geç"
+            }
+            aria-pressed={highContrast}
+          >
+            🌓
+          </button>
           <LangSwitcher onChange={onRefresh} />
           <button
             type="button"
@@ -1869,6 +3110,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       </div>
 
       {/* Lobby Display */}
+      {showCsvImport && (
+        <CsvImportModal
+          companyId={session.companyId}
+          onClose={() => setShowCsvImport(false)}
+          onImported={() => {
+            setShowCsvImport(false);
+          }}
+        />
+      )}
+
       {lobbyOpen && (
         <div
           data-ocid="lobby_display.panel"
@@ -1895,6 +3146,20 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             >
               {company?.name}
             </div>
+            {(() => {
+              const mainBranch = getBranches(session.companyId).find(
+                (b) => b.isMain,
+              );
+              const otherBranches = getBranches(session.companyId).filter(
+                (b) => !b.isMain,
+              );
+              return mainBranch || otherBranches.length > 0 ? (
+                <div className="text-slate-400 text-lg mb-1">
+                  🏢 {mainBranch?.name ?? otherBranches[0]?.name}
+                  {mainBranch?.address ? ` — ${mainBranch.address}` : ""}
+                </div>
+              ) : null;
+            })()}
             <div className="text-7xl font-mono text-white">
               {lobbyTime.toLocaleTimeString("tr-TR", {
                 hour: "2-digit",
@@ -1950,7 +3215,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                           <div className="text-white text-lg font-semibold">
                             {a.visitorName}
                           </div>
-                          <div className="text-slate-400">{a.hostName}</div>
+                          <div className="flex items-center gap-2 text-slate-400">
+                            {a.hostStaffId && getStaffPhoto(a.hostStaffId) && (
+                              <img
+                                src={getStaffPhoto(a.hostStaffId)}
+                                alt={a.hostName}
+                                className="w-6 h-6 rounded-full object-cover"
+                              />
+                            )}
+                            {a.hostName}
+                          </div>
                         </div>
                         <div className="text-teal-400 text-xl font-mono">
                           {a.appointmentTime}
@@ -2239,6 +3513,25 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 placeholder={t(lang, "search")}
                 className="flex-1 min-w-[200px] px-4 py-1.5 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
               />
+              {getBranches(session.companyId).length > 1 && (
+                <select
+                  data-ocid="visitors.branch.select"
+                  value={branchFilter}
+                  onChange={(e) => setBranchFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl text-xs text-white outline-none"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <option value="all">Tüm Şubeler</option>
+                  {getBranches(session.companyId).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
                 data-ocid="visitors.filter.toggle"
@@ -2470,7 +3763,6 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                             e.stopPropagation();
                             setReinviteVisitorData(v);
                             setReinviteOpen(true);
-                            setReinvitePurpose(v.visitReason);
                           }}
                           className="px-2 py-1 rounded-lg text-xs font-medium whitespace-nowrap"
                           style={{
@@ -2540,6 +3832,22 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* STAFF TAB */}
         {tab === "staff" && (
           <div>
+            <div className="flex items-center justify-between mb-5">
+              <p className="text-white font-semibold">Personel Yönetimi</p>
+              <button
+                type="button"
+                data-ocid="staff.mesai_ozeti.button"
+                onClick={() => setMesaiOzetiOpen(true)}
+                className="px-4 py-2 rounded-xl text-sm text-white font-medium flex items-center gap-2"
+                style={{
+                  background:
+                    "linear-gradient(135deg, rgba(14,165,233,0.3), rgba(14,165,233,0.15))",
+                  border: "1px solid rgba(14,165,233,0.4)",
+                }}
+              >
+                ⏱️ Mesai Özeti
+              </button>
+            </div>
             {/* Add staff by code */}
             <div className="flex gap-3 mb-6">
               <input
@@ -2651,6 +3959,147 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             )}
           </div>
         )}
+
+        {/* MESAI OZETI MODAL */}
+        {mesaiOzetiOpen &&
+          (() => {
+            const sessions: {
+              id: string;
+              staffId: string;
+              staffName: string;
+              loginTime: number;
+              logoutTime?: number;
+            }[] = (() => {
+              try {
+                return JSON.parse(
+                  localStorage.getItem(
+                    `safentry_staff_sessions_${session.companyId}`,
+                  ) || "[]",
+                );
+              } catch {
+                return [];
+              }
+            })();
+            const now = Date.now();
+            const weekAgo = now - 7 * 24 * 3600000;
+            const monthAgo = now - 30 * 24 * 3600000;
+            const staffSummary = staffList.map((s) => {
+              const mySessions = sessions.filter(
+                (x) => x.staffId === s.staffId,
+              );
+              const calcHours = (from: number) =>
+                mySessions
+                  .filter((x) => x.loginTime >= from)
+                  .reduce((sum, x) => {
+                    const end =
+                      x.logoutTime ?? Math.min(now, x.loginTime + 12 * 3600000);
+                    return sum + Math.max(0, end - x.loginTime);
+                  }, 0);
+              const weekMs = calcHours(weekAgo);
+              const monthMs = calcHours(monthAgo);
+              const fmtHours = (ms: number) => {
+                const h = Math.floor(ms / 3600000);
+                const m = Math.floor((ms % 3600000) / 60000);
+                return `${h} sa ${m} dk`;
+              };
+              return {
+                name: s.name,
+                staffId: s.staffId,
+                weekHours: fmtHours(weekMs),
+                monthHours: fmtHours(monthMs),
+                sessionCount: mySessions.length,
+              };
+            });
+            return (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                style={{ background: "rgba(0,0,0,0.75)" }}
+                data-ocid="mesai_ozeti.modal"
+              >
+                <div
+                  className="w-full max-w-2xl p-6 rounded-2xl overflow-auto"
+                  style={{
+                    background: "#1e293b",
+                    border: "1.5px solid rgba(14,165,233,0.3)",
+                    maxHeight: "80vh",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-white font-bold text-lg">
+                      ⏱️ Mesai Özeti
+                    </h3>
+                    <button
+                      type="button"
+                      data-ocid="mesai_ozeti.close_button"
+                      onClick={() => setMesaiOzetiOpen(false)}
+                      className="text-slate-400 hover:text-white text-sm px-3 py-1.5 rounded-lg"
+                      style={{ background: "rgba(255,255,255,0.07)" }}
+                    >
+                      ✕ Kapat
+                    </button>
+                  </div>
+                  <div className="overflow-auto rounded-xl border border-white/10">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr
+                          style={{ background: "rgba(255,255,255,0.04)" }}
+                          className="border-b border-white/10"
+                        >
+                          <th className="p-3 text-left text-slate-400 font-medium">
+                            Personel
+                          </th>
+                          <th className="p-3 text-left text-slate-400 font-medium">
+                            Bu Hafta
+                          </th>
+                          <th className="p-3 text-left text-slate-400 font-medium">
+                            Bu Ay
+                          </th>
+                          <th className="p-3 text-left text-slate-400 font-medium">
+                            Toplam Oturum
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {staffSummary.map((s, i) => (
+                          <tr
+                            key={s.staffId}
+                            data-ocid={`mesai_ozeti.row.${i + 1}`}
+                            className="border-b border-white/5"
+                          >
+                            <td className="p-3 text-white font-medium">
+                              {s.name}
+                            </td>
+                            <td className="p-3 text-[#0ea5e9] font-mono text-sm">
+                              {s.weekHours}
+                            </td>
+                            <td className="p-3 text-amber-400 font-mono text-sm">
+                              {s.monthHours}
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className="px-2 py-0.5 rounded-full text-xs font-bold"
+                                style={{
+                                  background: "rgba(168,85,247,0.2)",
+                                  color: "#a855f7",
+                                }}
+                              >
+                                {s.sessionCount}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {staffSummary.length === 0 && (
+                    <p className="text-slate-500 text-sm text-center py-6">
+                      Henüz oturum verisi bulunmuyor.
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
         {/* BLACKLIST TAB */}
         {tab === "blacklist" && (
@@ -3738,6 +5187,362 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </h3>
               <SegmentationAnalysis visitors={visitors} />
             </div>
+            {/* Karşılaştırma Analizi */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <h3 className="text-white font-bold text-base mb-4">
+                📈 Dönemsel Karşılaştırma
+              </h3>
+              {(() => {
+                const now = new Date();
+                const thisWeekStart = new Date(now);
+                thisWeekStart.setDate(now.getDate() - now.getDay());
+                thisWeekStart.setHours(0, 0, 0, 0);
+                const lastWeekStart = new Date(thisWeekStart);
+                lastWeekStart.setDate(lastWeekStart.getDate() - 7);
+                const lastWeekEnd = new Date(thisWeekStart);
+
+                const thisMonthStart = new Date(
+                  now.getFullYear(),
+                  now.getMonth(),
+                  1,
+                );
+                const lastMonthStart = new Date(
+                  now.getFullYear(),
+                  now.getMonth() - 1,
+                  1,
+                );
+                const lastMonthEnd = new Date(thisMonthStart);
+
+                const inRange = (v: Visitor, start: Date, end: Date) => {
+                  const t = v.arrivalTime;
+                  return t >= start.getTime() && t < end.getTime();
+                };
+
+                const thisWeekVisitors = visitors.filter(
+                  (v) => v.arrivalTime >= thisWeekStart.getTime(),
+                );
+                const lastWeekVisitors = visitors.filter((v) =>
+                  inRange(v, lastWeekStart, lastWeekEnd),
+                );
+                const thisMonthVisitors = visitors.filter(
+                  (v) => v.arrivalTime >= thisMonthStart.getTime(),
+                );
+                const lastMonthVisitors = visitors.filter((v) =>
+                  inRange(v, lastMonthStart, lastMonthEnd),
+                );
+
+                const avgSatisfaction = (vs: Visitor[]) => {
+                  const rated = vs.filter((v) => (v.exitRating ?? 0) > 0);
+                  if (rated.length === 0) return null;
+                  return (
+                    rated.reduce((s, v) => s + (v.exitRating ?? 0), 0) /
+                    rated.length
+                  ).toFixed(1);
+                };
+
+                const pctChange = (cur: number, prev: number) => {
+                  if (prev === 0) return cur > 0 ? "+100%" : "—";
+                  const pct = ((cur - prev) / prev) * 100;
+                  return `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%`;
+                };
+                const pctColor = (cur: number, prev: number) => {
+                  if (prev === 0) return "#94a3b8";
+                  return cur >= prev ? "#22c55e" : "#ef4444";
+                };
+
+                const rows = [
+                  {
+                    label: "Bu Hafta vs Geçen Hafta",
+                    curCount: thisWeekVisitors.length,
+                    prevCount: lastWeekVisitors.length,
+                    curSat: avgSatisfaction(thisWeekVisitors),
+                    prevSat: avgSatisfaction(lastWeekVisitors),
+                  },
+                  {
+                    label: "Bu Ay vs Geçen Ay",
+                    curCount: thisMonthVisitors.length,
+                    prevCount: lastMonthVisitors.length,
+                    curSat: avgSatisfaction(thisMonthVisitors),
+                    prevSat: avgSatisfaction(lastMonthVisitors),
+                  },
+                ];
+
+                const barData = [
+                  {
+                    name: "Bu Hafta / Geçen Hafta",
+                    "Bu Dönem": thisWeekVisitors.length,
+                    "Önceki Dönem": lastWeekVisitors.length,
+                  },
+                  {
+                    name: "Bu Ay / Geçen Ay",
+                    "Bu Dönem": thisMonthVisitors.length,
+                    "Önceki Dönem": lastMonthVisitors.length,
+                  },
+                ];
+
+                return (
+                  <div className="space-y-5">
+                    <div style={{ width: "100%", height: 160 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={barData}
+                          margin={{ top: 4, right: 4, left: -20, bottom: 0 }}
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="rgba(255,255,255,0.06)"
+                          />
+                          <XAxis
+                            dataKey="name"
+                            tick={{ fill: "#94a3b8", fontSize: 10 }}
+                          />
+                          <YAxis tick={{ fill: "#94a3b8", fontSize: 10 }} />
+                          <Tooltip
+                            contentStyle={{
+                              background: "#1e293b",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                              borderRadius: 8,
+                              fontSize: 12,
+                            }}
+                            labelStyle={{ color: "#e2e8f0" }}
+                          />
+                          <Bar
+                            dataKey="Bu Dönem"
+                            fill="#0ea5e9"
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar
+                            dataKey="Önceki Dönem"
+                            fill="rgba(14,165,233,0.3)"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {rows.map((row) => (
+                        <div
+                          key={row.label}
+                          data-ocid="stats.comparison.card"
+                          className="p-4 rounded-xl space-y-3"
+                          style={{
+                            background: "rgba(255,255,255,0.04)",
+                            border: "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          <p className="text-slate-400 text-xs font-medium">
+                            {row.label}
+                          </p>
+                          <div className="flex items-end justify-between">
+                            <div>
+                              <p className="text-slate-500 text-xs">
+                                Ziyaretçi Sayısı
+                              </p>
+                              <p className="text-white font-bold text-xl">
+                                {row.curCount}
+                              </p>
+                              <p className="text-slate-400 text-xs">
+                                vs {row.prevCount}
+                              </p>
+                            </div>
+                            <span
+                              className="text-sm font-bold px-2 py-1 rounded-lg"
+                              style={{
+                                background: `${pctColor(row.curCount, row.prevCount)}22`,
+                                color: pctColor(row.curCount, row.prevCount),
+                              }}
+                            >
+                              {pctChange(row.curCount, row.prevCount)}
+                            </span>
+                          </div>
+                          {(row.curSat || row.prevSat) && (
+                            <div
+                              className="flex items-end justify-between pt-2"
+                              style={{
+                                borderTop: "1px solid rgba(255,255,255,0.06)",
+                              }}
+                            >
+                              <div>
+                                <p className="text-slate-500 text-xs">
+                                  Ort. Memnuniyet
+                                </p>
+                                <p className="text-white font-bold">
+                                  ⭐ {row.curSat ?? "—"}
+                                </p>
+                                <p className="text-slate-400 text-xs">
+                                  vs {row.prevSat ?? "—"}
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Kapasite Tahmini */}
+              {(() => {
+                const allVisitors = getVisitors(session.companyId);
+                if (allVisitors.length < 7) {
+                  return (
+                    <div
+                      className="p-5 rounded-2xl"
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <p className="text-slate-300 text-sm font-semibold mb-2">
+                        📈 Kapasite Tahmini (Önümüzdeki 14 Gün)
+                      </p>
+                      <p className="text-slate-500 text-sm">
+                        Veri yetersiz — en az 7 ziyaretçi kaydı gereklidir.
+                      </p>
+                    </div>
+                  );
+                }
+                const dowCounts: Record<number, number[]> = {
+                  0: [],
+                  1: [],
+                  2: [],
+                  3: [],
+                  4: [],
+                  5: [],
+                  6: [],
+                };
+                for (const v of allVisitors) {
+                  const d = new Date(v.arrivalTime).getDay();
+                  if (!dowCounts[d]) dowCounts[d] = [];
+                  dowCounts[d].push(1);
+                }
+                // Group visitors by calendar day
+                const byDay: Record<string, number> = {};
+                for (const v of allVisitors) {
+                  const dk = new Date(v.arrivalTime).toDateString();
+                  byDay[dk] = (byDay[dk] || 0) + 1;
+                }
+                const dowAvg: Record<number, number> = {};
+                for (let d = 0; d < 7; d++) {
+                  const days = Object.keys(byDay).filter(
+                    (k) => new Date(k).getDay() === d,
+                  );
+                  dowAvg[d] =
+                    days.length > 0
+                      ? Math.round(
+                          days.reduce((s, k) => s + byDay[k], 0) / days.length,
+                        )
+                      : 0;
+                }
+                const maxCap =
+                  company?.maxCapacity ?? company?.maxConcurrentVisitors ?? 50;
+                const DAY_LABELS = [
+                  "Paz",
+                  "Pzt",
+                  "Sal",
+                  "Çar",
+                  "Per",
+                  "Cum",
+                  "Cmt",
+                ];
+                const predictionData = Array.from({ length: 14 }, (_, i) => {
+                  const d = new Date();
+                  d.setDate(d.getDate() + i + 1);
+                  const dow = d.getDay();
+                  const predicted = dowAvg[dow] || 0;
+                  return {
+                    date: `${DAY_LABELS[dow]} ${d.getDate()}.`,
+                    predicted,
+                    high: predicted > maxCap * 0.7,
+                  };
+                });
+                return (
+                  <div
+                    className="p-5 rounded-2xl"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    <p className="text-slate-300 text-sm font-semibold mb-1">
+                      📈 Kapasite Tahmini (Önümüzdeki 14 Gün)
+                    </p>
+                    <p className="text-slate-500 text-xs mb-4">
+                      Geçmiş verilere göre günlük ortalama ziyaretçi tahmini
+                    </p>
+                    <ResponsiveContainer width="100%" height={200}>
+                      <BarChart data={predictionData}>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="rgba(255,255,255,0.05)"
+                        />
+                        <XAxis
+                          dataKey="date"
+                          tick={{ fill: "#94a3b8", fontSize: 10 }}
+                        />
+                        <YAxis tick={{ fill: "#94a3b8", fontSize: 12 }} />
+                        <Tooltip
+                          contentStyle={{
+                            background: "#1e293b",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                          labelStyle={{ color: "#e2e8f0" }}
+                        />
+                        <Bar
+                          dataKey="predicted"
+                          name="Tahmini Ziyaretçi"
+                          radius={[4, 4, 0, 0]}
+                        >
+                          {predictionData.map((entry) => (
+                            <Cell
+                              key={entry.date}
+                              fill={entry.high ? "#f59e0b" : "#0ea5e9"}
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                    <div className="flex items-center gap-4 mt-3 text-xs text-slate-400">
+                      <span>
+                        <span
+                          className="inline-block w-3 h-3 rounded mr-1"
+                          style={{ background: "#0ea5e9" }}
+                        />
+                        Normal
+                      </span>
+                      <span>
+                        <span
+                          className="inline-block w-3 h-3 rounded mr-1"
+                          style={{ background: "#f59e0b" }}
+                        />
+                        Yüksek (%70+ kapasite)
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {tab === "statistics" && (
+          <div
+            className="mt-6 p-5 rounded-2xl"
+            style={{
+              background: "rgba(0,212,170,0.05)",
+              border: "1px solid rgba(0,212,170,0.15)",
+            }}
+          >
+            <VisitorHeatmap visitors={visitors} />
           </div>
         )}
 
@@ -5321,6 +7126,75 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
         {tab === "permits" && (
           <div data-ocid="permits.section">
+            {/* Compliance Dashboard */}
+            {permits.length > 0 &&
+              (() => {
+                const now = new Date();
+                const expired = permits.filter(
+                  (p) => new Date(p.expiryDate) < now,
+                );
+                const expiringSoon = permits.filter((p) => {
+                  const d = new Date(p.expiryDate);
+                  const days = Math.ceil(
+                    (d.getTime() - now.getTime()) / 86400000,
+                  );
+                  return days >= 0 && days <= 30;
+                });
+                const valid = permits.filter((p) => {
+                  const days = Math.ceil(
+                    (new Date(p.expiryDate).getTime() - now.getTime()) /
+                      86400000,
+                  );
+                  return days > 30;
+                });
+                return (
+                  <div
+                    data-ocid="permits.compliance.panel"
+                    className="grid grid-cols-3 gap-3 mb-6"
+                  >
+                    {[
+                      {
+                        label: "Süresi Dolmuş",
+                        count: expired.length,
+                        color: "#ef4444",
+                        bg: "rgba(239,68,68,0.1)",
+                        border: "rgba(239,68,68,0.3)",
+                      },
+                      {
+                        label: "30 Gün İçinde Dolacak",
+                        count: expiringSoon.length,
+                        color: "#f59e0b",
+                        bg: "rgba(245,158,11,0.1)",
+                        border: "rgba(245,158,11,0.3)",
+                      },
+                      {
+                        label: "Geçerli",
+                        count: valid.length,
+                        color: "#22c55e",
+                        bg: "rgba(34,197,94,0.1)",
+                        border: "rgba(34,197,94,0.3)",
+                      },
+                    ].map((s) => (
+                      <div
+                        key={s.label}
+                        className="p-4 rounded-2xl text-center"
+                        style={{
+                          background: s.bg,
+                          border: `1px solid ${s.border}`,
+                        }}
+                      >
+                        <div
+                          className="text-2xl font-bold mb-1"
+                          style={{ color: s.color }}
+                        >
+                          {s.count}
+                        </div>
+                        <div className="text-xs text-slate-400">{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-white font-bold text-lg">
                 📋 Müteahhit İş İzni Takibi
@@ -5522,7 +7396,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                       data-ocid={`permits.item.${i + 1}`}
                       className="p-4 rounded-2xl"
                       style={{
-                        background: "rgba(255,255,255,0.04)",
+                        background:
+                          status === "expired"
+                            ? "rgba(239,68,68,0.06)"
+                            : status === "expiring"
+                              ? "rgba(245,158,11,0.06)"
+                              : "rgba(255,255,255,0.04)",
                         border: `1px solid ${statusColor}30`,
                       }}
                     >
@@ -6005,6 +7884,494 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             />
           </div>
         )}
+
+        {tab === "branches" && <BranchManager companyId={session.companyId} />}
+        {tab === "kvkkrequests" && (
+          <div className="max-w-2xl space-y-6">
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(14,165,233,0.06)",
+                border: "1px solid rgba(14,165,233,0.2)",
+              }}
+            >
+              <p className="text-white font-semibold mb-1">
+                🔐 KVKK / GDPR Bireysel Başvuru (SAR)
+              </p>
+              <p className="text-slate-400 text-sm mb-4">
+                Ziyaretçi, kendi verilerinin silinmesini talep edebilir. TC
+                numarasını girerek talep oluşturun.
+              </p>
+              <div className="flex gap-3">
+                <input
+                  data-ocid="kvkk.tc_input"
+                  type="text"
+                  maxLength={11}
+                  placeholder="TC Kimlik Numarası"
+                  value={sarIdInput}
+                  onChange={(e) =>
+                    setSarIdInput(e.target.value.replace(/\D/g, ""))
+                  }
+                  className="flex-1 px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                />
+                <button
+                  type="button"
+                  data-ocid="kvkk.submit_button"
+                  onClick={submitSarRequest}
+                  className="px-5 py-3 rounded-xl font-semibold text-white"
+                  style={{
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                  }}
+                >
+                  Talep Oluştur
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-slate-300 font-semibold mb-3">
+                📋 Talepler ({sarRequests.length})
+              </p>
+              {sarRequests.length === 0 ? (
+                <div
+                  data-ocid="kvkk.empty_state"
+                  className="text-center py-12 text-slate-500"
+                >
+                  <p className="text-4xl mb-3">📭</p>
+                  <p>Henüz KVKK talebi yok.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {sarRequests.map((req, i) => (
+                    <div
+                      key={req.id}
+                      data-ocid={`kvkk.item.${i + 1}`}
+                      className="flex items-center justify-between p-4 rounded-2xl"
+                      style={{
+                        background:
+                          req.status === "approved"
+                            ? "rgba(34,197,94,0.07)"
+                            : req.status === "rejected"
+                              ? "rgba(239,68,68,0.07)"
+                              : "rgba(255,255,255,0.04)",
+                        border: `1px solid ${req.status === "approved" ? "rgba(34,197,94,0.25)" : req.status === "rejected" ? "rgba(239,68,68,0.25)" : "rgba(255,255,255,0.1)"}`,
+                      }}
+                    >
+                      <div>
+                        <p className="text-white text-sm font-medium">
+                          {req.name}
+                        </p>
+                        <p className="text-slate-500 text-xs">
+                          TC: {req.idNumber}
+                        </p>
+                        <p className="text-slate-600 text-xs">
+                          {new Date(req.createdAt).toLocaleString("tr-TR")}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {req.status === "pending" ? (
+                          <>
+                            <button
+                              type="button"
+                              data-ocid={`kvkk.confirm_button.${i + 1}`}
+                              onClick={() =>
+                                approveSarRequest(req.id, req.idNumber)
+                              }
+                              className="px-3 py-2 rounded-lg text-xs font-semibold text-white"
+                              style={{
+                                background: "rgba(34,197,94,0.2)",
+                                border: "1px solid rgba(34,197,94,0.4)",
+                              }}
+                            >
+                              ✓ Onayla &amp; Sil
+                            </button>
+                            <button
+                              type="button"
+                              data-ocid={`kvkk.cancel_button.${i + 1}`}
+                              onClick={() => rejectSarRequest(req.id)}
+                              className="px-3 py-2 rounded-lg text-xs font-semibold"
+                              style={{
+                                background: "rgba(239,68,68,0.15)",
+                                border: "1px solid rgba(239,68,68,0.3)",
+                                color: "#f87171",
+                              }}
+                            >
+                              ✕ Reddet
+                            </button>
+                          </>
+                        ) : (
+                          <span
+                            className="px-3 py-1 rounded-full text-xs font-semibold"
+                            style={{
+                              background:
+                                req.status === "approved"
+                                  ? "rgba(34,197,94,0.15)"
+                                  : "rgba(239,68,68,0.15)",
+                              color:
+                                req.status === "approved"
+                                  ? "#4ade80"
+                                  : "#f87171",
+                            }}
+                          >
+                            {req.status === "approved"
+                              ? "✓ Onaylandı"
+                              : "✕ Reddedildi"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {tab === "workcalendar" && (
+          <WorkingCalendar companyId={session.companyId} />
+        )}
+
+        {tab === "gatelogs" && (
+          <div data-ocid="gatelogs.section">
+            <h2 className="text-white font-bold text-lg mb-6">
+              🚪 Turnike / Bariyer Geçiş Logu
+            </h2>
+            {gatePassLogs.length === 0 ? (
+              <div
+                data-ocid="gatelogs.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                <div className="text-4xl mb-2">🚪</div>
+                <p>
+                  Henüz geçiş kaydı yok. Aktif ziyaretçi kartlarından "Kapıyı
+                  Aç" butonunu kullanın.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-slate-400">
+                      <th className="text-left pb-3 pr-4">Saat</th>
+                      <th className="text-left pb-3 pr-4">Ziyaretçi</th>
+                      <th className="text-left pb-3 pr-4">Kapı</th>
+                      <th className="text-left pb-3 pr-4">Yön</th>
+                      <th className="text-left pb-3">Personel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gatePassLogs.map((log, i) => (
+                      <tr
+                        key={log.id}
+                        data-ocid={`gatelogs.item.${i + 1}`}
+                        className="border-b border-white/5 hover:bg-white/3"
+                      >
+                        <td className="py-3 pr-4 text-slate-300">
+                          {new Date(log.passedAt).toLocaleString("tr-TR")}
+                        </td>
+                        <td className="py-3 pr-4 text-white font-medium">
+                          {log.visitorName}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-300">{log.gate}</td>
+                        <td className="py-3 pr-4">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-bold"
+                            style={{
+                              background:
+                                log.direction === "in"
+                                  ? "rgba(34,197,94,0.2)"
+                                  : "rgba(239,68,68,0.2)",
+                              color:
+                                log.direction === "in" ? "#22c55e" : "#f87171",
+                            }}
+                          >
+                            {log.direction === "in" ? "▶ Giriş" : "◀ Çıkış"}
+                          </span>
+                        </td>
+                        <td className="py-3 text-slate-400">{log.staffName}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "meetingrooms" && (
+          <div data-ocid="meetingrooms.section">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-white font-bold text-lg">
+                🏛️ Toplantı Odaları
+              </h2>
+              <button
+                type="button"
+                data-ocid="meetingrooms.open_modal_button"
+                onClick={() => {
+                  setShowMeetingRoomForm(true);
+                  setEditMeetingRoom(null);
+                  setMeetingRoomForm({
+                    name: "",
+                    floor: "",
+                    capacity: "10",
+                    branchId: "",
+                  });
+                }}
+                className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#14b8a6,#0d9488)",
+                }}
+              >
+                ➕ Oda Ekle
+              </button>
+            </div>
+            {(showMeetingRoomForm || editMeetingRoom) && (
+              <div
+                data-ocid="meetingrooms.dialog"
+                className="p-5 rounded-2xl mb-6"
+                style={{
+                  background: "rgba(20,184,166,0.07)",
+                  border: "1.5px solid rgba(20,184,166,0.2)",
+                }}
+              >
+                <h3 className="text-teal-400 font-semibold text-sm mb-4">
+                  {editMeetingRoom ? "✏️ Oda Düzenle" : "➕ Yeni Oda"}
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <input
+                    data-ocid="meetingrooms.name.input"
+                    value={meetingRoomForm.name}
+                    onChange={(e) =>
+                      setMeetingRoomForm((f) => ({
+                        ...f,
+                        name: e.target.value,
+                      }))
+                    }
+                    placeholder="Oda adı (örn. Konferans A)"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-teal-400"
+                  />
+                  <input
+                    data-ocid="meetingrooms.floor.input"
+                    value={meetingRoomForm.floor}
+                    onChange={(e) =>
+                      setMeetingRoomForm((f) => ({
+                        ...f,
+                        floor: e.target.value,
+                      }))
+                    }
+                    placeholder="Kat (örn. 3. Kat)"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-teal-400"
+                  />
+                  <input
+                    type="number"
+                    data-ocid="meetingrooms.capacity.input"
+                    value={meetingRoomForm.capacity}
+                    onChange={(e) =>
+                      setMeetingRoomForm((f) => ({
+                        ...f,
+                        capacity: e.target.value,
+                      }))
+                    }
+                    placeholder="Kapasite"
+                    className="px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-teal-400"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    data-ocid="meetingrooms.save_button"
+                    onClick={() => {
+                      const r: MeetingRoom = {
+                        ...(editMeetingRoom ?? {
+                          id: generateId(),
+                          companyId: session.companyId,
+                        }),
+                        name: meetingRoomForm.name,
+                        floor: meetingRoomForm.floor,
+                        capacity: Number(meetingRoomForm.capacity) || 10,
+                        branchId: meetingRoomForm.branchId || undefined,
+                      };
+                      saveMeetingRoom(r);
+                      setShowMeetingRoomForm(false);
+                      setEditMeetingRoom(null);
+                      reload();
+                      toast.success("Toplantı odası kaydedildi.");
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#14b8a6,#0d9488)",
+                    }}
+                  >
+                    Kaydet
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="meetingrooms.cancel_button"
+                    onClick={() => {
+                      setShowMeetingRoomForm(false);
+                      setEditMeetingRoom(null);
+                    }}
+                    className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+                  >
+                    İptal
+                  </button>
+                </div>
+              </div>
+            )}
+            {meetingRooms.length === 0 ? (
+              <div
+                data-ocid="meetingrooms.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                <div className="text-4xl mb-2">🏛️</div>
+                <p>Henüz toplantı odası eklenmedi.</p>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {meetingRooms.map((room, i) => (
+                  <div
+                    key={room.id}
+                    data-ocid={`meetingrooms.item.${i + 1}`}
+                    className="p-4 rounded-2xl"
+                    style={{
+                      background: "rgba(20,184,166,0.06)",
+                      border: "1px solid rgba(20,184,166,0.2)",
+                    }}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <div className="text-white font-semibold">
+                          {room.name}
+                        </div>
+                        <div className="text-slate-400 text-sm">
+                          {room.floor} bull; {room.capacity} kişi
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          data-ocid={`meetingrooms.edit_button.${i + 1}`}
+                          onClick={() => {
+                            setEditMeetingRoom(room);
+                            setShowMeetingRoomForm(false);
+                            setMeetingRoomForm({
+                              name: room.name,
+                              floor: room.floor,
+                              capacity: String(room.capacity),
+                              branchId: room.branchId ?? "",
+                            });
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-teal-400 hover:bg-teal-400/10 transition-all"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid={`meetingrooms.delete_button.${i + 1}`}
+                          onClick={() => {
+                            deleteMeetingRoom(session.companyId, room.id);
+                            reload();
+                            toast.success("Oda silindi.");
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-400/10 transition-all"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "badgelogs" && (
+          <div data-ocid="badgelogs.section">
+            <h2 className="text-white font-bold text-lg mb-6">
+              🖨️ Rozet Yeniden Basım Logları
+            </h2>
+            {badgeReprintLogs.length === 0 ? (
+              <div
+                data-ocid="badgelogs.empty_state"
+                className="text-center py-12 text-slate-500"
+              >
+                <div className="text-4xl mb-2">🖨️</div>
+                <p>Henüz rozet yeniden basım kaydı yok.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 text-slate-400">
+                      <th className="text-left pb-3 pr-4">Saat</th>
+                      <th className="text-left pb-3 pr-4">Ziyaretçi</th>
+                      <th className="text-left pb-3 pr-4">Neden</th>
+                      <th className="text-left pb-3 pr-4">Not</th>
+                      <th className="text-left pb-3">Personel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {badgeReprintLogs.map((log, i) => (
+                      <tr
+                        key={log.id}
+                        data-ocid={`badgelogs.item.${i + 1}`}
+                        className="border-b border-white/5"
+                      >
+                        <td className="py-3 pr-4 text-slate-300">
+                          {new Date(log.reprintedAt).toLocaleString("tr-TR")}
+                        </td>
+                        <td className="py-3 pr-4 text-white">
+                          {log.visitorName}
+                        </td>
+                        <td className="py-3 pr-4">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                            style={{
+                              background: "rgba(245,158,11,0.2)",
+                              color: "#fbbf24",
+                            }}
+                          >
+                            {log.reason}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 text-slate-400 text-xs">
+                          {log.note || "—"}
+                        </td>
+                        <td className="py-3 text-slate-400">
+                          {log.reprintedBy}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+        {tab === "headcount" && <HeadcountTab companyId={session.companyId} />}
+
+        {tab === "appeals" && (
+          <AppealsTab
+            companyId={session.companyId}
+            staffName={company?.name ?? "Admin"}
+          />
+        )}
+
+        {tab === "scheduledreports" && (
+          <ScheduledReportsTab
+            companyId={session.companyId}
+            visitors={visitors}
+            blacklist={blacklist}
+            permits={permits}
+          />
+        )}
+
+        {tab === "feedback" && (
+          <FeedbackTab companyId={session.companyId} company={company} />
+        )}
+
+        {tab === "parking" && <ParkingManager companyId={session.companyId} />}
+
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -6228,6 +8595,360 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               <p className="text-slate-500 text-xs mt-1">
                 Kiosk giriş ekranında gösterilecek karşılama mesajı
               </p>
+            </div>
+
+            {/* WiFi Bilgisi */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(14,165,233,0.04)",
+                border: "1px solid rgba(14,165,233,0.15)",
+              }}
+            >
+              <p className="text-slate-200 font-semibold mb-3">
+                📶 Misafir WiFi Bilgisi
+              </p>
+              <p className="text-slate-400 text-xs mb-4">
+                Kiosk onay ekranında ziyaretçilere gösterilecek WiFi bilgisi.
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-slate-300 text-sm mb-1">
+                    WiFi Ağ Adı (SSID)
+                  </p>
+                  <input
+                    data-ocid="profile.wifi_ssid.input"
+                    placeholder="Misafir-WiFi"
+                    value={profileForm.wifiSSID ?? ""}
+                    onChange={(e) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        wifiSSID: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-300 text-sm mb-1">WiFi Şifre</p>
+                  <input
+                    data-ocid="profile.wifi_password.input"
+                    type="text"
+                    placeholder="••••••••"
+                    value={profileForm.wifiPassword ?? ""}
+                    onChange={(e) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        wifiPassword: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* VIP Escort Protocol */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold mb-3">
+                🌟 VIP Protokol Yönetimi
+              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">
+                    VIP Güvenlik Eşliği Protokolü
+                  </p>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    VIP ziyaretçi kaydedildiğinde güvenlik eşliği uyarısı
+                    göster.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.vip_escort.toggle"
+                  onClick={() =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      vipEscortEnabled: !f.vipEscortEnabled,
+                    }))
+                  }
+                  className="relative w-12 h-6 rounded-full transition-colors"
+                  style={{
+                    background: profileForm.vipEscortEnabled
+                      ? "rgba(245,158,11,0.6)"
+                      : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                    style={{
+                      transform: profileForm.vipEscortEnabled
+                        ? "translateX(24px)"
+                        : "translateX(0)",
+                    }}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Biyometrik Doğrulama */}
+            <div
+              className="p-5 rounded-2xl space-y-4"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold mb-3">
+                👤 Biyometrik Doğrulama Kategorileri
+              </p>
+              <p className="text-slate-500 text-xs">
+                Seçili kategoriler için giriş sırasında fotoğraf doğrulama adımı
+                gösterilir.
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {(
+                  profileForm.customCategories ?? [
+                    "Misafir",
+                    "Müteahhit",
+                    "Teslimat",
+                    "Mülakat",
+                    "Tedarikçi",
+                    "VIP",
+                    "VVIP",
+                  ]
+                ).map((cat) => {
+                  const enabled = (
+                    profileForm.biometricCheckEnabled ?? [
+                      "VIP",
+                      "VVIP",
+                      "Müteahhit",
+                    ]
+                  ).includes(cat);
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      data-ocid={`profile.biometric_cat_${cat}.toggle`}
+                      onClick={() => {
+                        const current = profileForm.biometricCheckEnabled ?? [
+                          "VIP",
+                          "VVIP",
+                          "Müteahhit",
+                        ];
+                        setProfileForm((f) => ({
+                          ...f,
+                          biometricCheckEnabled: enabled
+                            ? current.filter((c) => c !== cat)
+                            : [...current, cat],
+                        }));
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                      style={{
+                        background: enabled
+                          ? "rgba(245,158,11,0.2)"
+                          : "rgba(255,255,255,0.05)",
+                        border: `1px solid ${enabled ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.1)"}`,
+                        color: enabled ? "#f59e0b" : "#94a3b8",
+                      }}
+                    >
+                      {enabled ? "✓ " : ""}
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Onay Zinciri */}
+            <div
+              className="p-5 rounded-2xl space-y-4"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold mb-3">
+                🔗 Çok Adımlı Onay Zinciri
+              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">Onay Zinciri Aktif</p>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    Yeni randevular için sıralı onay zinciri
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.approval_chain.toggle"
+                  onClick={() =>
+                    setApprovalChainCfg((c) => ({ ...c, enabled: !c.enabled }))
+                  }
+                  className="relative w-12 h-6 rounded-full transition-colors"
+                  style={{
+                    background: approvalChainCfg.enabled
+                      ? "rgba(14,165,233,0.6)"
+                      : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                    style={{
+                      transform: approvalChainCfg.enabled
+                        ? "translateX(24px)"
+                        : "translateX(0)",
+                    }}
+                  />
+                </button>
+              </div>
+              {approvalChainCfg.enabled && (
+                <div className="space-y-2 pt-2">
+                  <p className="text-slate-400 text-xs font-medium">
+                    Onay Adımları (sırayla)
+                  </p>
+                  {(["host", "security", "hr"] as const).map((role) => {
+                    const labels: Record<string, string> = {
+                      host: "🏠 Ev Sahibi (Host)",
+                      security: "🛡️ Güvenlik Yöneticisi",
+                      hr: "👥 İnsan Kaynakları",
+                    };
+                    const idx = approvalChainCfg.steps.indexOf(role);
+                    return (
+                      <div
+                        key={role}
+                        className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                        style={{
+                          background:
+                            idx >= 0
+                              ? "rgba(14,165,233,0.08)"
+                              : "rgba(255,255,255,0.03)",
+                          border: `1px solid ${idx >= 0 ? "rgba(14,165,233,0.25)" : "rgba(255,255,255,0.08)"}`,
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          {idx >= 0 && (
+                            <span
+                              className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold"
+                              style={{
+                                background: "rgba(14,165,233,0.3)",
+                                color: "#0ea5e9",
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+                          )}
+                          <span className="text-slate-300 text-sm">
+                            {labels[role]}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          data-ocid={`profile.approval_step_${role}.toggle`}
+                          onClick={() => {
+                            setApprovalChainCfg((c) => {
+                              const has = c.steps.includes(role);
+                              return {
+                                ...c,
+                                steps: has
+                                  ? c.steps.filter((s) => s !== role)
+                                  : [...c.steps, role],
+                              };
+                            });
+                          }}
+                          className="px-2 py-1 rounded-lg text-xs font-medium"
+                          style={{
+                            background:
+                              idx >= 0
+                                ? "rgba(14,165,233,0.2)"
+                                : "rgba(255,255,255,0.05)",
+                            border: `1px solid ${idx >= 0 ? "rgba(14,165,233,0.4)" : "rgba(255,255,255,0.1)"}`,
+                            color: idx >= 0 ? "#0ea5e9" : "#64748b",
+                          }}
+                        >
+                          {idx >= 0 ? "✓ Aktif" : "Ekle"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ISG Health & Safety */}
+            <div
+              className="p-5 rounded-2xl space-y-4"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <p className="text-slate-300 font-semibold">
+                🦺 İSG Sağlık ve Güvenlik Beyannamesi
+              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-300 text-sm">
+                    İSG Beyannamesi Aktif
+                  </p>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    Ziyaretçi kayıt formuna İSG onay kutucuğu ekle.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.ishg_enabled.toggle"
+                  onClick={() =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      ishgEnabled: !f.ishgEnabled,
+                    }))
+                  }
+                  className="relative w-12 h-6 rounded-full transition-colors"
+                  style={{
+                    background: profileForm.ishgEnabled
+                      ? "rgba(14,165,233,0.6)"
+                      : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                    style={{
+                      transform: profileForm.ishgEnabled
+                        ? "translateX(24px)"
+                        : "translateX(0)",
+                    }}
+                  />
+                </button>
+              </div>
+              {profileForm.ishgEnabled && (
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">
+                    İSG Beyannamesi Metni
+                  </p>
+                  <textarea
+                    data-ocid="profile.ishg_text.textarea"
+                    rows={4}
+                    value={
+                      profileForm.ishgText ??
+                      "Bu binada İş Sağlığı ve Güvenliği kurallarına uymayı kabul ediyorum. Belirlenen güvenlik önlemlerine, tahliye prosedürlerine ve acil durum talimatlarına uyacağımı taahhüt ederim."
+                    }
+                    onChange={(e) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        ishgText: e.target.value,
+                      }))
+                    }
+                    placeholder="İSG beyannamesi metni..."
+                    className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9] resize-none"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Category-Based NDA */}
@@ -6567,6 +9288,70 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                   </div>
                 );
               })}
+            </div>
+
+            {/* Ziyaretçi Politikası */}
+            <div
+              className="p-5 rounded-2xl space-y-4"
+              style={{
+                background: "rgba(14,165,233,0.04)",
+                border: "1px solid rgba(14,165,233,0.2)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-slate-200 font-semibold">
+                    📋 Ziyaretçi Politikası
+                  </p>
+                  <p className="text-slate-500 text-xs mt-0.5">
+                    Ziyaretçilerin giriş sırasında kabul etmesi gereken politika
+                    metni.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid="profile.visitor_policy.toggle"
+                  onClick={() =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      visitorPolicyEnabled: !f.visitorPolicyEnabled,
+                    }))
+                  }
+                  className="relative w-12 h-6 rounded-full transition-colors flex-shrink-0"
+                  style={{
+                    background: profileForm.visitorPolicyEnabled
+                      ? "rgba(14,165,233,0.6)"
+                      : "rgba(255,255,255,0.15)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                    style={{
+                      transform: profileForm.visitorPolicyEnabled
+                        ? "translateX(24px)"
+                        : "translateX(0)",
+                    }}
+                  />
+                </button>
+              </div>
+              {profileForm.visitorPolicyEnabled && (
+                <div>
+                  <p className="text-slate-400 text-sm mb-2">Politika Metni</p>
+                  <textarea
+                    data-ocid="profile.visitor_policy.textarea"
+                    rows={5}
+                    placeholder="Ziyaretçilerin giriş sırasında onaylayacağı politika metnini buraya girin..."
+                    value={profileForm.visitorPolicy ?? ""}
+                    onChange={(e) =>
+                      setProfileForm((f) => ({
+                        ...f,
+                        visitorPolicy: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+              )}
             </div>
 
             <button
@@ -7711,113 +10496,17 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
       {/* Re-invite Modal */}
       {reinviteOpen && reinviteVisitorData && (
-        <div
-          data-ocid="reinvite.modal"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{
-            background: "rgba(0,0,0,0.75)",
-            backdropFilter: "blur(4px)",
+        <ReinviteModal
+          visitor={reinviteVisitorData}
+          companyId={session.companyId}
+          staffId={session.staffId ?? ""}
+          staffList={staffList}
+          onClose={() => {
+            setReinviteOpen(false);
+            setReinviteVisitorData(null);
           }}
-        >
-          <div
-            className="w-full max-w-md p-6 rounded-2xl"
-            style={{
-              background: "#0f1729",
-              border: "1.5px solid rgba(14,165,233,0.4)",
-            }}
-          >
-            <h3 className="text-white font-bold text-lg mb-4">
-              ✉️ Tekrar Davet Et
-            </h3>
-            <div className="space-y-4">
-              <div
-                className="p-3 rounded-xl"
-                style={{
-                  background: "rgba(14,165,233,0.08)",
-                  border: "1px solid rgba(14,165,233,0.2)",
-                }}
-              >
-                <p className="text-white font-medium">
-                  {reinviteVisitorData.name}
-                </p>
-                <p className="text-slate-400 text-xs">
-                  {reinviteVisitorData.idNumber}
-                </p>
-              </div>
-              <div>
-                <p className="text-slate-300 text-xs mb-1.5">Randevu Tarihi</p>
-                <input
-                  data-ocid="reinvite.date.input"
-                  type="date"
-                  value={reinviteDate}
-                  onChange={(e) => setReinviteDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                  }}
-                />
-              </div>
-              <div>
-                <p className="text-slate-300 text-xs mb-1.5">Randevu Saati</p>
-                <input
-                  data-ocid="reinvite.time.input"
-                  type="time"
-                  value={reinviteTime}
-                  onChange={(e) => setReinviteTime(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                  }}
-                />
-              </div>
-              <div>
-                <p className="text-slate-300 text-xs mb-1.5">Ziyaret Amacı</p>
-                <input
-                  data-ocid="reinvite.purpose.input"
-                  type="text"
-                  value={reinvitePurpose}
-                  onChange={(e) => setReinvitePurpose(e.target.value)}
-                  placeholder="Ziyaret amacı..."
-                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                  }}
-                />
-              </div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button
-                type="button"
-                data-ocid="reinvite.cancel_button"
-                onClick={() => {
-                  setReinviteOpen(false);
-                  setReinviteVisitorData(null);
-                }}
-                className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm"
-                style={{
-                  background: "rgba(255,255,255,0.07)",
-                  border: "1px solid rgba(255,255,255,0.15)",
-                }}
-              >
-                İptal
-              </button>
-              <button
-                type="button"
-                data-ocid="reinvite.confirm_button"
-                onClick={submitReinvite}
-                className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
-                style={{
-                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
-                }}
-              >
-                Randevu Oluştur
-              </button>
-            </div>
-          </div>
-        </div>
+          onCreated={reload}
+        />
       )}
       {profileVisitor && (
         <div

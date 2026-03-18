@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { findPreRegByToken, getPreRegs, savePreReg } from "../store";
-import type { AppScreen } from "../types";
+import { findPreRegByToken, savePreReg } from "../store";
+import type { AppScreen, UploadedDocument } from "../types";
+import { generateId } from "../utils";
 import { validateTcId } from "../utils/tcValidation";
 
 interface Props {
@@ -21,6 +22,7 @@ export default function PreRegPage({ token }: Props) {
   const [submitted, setSubmitted] = useState(preReg?.status === "used");
   const [error, setError] = useState("");
   const [tcError, setTcError] = useState("");
+  const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
 
   if (!preReg) {
     return (
@@ -65,8 +67,8 @@ export default function PreRegPage({ token }: Props) {
             Ön Kayıt Tamamlandı!
           </h2>
           <p className="text-slate-300 text-sm mb-2">
-            Bilgileriniz kaydedildi. Ziyaretinizde kiosk'ta token numaranızı
-            gösterin.
+            Bilgileriniz kaydedildi. Ziyaretinizde kiosk&apos;ta token
+            numaranızı gösterin.
           </p>
           <div
             className="mt-6 px-6 py-3 rounded-xl text-center font-mono font-bold text-lg"
@@ -95,7 +97,12 @@ export default function PreRegPage({ token }: Props) {
       setTcError("Geçersiz TC Kimlik Numarası");
       return;
     }
-    const updated = { ...preReg, ...form, status: "used" as const };
+    const updated = {
+      ...preReg,
+      ...form,
+      status: "used" as const,
+      uploadedDocuments: uploadedDocs.length > 0 ? uploadedDocs : undefined,
+    };
     savePreReg(updated);
     setSubmitted(true);
     toast.success("Ön kayıt tamamlandı!");
@@ -238,6 +245,81 @@ export default function PreRegPage({ token }: Props) {
               placeholder="Ziyaret nedeniniz"
               className="w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
             />
+          </div>
+
+          {/* Document Upload */}
+          <div>
+            <p className="block text-slate-400 text-xs mb-1.5 font-medium">
+              📎 Belgeler (isteğe bağlı, max 3 dosya, max 2MB)
+            </p>
+            <div className="space-y-2">
+              {uploadedDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className="flex items-center justify-between px-3 py-2 rounded-lg"
+                  style={{
+                    background: "rgba(14,165,233,0.1)",
+                    border: "1px solid rgba(14,165,233,0.2)",
+                  }}
+                >
+                  <span className="text-white text-xs truncate flex-1">
+                    {doc.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setUploadedDocs((d) => d.filter((x) => x.id !== doc.id))
+                    }
+                    className="ml-2 text-red-400 hover:text-red-300 text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {uploadedDocs.length < 3 && (
+                <label
+                  data-ocid="prereg.upload_button"
+                  htmlFor="prereg-doc-upload"
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs text-slate-400 hover:text-white transition-colors"
+                  style={{
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1.5px dashed rgba(255,255,255,0.2)",
+                  }}
+                >
+                  <span>📁 Dosya Ekle (PDF, JPG, PNG)</span>
+                  <input
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    id="prereg-doc-upload"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 2 * 1024 * 1024) {
+                        toast.error("Dosya boyutu 2MB'yi aşamaz");
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const base64 = ev.target?.result as string;
+                        setUploadedDocs((d) => [
+                          ...d,
+                          {
+                            id: generateId(),
+                            name: file.name,
+                            type: file.type,
+                            base64,
+                            uploadedAt: Date.now(),
+                          },
+                        ]);
+                      };
+                      reader.readAsDataURL(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+            </div>
           </div>
 
           {error && (

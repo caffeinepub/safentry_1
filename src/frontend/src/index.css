@@ -217,3 +217,60 @@ body {
     border-color: #ccc !important;
   }
 }
+
+/* ─── Accessibility ─────────────────────────────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  background: #000;
+  color: #fff;
+  padding: 8px 16px;
+  z-index: 9999;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  border-radius: 0 0 8px 0;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+:focus-visible {
+  outline: 3px solid oklch(0.7 0.2 180);
+  outline-offset: 2px;
+}
+
+/* ─── High Contrast Mode ─────────────────────────────────────────────────────── */
+body.high-contrast {
+  background: #000 !important;
+  color: #fff !important;
+}
+body.high-contrast .glass-card,
+body.high-contrast [class*="bg-slate"],
+body.high-contrast [style*="background: #0a0f1e"],
+body.high-contrast [style*="background: #0f1729"],
+body.high-contrast [style*="background: rgba"] {
+  background: #111 !important;
+  border-color: #fff !important;
+}
+body.high-contrast * {
+  color: #fff !important;
+}
+body.high-contrast button,
+body.high-contrast [role="button"] {
+  border: 2px solid #ff0 !important;
+  color: #ff0 !important;
+  background: #000 !important;
+}
+body.high-contrast a {
+  color: #ff0 !important;
+  text-decoration: underline !important;
+}
+body.high-contrast input,
+body.high-contrast textarea,
+body.high-contrast select {
+  background: #111 !important;
+  color: #fff !important;
+  border: 2px solid #ff0 !important;
+}

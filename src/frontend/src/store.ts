@@ -3,16 +3,21 @@ import type {
   Appointment,
   BelongingsItem,
   BlacklistEntry,
+  Branch,
   CategoryTimeRestriction,
   Company,
   ContractorPermit,
   Department,
+  FloorRoom,
+  HolidayEntry,
+  HostReview,
   Invitation,
   ScreeningQuestion,
   SentryNotification,
   Session,
   Staff,
   Visitor,
+  WorkingDay,
 } from "./types";
 
 export function getCompanies(): Company[] {
@@ -772,4 +777,467 @@ export function getVisitorBelongings(
   visitorId: string,
 ): BelongingsItem[] {
   return getBelongings(companyId).filter((b) => b.visitorId === visitorId);
+}
+
+// ─── Branches ─────────────────────────────────────────────────────────────────
+
+export function getBranches(companyId: string): Branch[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_branches_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveBranch(b: Branch) {
+  const list = getBranches(b.companyId).filter((x) => x.id !== b.id);
+  localStorage.setItem(
+    `safentry_branches_${b.companyId}`,
+    JSON.stringify([...list, b]),
+  );
+}
+export function deleteBranch(companyId: string, id: string) {
+  const list = getBranches(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_branches_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Working Hours ─────────────────────────────────────────────────────────────
+const DEFAULT_WORK_DAYS: WorkingDay[] = [
+  { enabled: true, start: "09:00", end: "18:00" }, // Mon
+  { enabled: true, start: "09:00", end: "18:00" }, // Tue
+  { enabled: true, start: "09:00", end: "18:00" }, // Wed
+  { enabled: true, start: "09:00", end: "18:00" }, // Thu
+  { enabled: true, start: "09:00", end: "18:00" }, // Fri
+  { enabled: false, start: "09:00", end: "13:00" }, // Sat
+  { enabled: false, start: "09:00", end: "13:00" }, // Sun
+];
+export function getWorkingDays(companyId: string): WorkingDay[] {
+  try {
+    const raw = localStorage.getItem(`safentry_workhours_${companyId}`);
+    return raw ? JSON.parse(raw) : DEFAULT_WORK_DAYS;
+  } catch {
+    return DEFAULT_WORK_DAYS;
+  }
+}
+export function saveWorkingDays(companyId: string, days: WorkingDay[]) {
+  localStorage.setItem(`safentry_workhours_${companyId}`, JSON.stringify(days));
+}
+
+// ─── Holidays ─────────────────────────────────────────────────────────────────
+export function getHolidays(companyId: string): HolidayEntry[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_holidays_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveHoliday(h: HolidayEntry) {
+  const list = getHolidays(h.companyId).filter((x) => x.id !== h.id);
+  localStorage.setItem(
+    `safentry_holidays_${h.companyId}`,
+    JSON.stringify([...list, h]),
+  );
+}
+export function deleteHoliday(companyId: string, id: string) {
+  const list = getHolidays(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_holidays_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Floor Rooms ───────────────────────────────────────────────────────────────
+export function getFloorRooms(
+  companyId: string,
+  branchId: string,
+): FloorRoom[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_floorplan_${companyId}_${branchId}`) ||
+        "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveFloorRoom(r: FloorRoom) {
+  const list = getFloorRooms(r.companyId, r.branchId).filter(
+    (x) => x.id !== r.id,
+  );
+  localStorage.setItem(
+    `safentry_floorplan_${r.companyId}_${r.branchId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteFloorRoom(
+  companyId: string,
+  branchId: string,
+  id: string,
+) {
+  const list = getFloorRooms(companyId, branchId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_floorplan_${companyId}_${branchId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Staff Photo ───────────────────────────────────────────────────────────────
+export function getStaffPhoto(staffCode: string): string {
+  return localStorage.getItem(`safentry_staffphoto_${staffCode}`) ?? "";
+}
+export function saveStaffPhoto(staffCode: string, base64: string) {
+  localStorage.setItem(`safentry_staffphoto_${staffCode}`, base64);
+}
+
+// ─── Working Hours Checker ─────────────────────────────────────────────────────
+export function isDateTimeOutsideWorkHours(
+  companyId: string,
+  dateStr: string,
+  timeStr: string,
+): { outside: boolean; reason: string } {
+  const holidays = getHolidays(companyId);
+  const holiday = holidays.find((h) => h.date === dateStr);
+  if (holiday) return { outside: true, reason: `Resmi tatil: ${holiday.name}` };
+
+  const days = getWorkingDays(companyId);
+  const d = new Date(`${dateStr}T${timeStr}`);
+  // getDay() returns 0=Sun...6=Sat; we use Mon=0 index
+  const dow = (d.getDay() + 6) % 7;
+  const day = days[dow];
+  if (!day.enabled) return { outside: true, reason: "Kapalı gün" };
+
+  const [sh, sm] = day.start.split(":").map(Number);
+  const [eh, em] = day.end.split(":").map(Number);
+  const startMins = sh * 60 + sm;
+  const endMins = eh * 60 + em;
+  const nowMins = d.getHours() * 60 + d.getMinutes();
+  if (nowMins < startMins || nowMins >= endMins) {
+    return {
+      outside: true,
+      reason: `Çalışma saatleri dışında (${day.start}–${day.end})`,
+    };
+  }
+  return { outside: false, reason: "" };
+}
+
+// ─── Gate Pass Logs ────────────────────────────────────────────────────────────
+export function getGatePassLogs(
+  companyId: string,
+): import("./types").GatePassLog[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_gatelog_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function addGatePassLog(log: import("./types").GatePassLog) {
+  const list = getGatePassLogs(log.companyId);
+  localStorage.setItem(
+    `safentry_gatelog_${log.companyId}`,
+    JSON.stringify([log, ...list].slice(0, 1000)),
+  );
+}
+
+// ─── Meeting Rooms ─────────────────────────────────────────────────────────────
+export function getMeetingRooms(
+  companyId: string,
+): import("./types").MeetingRoom[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_meetingrooms_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveMeetingRoom(r: import("./types").MeetingRoom) {
+  const list = getMeetingRooms(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_meetingrooms_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteMeetingRoom(companyId: string, id: string) {
+  const list = getMeetingRooms(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_meetingrooms_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Badge Reprint Logs ────────────────────────────────────────────────────────
+export function getBadgeReprintLogs(
+  companyId: string,
+): import("./types").BadgeReprintLog[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_badgereprint_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function addBadgeReprintLog(log: import("./types").BadgeReprintLog) {
+  const list = getBadgeReprintLogs(log.companyId);
+  localStorage.setItem(
+    `safentry_badgereprint_${log.companyId}`,
+    JSON.stringify([log, ...list].slice(0, 500)),
+  );
+}
+
+// ─── Unreturned Access Cards ───────────────────────────────────────────────────
+export function getUnreturnedCards(companyId: string): Visitor[] {
+  return getVisitors(companyId).filter(
+    (v) =>
+      v.accessCardNumber &&
+      v.accessCardReturned !== true &&
+      v.status !== "departed",
+  );
+}
+
+// ─── Host Reviews ──────────────────────────────────────────────────────────────
+export function getHostReviews(companyId: string): HostReview[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_hostreviews_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveHostReview(r: HostReview) {
+  const list = getHostReviews(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_hostreviews_${r.companyId}`,
+    JSON.stringify([r, ...list].slice(0, 1000)),
+  );
+}
+
+// ─── Visitor Trust Score ────────────────────────────────────────────────────
+export function computeVisitorTrustScore(
+  companyId: string,
+  idNumber: string,
+): number {
+  if (isBlacklisted(companyId, idNumber)) return 0;
+  const visits = getVisitors(companyId).filter(
+    (v) => v.idNumber === idNumber && v.status === "departed",
+  );
+  const appointments = getAppointments(companyId).filter(
+    (a) => a.visitorId === idNumber && a.status === "cancelled",
+  );
+  let score = 80;
+  // On-time completions
+  const onTime = visits.filter(
+    (v) => v.departureTime && v.departureTime > 0,
+  ).length;
+  score += Math.min(onTime * 2, 20);
+  // Late exits (stay > 1.5x expected 4h)
+  const lateExits = visits.filter((v) => {
+    if (!v.departureTime) return false;
+    const stayMs = v.departureTime - v.arrivalTime;
+    return stayMs > 1.5 * 4 * 60 * 60 * 1000;
+  }).length;
+  score -= lateExits * 5;
+  // No-shows (cancelled appointments)
+  score -= appointments.length * 10;
+  // Explicit no-shows marked by staff
+  const noShowAppts = getAppointments(companyId).filter(
+    (a) => a.visitorId === idNumber && a.noShow === true,
+  );
+  score -= noShowAppts.length * 15;
+  return Math.max(0, Math.min(100, score));
+}
+
+// ─── Blacklist Appeals ─────────────────────────────────────────────────────
+export function getBlacklistAppeals(
+  companyId: string,
+): import("./types").BlacklistAppeal[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_bl_appeals_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveBlacklistAppeal(a: import("./types").BlacklistAppeal) {
+  const list = getBlacklistAppeals(a.companyId).filter((x) => x.id !== a.id);
+  localStorage.setItem(
+    `safentry_bl_appeals_${a.companyId}`,
+    JSON.stringify([a, ...list]),
+  );
+}
+export function updateBlacklistAppeal(a: import("./types").BlacklistAppeal) {
+  saveBlacklistAppeal(a);
+}
+
+// ─── Scheduled Reports ─────────────────────────────────────────────────────
+export function getScheduledReports(
+  companyId: string,
+): import("./types").ScheduledReport[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_scheduled_reports_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveScheduledReport(r: import("./types").ScheduledReport) {
+  const list = getScheduledReports(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_scheduled_reports_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteScheduledReport(companyId: string, id: string) {
+  const list = getScheduledReports(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_scheduled_reports_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Approval Chain Config ─────────────────────────────────────────────────
+export function getApprovalChainConfig(
+  companyId: string,
+): import("./types").ApprovalChainConfig {
+  try {
+    const raw = localStorage.getItem(`safentry_approval_chain_${companyId}`);
+    return raw
+      ? JSON.parse(raw)
+      : { enabled: false, steps: ["host", "security", "hr"] };
+  } catch {
+    return { enabled: false, steps: ["host", "security", "hr"] };
+  }
+}
+export function saveApprovalChainConfig(
+  companyId: string,
+  config: import("./types").ApprovalChainConfig,
+) {
+  localStorage.setItem(
+    `safentry_approval_chain_${companyId}`,
+    JSON.stringify(config),
+  );
+}
+
+// ─── Biometric Check ──────────────────────────────────────────────────────────
+export function isBiometricRequired(
+  companyId: string,
+  category?: string,
+): boolean {
+  if (!category) return false;
+  const company = findCompanyById(companyId);
+  const defaults = ["VIP", "VVIP", "Müteahhit"];
+  const enabled = company?.biometricCheckEnabled ?? defaults;
+  return enabled.includes(category);
+}
+
+// ─── Visitor Feedback ─────────────────────────────────────────────────────────
+export function getVisitorFeedback(
+  companyId: string,
+): import("./types").VisitorFeedback[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_feedback_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveVisitorFeedback(f: import("./types").VisitorFeedback) {
+  const list = getVisitorFeedback(f.companyId).filter((x) => x.id !== f.id);
+  localStorage.setItem(
+    `safentry_feedback_${f.companyId}`,
+    JSON.stringify([f, ...list].slice(0, 500)),
+  );
+}
+export function updateVisitorFeedback(f: import("./types").VisitorFeedback) {
+  saveVisitorFeedback(f);
+}
+
+// Staff session tracking for working hours
+export function getStaffSessions(
+  companyId: string,
+): import("./types").StaffSession[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_staff_sessions_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function addStaffSession(s: import("./types").StaffSession): void {
+  const list = getStaffSessions(s.companyId);
+  localStorage.setItem(
+    `safentry_staff_sessions_${s.companyId}`,
+    JSON.stringify([s, ...list].slice(0, 2000)),
+  );
+}
+
+export function updateStaffSessionLogout(
+  companyId: string,
+  sessionId: string,
+): void {
+  const list = getStaffSessions(companyId);
+  const updated = list.map((s) =>
+    s.id === sessionId ? { ...s, logoutTime: Date.now() } : s,
+  );
+  localStorage.setItem(
+    `safentry_staff_sessions_${companyId}`,
+    JSON.stringify(updated),
+  );
+}
+
+// ─── Bulk Visitor Save ─────────────────────────────────────────────────────────
+export function bulkSaveVisitors(visitors: import("./types").Visitor[]): void {
+  if (visitors.length === 0) return;
+  const companyId = visitors[0].companyId;
+  const existing = getVisitors(companyId);
+  const existingIds = new Set(existing.map((v) => v.visitorId));
+  const newOnes = visitors.filter((v) => !existingIds.has(v.visitorId));
+  localStorage.setItem(
+    `safentry_visitors_${companyId}`,
+    JSON.stringify([...existing, ...newOnes]),
+  );
+}
+
+// ─── Self Pre-Registration ─────────────────────────────────────────────────────
+export function getSelfPreRegEntries(
+  companyCode: string,
+): import("./types").SelfPreRegEntry[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_self_prereg_${companyCode}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveSelfPreRegEntry(entry: import("./types").SelfPreRegEntry) {
+  const list = getSelfPreRegEntries(entry.companyCode).filter(
+    (x) => x.id !== entry.id,
+  );
+  localStorage.setItem(
+    `safentry_self_prereg_${entry.companyCode}`,
+    JSON.stringify([entry, ...list]),
+  );
+}
+export function deleteSelfPreRegEntry(id: string, companyCode: string) {
+  const list = getSelfPreRegEntries(companyCode).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_self_prereg_${companyCode}`,
+    JSON.stringify(list),
+  );
+}
+export function getSelfPreRegEntriesByCompanyId(
+  companyId: string,
+): import("./types").SelfPreRegEntry[] {
+  const company = findCompanyById(companyId);
+  if (!company) return [];
+  return getSelfPreRegEntries(company.loginCode);
 }

@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
-import { findCompanyById, getAppointments } from "../store";
-import { getCompanies } from "../store";
+import {
+  findCompanyById,
+  getAppointments,
+  getCompanies,
+  getStaffPhoto,
+} from "../store";
 import type { AppScreen, Appointment } from "../types";
 
 interface Props {
@@ -12,6 +16,7 @@ export default function AppointmentConfirmPage({ token, onNavigate }: Props) {
   const [appt, setAppt] = useState<Appointment | null>(null);
   const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState("");
+  const [hostPhoto, setHostPhoto] = useState("");
 
   useEffect(() => {
     try {
@@ -26,6 +31,9 @@ export default function AppointmentConfirmPage({ token, onNavigate }: Props) {
           setAppt(found);
           const co = findCompanyById(c.companyId);
           setCompanyName(co?.name ?? "");
+          if (found.hostStaffId) {
+            setHostPhoto(getStaffPhoto(found.hostStaffId));
+          }
           return;
         }
       }
@@ -96,7 +104,22 @@ export default function AppointmentConfirmPage({ token, onNavigate }: Props) {
 
             {companyName && <Row label="Şirket" value={companyName} />}
             <Row label="Ziyaretçi" value={appt.visitorName} />
-            <Row label="Ev Sahibi" value={appt.hostName} />
+            <div
+              className="flex items-center justify-between py-2"
+              style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+            >
+              <span className="text-slate-500 text-sm shrink-0">Ev Sahibi</span>
+              <div className="flex items-center gap-2">
+                {hostPhoto && (
+                  <img
+                    src={hostPhoto}
+                    alt="Host"
+                    className="w-8 h-8 rounded-full object-cover"
+                  />
+                )}
+                <span className="text-white text-sm">{appt.hostName}</span>
+              </div>
+            </div>
             <Row label="Tarih" value={appt.appointmentDate} />
             <Row label="Saat" value={appt.appointmentTime} />
             <Row label="Amaç" value={appt.purpose} />

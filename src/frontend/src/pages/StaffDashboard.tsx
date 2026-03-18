@@ -15,10 +15,13 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { addAuditLog } from "../auditLog";
+import CsvImportModal from "../components/CsvImportModal";
+import DailyBriefing from "../components/DailyBriefing";
 import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
 import NotificationCenter from "../components/NotificationCenter";
 import QRCode from "../components/QRCode";
+import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistModal } from "../components/SecurityChecklist";
 import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
@@ -28,8 +31,11 @@ import { useQRScanner } from "../qr-code/useQRScanner";
 import {
   type StaffMessage,
   addAlertHistory,
+  addBadgeReprintLog,
+  addGatePassLog,
   addNotification,
   clearSession,
+  computeVisitorTrustScore,
   deleteIncident,
   findApprovedByIdNumber,
   findCompanyById,
@@ -39,48 +45,63 @@ import {
   getAlertHistory,
   getAllStaff,
   getAppointments,
+  getApprovalChainConfig,
   getApprovedVisitors,
   getBelongings,
+  getBranches,
   getCompanyDepartments,
   getCompanyFloors,
   getCustomCategories,
   getDepartments,
   getDeptTodayVisitorCount,
+  getHostReviews,
   getIncidents,
   getInvitations,
   getLockdown,
+  getMeetingRooms,
   getSession,
   getStaffByCompany,
   getStaffMessages,
+  getStaffPhoto,
   getVisitorBelongings,
   getVisitors,
+  isBiometricRequired,
   isBlacklisted,
+  isDateTimeOutsideWorkHours,
   refreshSession,
   removeFromQueue,
   resetStaffCode,
   saveAppointment,
+  saveApprovalChainConfig,
   saveBelonging,
   saveCompany,
+  saveHostReview,
   saveIncident,
   saveInvitation,
   saveSession,
   saveStaff,
   saveStaffMessage,
+  saveStaffPhoto,
   saveVisitor,
   setKioskApprovalStatus,
+  updateStaffSessionLogout,
 } from "../store";
 import type {
   AlertHistoryEntry,
   AppScreen,
   Appointment,
+  ApprovalChainStep,
   ApprovedVisitor,
   BelongingsItem,
   Company,
   ContractorPermit,
   ExitQuestion,
+  HostReview,
   Invitation,
+  MeetingRoom,
   SecurityIncident,
   Staff,
+  UploadedDocument,
   Visitor,
 } from "../types";
 import {
@@ -185,6 +206,11 @@ const EMPTY_FORM = {
   department: "",
   floor: "",
   screeningAnswers: {} as Record<string, string>,
+  accessCardNumber: "",
+  ishgAccepted: false,
+  emergencyContactName: "",
+  emergencyContactPhone: "",
+  policyAccepted: false,
 };
 
 const EMPTY_APPT = {
@@ -198,6 +224,7 @@ const EMPTY_APPT = {
   backupContact: "",
   recurrence: "none" as "none" | "weekly" | "monthly",
   recurrenceEndDate: "",
+  meetingRoomId: "",
 };
 
 const KIOSK_PENDING_KEY = "safentry_kiosk_pending";
@@ -356,6 +383,14 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const [approvedSuggestion, setApprovedSuggestion] =
     useState<ApprovedVisitor | null>(null);
 
+  // Trust score
+  const [visitorTrustScore, setVisitorTrustScore] = useState<number | null>(
+    null,
+  );
+
+  // Uploaded documents for new visitor form
+  const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
+
   // Checklist modal
   const [checklistOpen, setChecklistOpen] = useState(false);
   const [checklistType, setChecklistType] = useState<"start" | "end">("start");
@@ -385,20 +420,67 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Daily appointments banner
   const [dailyBannerDismissed, setDailyBannerDismissed] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(() => {
+    return !sessionStorage.getItem("safentry_briefing_dismissed");
+  });
 
   // Parking assign
   const [parkingModalVisitor, setParkingModalVisitor] =
     useState<Visitor | null>(null);
 
   // Exit rating modal
+  const [postExitFeedbackVisitor, setPostExitFeedbackVisitor] =
+    useState<Visitor | null>(null);
+  const [postExitFeedbackRating, setPostExitFeedbackRating] = useState(0);
+  const [postExitFeedbackComment, setPostExitFeedbackComment] = useState("");
+  const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [exitModalVisitor, setExitModalVisitor] = useState<Visitor | null>(
     null,
   );
   const [exitRating, setExitRating] = useState(0);
   const [exitComment, setExitComment] = useState("");
+  // Card return confirmation modal
+  const [cardReturnModalVisitor, setCardReturnModalVisitor] =
+    useState<Visitor | null>(null);
+  // Host review modal
+  const [hostReviewModalVisitor, setHostReviewModalVisitor] =
+    useState<Visitor | null>(null);
+  const [hostReviewForm, setHostReviewForm] = useState({
+    purposeAchieved: true,
+    reinvite: true,
+    note: "",
+  });
 
   // Appointment form
   const [apptForm, setApptForm] = useState(EMPTY_APPT);
+
+  // Gate pass modal
+  const [gateModalVisitor, setGateModalVisitor] = useState<Visitor | null>(
+    null,
+  );
+  const [selectedGate, setSelectedGate] = useState("Ana Giriş");
+  const [gateDirection, setGateDirection] = useState<"in" | "out">("in");
+
+  // Badge reprint modal
+  const [reprintVisitor, setReprintVisitor] = useState<Visitor | null>(null);
+  const [reprintReason, setReprintReason] = useState<
+    "Kayıp" | "Hasar Gördü" | "Diğer"
+  >("Kayıp");
+  const [reprintNote, setReprintNote] = useState("");
+
+  // Transfer modal
+  const [transferAppt, setTransferAppt] = useState<Appointment | null>(null);
+  const [transferTargetId, setTransferTargetId] = useState("");
+
+  // Evacuation modal in staff
+  const [showEvacModal, setShowEvacModal] = useState(false);
+
+  // Biometric verification modal
+  const [biometricModalVisitor, setBiometricModalVisitor] =
+    useState<Visitor | null>(null);
+
+  // Meeting rooms
+  const meetingRooms = getMeetingRooms(session.companyId);
   const [apptError, setApptError] = useState("");
   const [apptTab, setApptTab] = useState<"today" | "create">("today");
 
@@ -408,6 +490,21 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // CSV Bulk Import
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
+  const [showCsvImportModal, setShowCsvImportModal] = useState(false);
+  const [highContrast, setHighContrast] = useState(
+    () => localStorage.getItem("safentry_high_contrast") === "1",
+  );
+  const toggleHighContrast = () => {
+    const next = !highContrast;
+    setHighContrast(next);
+    if (next) {
+      localStorage.setItem("safentry_high_contrast", "1");
+      document.body.classList.add("high-contrast");
+    } else {
+      localStorage.removeItem("safentry_high_contrast");
+      document.body.classList.remove("high-contrast");
+    }
+  };
   const [csvPreview, setCsvPreview] = useState<
     Array<{
       name: string;
@@ -489,8 +586,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   // Shift report
   const [shiftReportOpen, setShiftReportOpen] = useState(false);
 
-  // Re-invite prefill
-  const [_reinviteVisitor, setReinviteVisitor] = useState<Visitor | null>(null);
+  // Re-invite modal
+  const [reinviteModalVisitor, setReinviteModalVisitor] =
+    useState<Visitor | null>(null);
+  const [staffProfilePhoto, setStaffProfilePhoto] = useState(() =>
+    getStaffPhoto(session.staffId ?? ""),
+  );
 
   // Guest invitation
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -694,6 +795,13 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   }, [company?.autoCheckoutHours, session.companyId, reload]);
 
   const logout = () => {
+    const sessionId = localStorage.getItem(
+      `safentry_current_session_id_${session.staffId}`,
+    );
+    if (sessionId && session.staffId && session.companyId) {
+      updateStaffSessionLogout(session.companyId, sessionId);
+      localStorage.removeItem(`safentry_current_session_id_${session.staffId}`);
+    }
     clearSession();
     onNavigate("welcome");
   };
@@ -749,9 +857,13 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       // Also check approved visitors list
       const approved = findApprovedByIdNumber(session.companyId, val);
       setApprovedSuggestion(approved ?? null);
+      // Compute trust score
+      const score = computeVisitorTrustScore(session.companyId, val);
+      setVisitorTrustScore(score);
     } else {
       setReturningSuggestion(null);
       setApprovedSuggestion(null);
+      setVisitorTrustScore(null);
     }
   };
 
@@ -842,6 +954,16 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     }
     if (!form.ndaAccepted) {
       setFormError("Gizlilik sözleşmesini onaylamanız gerekiyor.");
+      return;
+    }
+    if (company?.ishgEnabled && !form.ishgAccepted) {
+      setFormError(
+        "İSG Sağlık ve Güvenlik Beyannamesini onaylamanız gerekiyor.",
+      );
+      return;
+    }
+    if (company?.visitorPolicyEnabled && !form.policyAccepted) {
+      setFormError("Ziyaretçi politikasını okuyup kabul etmeniz gerekiyor.");
       return;
     }
     if (!form.signatureData) {
@@ -1032,6 +1154,11 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             answer: ans,
           }))
         : undefined,
+      accessCardNumber: form.accessCardNumber?.trim() || undefined,
+      ishgAccepted: form.ishgAccepted || undefined,
+      uploadedDocuments: uploadedDocs.length > 0 ? uploadedDocs : undefined,
+      emergencyContactName: form.emergencyContactName?.trim() || undefined,
+      emergencyContactPhone: form.emergencyContactPhone?.trim() || undefined,
     };
     // Show ID verification dialog before saving
     setPendingVisitorData(visitor);
@@ -1071,9 +1198,29 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     });
     setFormError("");
     setReturningSuggestion(null);
+    setUploadedDocs([]);
+    setVisitorTrustScore(null);
     setPendingVisitorData(null);
     setShowIdVerify(false);
     toast.success("Ziyaretçi başarıyla kaydedildi");
+    // Biometric check trigger
+    if (
+      visitor.visitorPhoto &&
+      isBiometricRequired(session.companyId, visitor.category)
+    ) {
+      setTimeout(() => setBiometricModalVisitor(visitor), 500);
+    }
+    // VIP escort protocol
+    if (visitor.label === "vip" && company?.vipEscortEnabled) {
+      toast("🌟 VIP Ziyaretçi — Güvenlik Eşliği Gerekli!", {
+        duration: 8000,
+        style: {
+          background: "#0f172a",
+          color: "#fbbf24",
+          border: "2px solid rgba(245,158,11,0.6)",
+        },
+      });
+    }
     // Accessibility routing notification
     if (visitor.specialNeeds?.trim()) {
       addNotification({
@@ -1136,11 +1283,29 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       "visitor_checkout",
       `${exitModalVisitor.name} çıkış yaptı`,
     );
+    const departedVisitor = {
+      ...exitModalVisitor,
+      status: "departed" as const,
+      departureTime: Date.now(),
+    };
     setExitModalVisitor(null);
     setExitRating(0);
     setExitComment("");
     setEquipmentReturnChecked(false);
     toast.success("Çıkış kaydedildi");
+    // Show post-exit feedback modal
+    setPostExitFeedbackVisitor(departedVisitor);
+    setPostExitFeedbackRating(0);
+    setPostExitFeedbackComment("");
+    // Host review trigger
+    if (
+      departedVisitor.hostStaffId &&
+      session?.staffId &&
+      departedVisitor.hostStaffId === session.staffId
+    ) {
+      setHostReviewForm({ purposeAchieved: true, reinvite: true, note: "" });
+      setHostReviewModalVisitor(departedVisitor);
+    }
     reload();
   };
 
@@ -1169,7 +1334,11 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   };
 
   const checkout = (v: Visitor) => {
-    openExitModal(v);
+    if (v.accessCardNumber && v.accessCardReturned !== true) {
+      setCardReturnModalVisitor(v);
+    } else {
+      openExitModal(v);
+    }
   };
 
   const downloadPDF = async (v: Visitor) => {
@@ -1253,7 +1422,19 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       backupContact: apptForm.backupContact || undefined,
       hostStaffId: hostStaffMatch?.staffId,
       hostApprovalStatus: hostStaffMatch ? "pending" : undefined,
+      meetingRoomId: apptForm.meetingRoomId || undefined,
     };
+    // Check working hours / holidays
+    const workCheck = isDateTimeOutsideWorkHours(
+      session.companyId,
+      apptForm.appointmentDate,
+      apptForm.appointmentTime,
+    );
+    if (workCheck.outside) {
+      toast.warning(
+        `⚠️ Uyarı: ${workCheck.reason}. Randevu yine de oluşturuldu.`,
+      );
+    }
     saveAppointment(baseAppt);
     // Generate shareable confirmation link
     setLastCreatedApptLink(
@@ -1283,6 +1464,17 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setApptForm(EMPTY_APPT);
     setApptError("");
     reload();
+    // Initialize approval chain if enabled
+    (() => {
+      const chainCfg = getApprovalChainConfig(session.companyId);
+      if (chainCfg.enabled && chainCfg.steps.length > 0) {
+        const chain: ApprovalChainStep[] = chainCfg.steps.map((role) => ({
+          role,
+          status: "pending" as const,
+        }));
+        saveAppointment({ ...baseAppt, approvalChain: chain });
+      }
+    })();
     toast.success("Randevu oluşturuldu");
   };
 
@@ -1372,15 +1564,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Re-invite visitor pre-fill
   const openReinvite = (v: Visitor) => {
-    setReinviteVisitor(v);
-    setApptForm((f) => ({
-      ...f,
-      visitorName: v.name,
-      visitorId: v.idNumber,
-      purpose: v.visitReason,
-    }));
-    setTab("appointments");
-    setApptTab("create");
+    setReinviteModalVisitor(v);
   };
 
   // Generate invite code for appointment
@@ -1675,6 +1859,41 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   return (
     <>
+      {/* CSV Import Modal */}
+      {showCsvImportModal && (
+        <CsvImportModal
+          companyId={session.companyId}
+          onClose={() => setShowCsvImportModal(false)}
+          onImported={() => {
+            setShowCsvImportModal(false);
+            reload();
+          }}
+        />
+      )}
+
+      {/* Daily Briefing */}
+      {showBriefing && (
+        <DailyBriefing
+          companyId={session.companyId}
+          visitors={visitors}
+          appointments={appointments}
+          onDismiss={() => {
+            sessionStorage.setItem("safentry_briefing_dismissed", "1");
+            setShowBriefing(false);
+          }}
+        />
+      )}
+      {/* Re-invite Modal */}
+      {reinviteModalVisitor && (
+        <ReinviteModal
+          visitor={reinviteModalVisitor}
+          companyId={session.companyId}
+          staffId={session.staffId ?? ""}
+          staffList={staffList}
+          onClose={() => setReinviteModalVisitor(null)}
+          onCreated={reload}
+        />
+      )}
       {/* Permit Warning Modal */}
       {permitWarning && (
         <div
@@ -1785,7 +2004,11 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         </div>
       )}
-      <div className="min-h-screen" style={{ background: "#0a0f1e" }}>
+      <div
+        id="main-content"
+        className="min-h-screen"
+        style={{ background: "#0a0f1e" }}
+      >
         {/* Lockdown Banner */}
         {lockdownActive && (
           <div
@@ -2311,6 +2534,95 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   }}
                 >
                   Çıkışı Onayla
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Post-Exit Feedback Modal */}
+        {postExitFeedbackVisitor && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)" }}
+            data-ocid="post_exit_feedback.modal"
+          >
+            <div
+              className="w-full max-w-sm p-7 rounded-2xl text-center"
+              style={{
+                background: "#1e293b",
+                border: "1.5px solid rgba(14,165,233,0.3)",
+              }}
+            >
+              <div className="text-4xl mb-3">✅</div>
+              <h3 className="text-white font-bold text-lg mb-1">
+                Ziyaretiniz Tamamlandı!
+              </h3>
+              <p className="text-slate-400 text-sm mb-5">
+                {postExitFeedbackVisitor.name} — memnuniyet değerlendirmesi
+              </p>
+              <div className="flex justify-center mb-3">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <button
+                    key={star}
+                    type="button"
+                    data-ocid={`post_exit_feedback.star.${star}`}
+                    onClick={() => setPostExitFeedbackRating(star)}
+                    className="text-3xl px-1 transition-transform hover:scale-110"
+                    style={{
+                      color:
+                        star <= postExitFeedbackRating
+                          ? "#f59e0b"
+                          : "rgba(255,255,255,0.2)",
+                    }}
+                  >
+                    ★
+                  </button>
+                ))}
+              </div>
+              <textarea
+                data-ocid="post_exit_feedback.comment.textarea"
+                value={postExitFeedbackComment}
+                onChange={(e) => setPostExitFeedbackComment(e.target.value)}
+                rows={2}
+                placeholder="Ek yorum (isteğe bağlı)..."
+                className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none mb-4"
+              />
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  data-ocid="post_exit_feedback.skip_button"
+                  onClick={() => setPostExitFeedbackVisitor(null)}
+                  className="flex-1 py-2.5 rounded-xl text-slate-300 text-sm font-medium"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                >
+                  Geç
+                </button>
+                <button
+                  type="button"
+                  data-ocid="post_exit_feedback.save_button"
+                  disabled={postExitFeedbackRating === 0}
+                  onClick={() => {
+                    if (postExitFeedbackRating > 0) {
+                      saveVisitor({
+                        ...postExitFeedbackVisitor,
+                        exitRating: postExitFeedbackRating,
+                        exitComment:
+                          postExitFeedbackComment.trim() || undefined,
+                      });
+                      toast.success("Değerlendirme kaydedildi");
+                    }
+                    setPostExitFeedbackVisitor(null);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-40"
+                  style={{
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                  }}
+                >
+                  Anketi Kaydet
                 </button>
               </div>
             </div>
@@ -3469,6 +3781,16 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </button>
             <button
               type="button"
+              data-ocid="staff_dashboard.evacuation.button"
+              onClick={() => setShowEvacModal(true)}
+              title="Acil Tahliye Listesi"
+              className="relative p-2 rounded-xl transition-all hover:bg-white/10"
+              style={{ color: "#ef4444" }}
+            >
+              🚨
+            </button>
+            <button
+              type="button"
               data-ocid="staff_dashboard.shift_note.button"
               onClick={() => setShiftNoteModalOpen(true)}
               title="Vardiya Notu Bırak"
@@ -3489,6 +3811,49 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               style={{ color: "#0ea5e9" }}
             >
               🔍
+            </button>
+            <button
+              type="button"
+              data-ocid="staff_dashboard.self_reg_portal.button"
+              onClick={() => {
+                const loginCode =
+                  findCompanyById(session.companyId)?.loginCode ?? "";
+                copyToClipboard(
+                  `${window.location.origin}/self-prereg/${loginCode}`,
+                );
+                toast.success("Self-Reg portal linki kopyalandı");
+              }}
+              title="Self-Reg Portal Linki Kopyala"
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-purple-300 border border-purple-500/30 hover:bg-purple-900/20 transition-colors"
+              aria-label="Self-Reg Portal Linki Kopyala"
+            >
+              🔗
+            </button>
+            <button
+              type="button"
+              data-ocid="staff_dashboard.csv_import.open_modal_button"
+              onClick={() => setShowCsvImportModal(true)}
+              title="CSV ile Toplu Ziyaretçi Aktar"
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-green-300 border border-green-500/30 hover:bg-green-900/20 transition-colors"
+              aria-label="CSV ile Toplu Ziyaretçi Aktar"
+            >
+              📥
+            </button>
+            <button
+              type="button"
+              data-ocid="staff_dashboard.high_contrast.toggle"
+              onClick={toggleHighContrast}
+              title={highContrast ? "Normal Görünüm" : "Yüksek Kontrast"}
+              className="relative p-2 rounded-xl transition-all hover:bg-white/10"
+              style={{ color: highContrast ? "#facc15" : "#94a3b8" }}
+              aria-label={
+                highContrast
+                  ? "Normal görünüme geç"
+                  : "Yüksek kontrast moduna geç"
+              }
+              aria-pressed={highContrast}
+            >
+              🌓
             </button>
             <LangSwitcher onChange={onRefresh} />
             <button
@@ -3532,8 +3897,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         )}
 
-        {/* Tabs */}
-        <div className="flex overflow-x-auto gap-1 px-6 pt-4 border-b border-white/10">
+        {/* Tabs - hidden on mobile, visible on desktop */}
+        <div className="hidden md:flex overflow-x-auto gap-1 px-6 pt-4 border-b border-white/10">
           {TABS.map(([key, label]) => (
             <button
               type="button"
@@ -3551,7 +3916,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           ))}
         </div>
 
-        <div className="p-6">
+        <div className="p-6 pb-24 md:pb-6">
           {/* REGISTER TAB */}
           {tab === "register" && (
             <div className="max-w-2xl">
@@ -3964,6 +4329,49 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     maxLength={11}
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b] font-mono"
                   />
+                  {visitorTrustScore !== null && (
+                    <div className="mt-2 flex items-center gap-3">
+                      <div
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium"
+                        style={{
+                          background:
+                            visitorTrustScore >= 80
+                              ? "rgba(34,197,94,0.15)"
+                              : visitorTrustScore >= 50
+                                ? "rgba(245,158,11,0.15)"
+                                : "rgba(239,68,68,0.15)",
+                          border: `1px solid ${visitorTrustScore >= 80 ? "rgba(34,197,94,0.4)" : visitorTrustScore >= 50 ? "rgba(245,158,11,0.4)" : "rgba(239,68,68,0.4)"}`,
+                          color:
+                            visitorTrustScore >= 80
+                              ? "#4ade80"
+                              : visitorTrustScore >= 50
+                                ? "#fbbf24"
+                                : "#f87171",
+                        }}
+                      >
+                        {visitorTrustScore >= 80
+                          ? "🟢 Güvenilir"
+                          : visitorTrustScore >= 50
+                            ? "🟡 Orta"
+                            : "🔴 Riskli"}
+                        <span className="opacity-70">
+                          ({visitorTrustScore}/100)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  {visitorTrustScore !== null && visitorTrustScore < 40 && (
+                    <div
+                      className="mt-2 p-3 rounded-lg text-xs"
+                      style={{
+                        background: "rgba(239,68,68,0.1)",
+                        border: "1px solid rgba(239,68,68,0.3)",
+                        color: "#f87171",
+                      }}
+                    >
+                      ⚠️ Yüksek riskli ziyaretçi - ek güvenlik kontrolü önerilir
+                    </div>
+                  )}
                 </div>
                 <div>
                   <p className="text-slate-300 text-sm mb-1 block">
@@ -4039,6 +4447,40 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     ))}
                   </select>
                 </div>
+                {/* Branch */}
+                {getBranches(session.companyId).length > 1 && (
+                  <div>
+                    <p className="text-slate-300 text-sm mb-1 block">Şube</p>
+                    <select
+                      data-ocid="register.branch.select"
+                      value={form.customFieldValues?.branch ?? ""}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          customFieldValues: {
+                            ...f.customFieldValues,
+                            branch: e.target.value,
+                          },
+                        }))
+                      }
+                      className="w-full px-4 py-3 rounded-xl bg-[#0f1729] border border-white/20 text-white focus:outline-none"
+                    >
+                      <option value="" className="bg-[#0f1729]">
+                        Ana Şube
+                      </option>
+                      {getBranches(session.companyId).map((b) => (
+                        <option
+                          key={b.id}
+                          value={b.id}
+                          className="bg-[#0f1729]"
+                        >
+                          {b.name}
+                          {b.isMain ? " (Ana)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {/* Floor */}
                 <div>
                   <p className="text-slate-300 text-sm mb-1 block">Kat *</p>
@@ -4187,6 +4629,76 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none font-mono uppercase"
                   />
                 </div>
+                <div>
+                  <p className="text-slate-300 text-sm mb-1 block">
+                    💳 Erişim Kartı No (isteğe bağlı)
+                  </p>
+                  <input
+                    data-ocid="register.access_card.input"
+                    type="text"
+                    value={form.accessCardNumber}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        accessCardNumber: e.target.value,
+                      }))
+                    }
+                    placeholder="Örn: T-047"
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-300 text-sm mb-1 block">
+                    🚨 Acil İletişim Kişi Adı (isteğe bağlı)
+                  </p>
+                  <input
+                    data-ocid="register.emergency_name.input"
+                    type="text"
+                    value={form.emergencyContactName}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        emergencyContactName: e.target.value,
+                      }))
+                    }
+                    placeholder="Kişi adı soyadı"
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-300 text-sm mb-1 block">
+                    📞 Acil İletişim Telefon (isteğe bağlı)
+                  </p>
+                  <input
+                    data-ocid="register.emergency_phone.input"
+                    type="tel"
+                    value={form.emergencyContactPhone}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        emergencyContactPhone: e.target.value,
+                      }))
+                    }
+                    placeholder="0555 000 0000"
+                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none text-sm"
+                  />
+                </div>
+                {(form.category === "Müteahhit" ||
+                  form.category === "Teknik Destek") &&
+                  !form.emergencyContactName && (
+                    <div
+                      data-ocid="register.emergency_warning.panel"
+                      className="px-4 py-3 rounded-xl text-sm flex items-center gap-2"
+                      style={{
+                        background: "rgba(245,158,11,0.1)",
+                        border: "1px solid rgba(245,158,11,0.3)",
+                        color: "#fbbf24",
+                      }}
+                    >
+                      ⚠️ {form.category} kategorisi için acil iletişim bilgisi
+                      girilmesi önerilir.
+                    </div>
+                  )}
                 <div>
                   <p className="text-slate-300 text-sm mb-1 block">
                     {t(lang, "label")}
@@ -4687,6 +5199,187 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     </div>
                   </label>
                 </div>
+                {company?.ishgEnabled && (
+                  <div
+                    className="p-4 rounded-xl"
+                    style={{
+                      background: form.ishgAccepted
+                        ? "rgba(14,165,233,0.06)"
+                        : "rgba(255,255,255,0.04)",
+                      border: form.ishgAccepted
+                        ? "1.5px solid rgba(14,165,233,0.3)"
+                        : "1.5px solid rgba(255,255,255,0.12)",
+                    }}
+                  >
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input
+                        data-ocid="register.ishg.checkbox"
+                        type="checkbox"
+                        checked={form.ishgAccepted}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            ishgAccepted: e.target.checked,
+                          }))
+                        }
+                        className="w-4 h-4 mt-0.5 rounded accent-[#0ea5e9] shrink-0"
+                      />
+                      <div className="flex-1">
+                        <span className="text-slate-200 text-sm font-medium">
+                          🦺 İSG Kurallarını Okudum ve Kabul Ediyorum *
+                        </span>
+                        <details className="mt-1">
+                          <summary className="text-[#0ea5e9] text-xs cursor-pointer hover:underline">
+                            Metni Oku
+                          </summary>
+                          <p
+                            className="mt-2 text-slate-400 text-xs leading-relaxed p-3 rounded-lg"
+                            style={{ background: "rgba(255,255,255,0.05)" }}
+                          >
+                            {company.ishgText ||
+                              "Bu binada İş Sağlığı ve Güvenliği kurallarına uymayı kabul ediyorum. Belirlenen güvenlik önlemlerine, tahliye prosedürlerine ve acil durum talimatlarına uyacağımı taahhüt ederim."}
+                          </p>
+                        </details>
+                      </div>
+                    </label>
+                  </div>
+                )}
+                {/* Visitor Policy */}
+                {company?.visitorPolicyEnabled && company.visitorPolicy && (
+                  <div
+                    data-ocid="register.policy.panel"
+                    className="p-4 rounded-2xl space-y-3"
+                    style={{
+                      background: "rgba(14,165,233,0.06)",
+                      border: "1px solid rgba(14,165,233,0.25)",
+                    }}
+                  >
+                    <p className="text-slate-200 font-semibold text-sm">
+                      📋 Ziyaretçi Politikası
+                    </p>
+                    <p className="text-slate-400 text-xs">
+                      Aşağıdaki politikayı okuyup kabul etmeniz gerekmektedir.
+                    </p>
+                    {policyModalOpen ? (
+                      <div
+                        className="p-3 rounded-xl text-slate-300 text-xs whitespace-pre-wrap leading-relaxed"
+                        style={{
+                          background: "rgba(0,0,0,0.3)",
+                          maxHeight: 160,
+                          overflowY: "auto",
+                        }}
+                      >
+                        {company.visitorPolicy}
+                      </div>
+                    ) : null}
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        data-ocid="register.policy_read.button"
+                        onClick={() => setPolicyModalOpen((v) => !v)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#0ea5e9] transition-all"
+                        style={{
+                          background: "rgba(14,165,233,0.15)",
+                          border: "1px solid rgba(14,165,233,0.3)",
+                        }}
+                      >
+                        {policyModalOpen ? "Gizle" : "Politikayı Oku"}
+                      </button>
+                    </div>
+                    <label className="flex items-start gap-3 cursor-pointer mt-2">
+                      <input
+                        data-ocid="register.policy_accept.checkbox"
+                        type="checkbox"
+                        checked={form.policyAccepted}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            policyAccepted: e.target.checked,
+                          }))
+                        }
+                        className="mt-0.5 accent-[#0ea5e9]"
+                      />
+                      <span className="text-slate-300 text-sm">
+                        Politikayı okudum ve kabul ediyorum{" "}
+                        <span className="text-red-400">*</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+                {/* Document Upload */}
+                <div>
+                  <p className="text-slate-300 text-sm mb-2 block">
+                    📎 Belgeler (isteğe bağlı, max 3 dosya, max 2MB)
+                  </p>
+                  <div className="space-y-2">
+                    {uploadedDocs.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="flex items-center justify-between px-3 py-2 rounded-lg"
+                        style={{
+                          background: "rgba(14,165,233,0.1)",
+                          border: "1px solid rgba(14,165,233,0.2)",
+                        }}
+                      >
+                        <span className="text-white text-xs truncate flex-1">
+                          {doc.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUploadedDocs((d) =>
+                              d.filter((x) => x.id !== doc.id),
+                            )
+                          }
+                          className="ml-2 text-red-400 hover:text-red-300 text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {uploadedDocs.length < 3 && (
+                      <label
+                        data-ocid="register.upload_button"
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer text-xs text-slate-400 hover:text-white transition-colors"
+                        style={{
+                          background: "rgba(255,255,255,0.05)",
+                          border: "1.5px dashed rgba(255,255,255,0.2)",
+                        }}
+                      >
+                        <span>📁 Dosya Ekle (PDF, JPG, PNG)</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.size > 2 * 1024 * 1024) {
+                              toast.error("Dosya boyutu 2MB'yi aşamaz");
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                              const base64 = ev.target?.result as string;
+                              setUploadedDocs((d) => [
+                                ...d,
+                                {
+                                  id: generateId(),
+                                  name: file.name,
+                                  type: file.type,
+                                  base64,
+                                  uploadedAt: Date.now(),
+                                },
+                              ]);
+                            };
+                            reader.readAsDataURL(file);
+                            e.target.value = "";
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
                 <div>
                   <p className="text-slate-300 text-sm mb-2 block">
                     {t(lang, "signature")} *
@@ -4977,6 +5670,33 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               </span>
                             </div>
                           )}
+                          {v.emergencyContactName && (
+                            <div className="text-slate-400 text-sm mb-1">
+                              🚨 Acil:{" "}
+                              <span className="text-white">
+                                {v.emergencyContactName}
+                              </span>
+                              {v.emergencyContactPhone && (
+                                <span className="text-slate-300 ml-1 font-mono text-xs">
+                                  ({v.emergencyContactPhone})
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {(v.category === "Müteahhit" ||
+                            v.category === "Teknik Destek") &&
+                            !v.emergencyContactName && (
+                              <span
+                                className="inline-block px-2 py-0.5 rounded text-xs font-medium mb-1"
+                                style={{
+                                  background: "rgba(245,158,11,0.15)",
+                                  color: "#fbbf24",
+                                  border: "1px solid rgba(245,158,11,0.3)",
+                                }}
+                              >
+                                ⚠️ Acil iletişim eksik
+                              </span>
+                            )}
                           <div className="text-slate-400 text-sm mb-3">
                             Süre:{" "}
                             <span
@@ -5197,6 +5917,44 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                                   🚗
                                 </button>
                               )}
+                            {/* Gate Pass Button */}
+                            <button
+                              type="button"
+                              data-ocid={`active_visitors.gate.button.${i + 1}`}
+                              onClick={() => {
+                                setGateModalVisitor(v);
+                                setSelectedGate("Ana Giriş");
+                                setGateDirection("in");
+                              }}
+                              title="Kapıyı Aç"
+                              className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                              style={{
+                                background: "rgba(20,184,166,0.15)",
+                                border: "1px solid rgba(20,184,166,0.3)",
+                                color: "#2dd4bf",
+                              }}
+                            >
+                              🚪
+                            </button>
+                            {/* Badge Reprint Button */}
+                            <button
+                              type="button"
+                              data-ocid={`active_visitors.reprint.button.${i + 1}`}
+                              onClick={() => {
+                                setReprintVisitor(v);
+                                setReprintReason("Kayıp");
+                                setReprintNote("");
+                              }}
+                              title="Rozet Yeniden Bas"
+                              className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                              style={{
+                                background: "rgba(168,85,247,0.15)",
+                                border: "1px solid rgba(168,85,247,0.3)",
+                                color: "#c084fc",
+                              }}
+                            >
+                              🖨️
+                            </button>
                           </div>
                           {/* Badge validity warning */}
                           {(() => {
@@ -5482,14 +6240,28 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                           }}
                         >
                           <div className="flex items-center justify-between flex-wrap gap-2">
-                            <div>
-                              <span className="text-white font-semibold text-sm">
-                                {a.visitorName}
-                              </span>
-                              <span className="text-slate-400 text-xs ml-2">
-                                {a.appointmentDate} {a.appointmentTime} —{" "}
-                                {a.purpose}
-                              </span>
+                            <div className="flex items-center gap-3">
+                              {(() => {
+                                const photo = getStaffPhoto(
+                                  session.staffId ?? "",
+                                );
+                                return photo ? (
+                                  <img
+                                    src={photo}
+                                    alt="Host"
+                                    className="w-8 h-8 rounded-full object-cover shrink-0"
+                                  />
+                                ) : null;
+                              })()}
+                              <div>
+                                <span className="text-white font-semibold text-sm">
+                                  {a.visitorName}
+                                </span>
+                                <span className="text-slate-400 text-xs ml-2">
+                                  {a.appointmentDate} {a.appointmentTime} —{" "}
+                                  {a.purpose}
+                                </span>
+                              </div>
                             </div>
                             <div className="flex gap-2">
                               <button
@@ -5936,6 +6708,48 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                                 <div className="text-slate-400 text-sm">
                                   Amaç: {appt.purpose}
                                 </div>
+                                {appt.approvalChain &&
+                                  appt.approvalChain.length > 0 && (
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      <span className="text-slate-500 text-xs">
+                                        🔗 Onay:
+                                      </span>
+                                      {appt.approvalChain.map((step, si) => {
+                                        const roleLabel: Record<
+                                          string,
+                                          string
+                                        > = {
+                                          host: "Host",
+                                          security: "Güvenlik",
+                                          hr: "İK",
+                                        };
+                                        const stepColor =
+                                          step.status === "approved"
+                                            ? "#22c55e"
+                                            : step.status === "rejected"
+                                              ? "#ef4444"
+                                              : "#94a3b8";
+                                        return (
+                                          <span
+                                            key={`${step.role}-${si}`}
+                                            className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                                            style={{
+                                              background: `${stepColor}22`,
+                                              color: stepColor,
+                                              border: `1px solid ${stepColor}44`,
+                                            }}
+                                          >
+                                            {si + 1}. {roleLabel[step.role]}
+                                            {step.status === "approved"
+                                              ? " ✓"
+                                              : step.status === "rejected"
+                                                ? " ✗"
+                                                : " ⏳"}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 {appt.notes && (
                                   <div className="text-slate-500 text-xs mt-1">
                                     {appt.notes}
@@ -5986,6 +6800,64 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                                     🔑 Davet Kodu
                                   </button>
                                 ) : null}
+                                {/* No-Show Button */}
+                                {!appt.noShow && appt.status === "pending" && (
+                                  <button
+                                    type="button"
+                                    data-ocid={`appointments.noshow_button.${i + 1}`}
+                                    onClick={() => {
+                                      const updated = {
+                                        ...appt,
+                                        noShow: true,
+                                        noShowMarkedAt: Date.now(),
+                                        status: "cancelled" as const,
+                                      };
+                                      saveAppointment(updated);
+                                      setAppointments(
+                                        getAppointments(session.companyId),
+                                      );
+                                      toast.warning(
+                                        `${appt.visitorName} gelmedi (No-Show) olarak işaretlendi`,
+                                      );
+                                    }}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-medium"
+                                    style={{
+                                      background: "rgba(239,68,68,0.12)",
+                                      border: "1px solid rgba(239,68,68,0.3)",
+                                      color: "#ef4444",
+                                    }}
+                                  >
+                                    🚫 Gelmedi
+                                  </button>
+                                )}
+                                {appt.noShow && (
+                                  <span
+                                    className="px-2 py-1 rounded-lg text-xs font-bold"
+                                    style={{
+                                      background: "rgba(239,68,68,0.15)",
+                                      color: "#ef4444",
+                                      border: "1px solid rgba(239,68,68,0.3)",
+                                    }}
+                                  >
+                                    🚫 No-Show
+                                  </span>
+                                )}
+                                {/* Transfer Button */}
+                                <button
+                                  type="button"
+                                  data-ocid={`appointments.transfer.button.${i + 1}`}
+                                  onClick={() => {
+                                    setTransferAppt(appt);
+                                    setTransferTargetId("");
+                                  }}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+                                  style={{
+                                    background: "rgba(20,184,166,0.15)",
+                                    border: "1px solid rgba(20,184,166,0.35)",
+                                  }}
+                                >
+                                  🔀 Devret
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -6256,6 +7128,55 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                       </div>
                     )}
                   </div>
+                  {/* Meeting Room Selection */}
+                  {meetingRooms.length > 0 && (
+                    <div>
+                      <p className="text-slate-300 text-sm mb-1">
+                        Toplantı Odası (isteğe bağlı)
+                      </p>
+                      <select
+                        data-ocid="appointments.meeting_room.select"
+                        value={apptForm.meetingRoomId}
+                        onChange={(e) => {
+                          const roomId = e.target.value;
+                          if (roomId) {
+                            const conflict = appointments.find(
+                              (a) =>
+                                a.meetingRoomId === roomId &&
+                                a.appointmentDate ===
+                                  apptForm.appointmentDate &&
+                                a.appointmentTime ===
+                                  apptForm.appointmentTime &&
+                                a.status !== "cancelled",
+                            );
+                            if (conflict)
+                              toast.warning(
+                                `Bu oda ${apptForm.appointmentTime} saatinde dolu: ${conflict.visitorName}`,
+                              );
+                          }
+                          setApptForm((f) => ({ ...f, meetingRoomId: roomId }));
+                        }}
+                        className="w-full px-4 py-3 rounded-xl text-white focus:outline-none"
+                        style={{
+                          background: "#0f1729",
+                          border: "1px solid rgba(255,255,255,0.2)",
+                        }}
+                      >
+                        <option value="" className="bg-[#0f1729]">
+                          Oda seçin (isteğe bağlı)
+                        </option>
+                        {meetingRooms.map((r) => (
+                          <option
+                            key={r.id}
+                            value={r.id}
+                            className="bg-[#0f1729]"
+                          >
+                            {r.name} — {r.floor} ({r.capacity} kişi)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {apptConflict && (
                     <div
                       data-ocid="appointments.conflict.error_state"
@@ -7367,14 +8288,22 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           {tab === "profile" && (
             <div className="max-w-xl space-y-6">
               <div className="flex items-center gap-4">
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white"
-                  style={{
-                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
-                  }}
-                >
-                  {staff?.name?.[0]?.toUpperCase() ?? "?"}
-                </div>
+                {staffProfilePhoto ? (
+                  <img
+                    src={staffProfilePhoto}
+                    alt="Profil"
+                    className="w-14 h-14 rounded-2xl object-cover"
+                  />
+                ) : (
+                  <div
+                    className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    }}
+                  >
+                    {staff?.name?.[0]?.toUpperCase() ?? "?"}
+                  </div>
+                )}
                 <div>
                   <div className="text-white text-lg font-semibold">
                     {staff?.name}
@@ -7386,6 +8315,75 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                         ? "Resepsiyonist"
                         : "Personel"}
                   </div>
+                </div>
+              </div>
+
+              {/* Profile Photo Section */}
+              <div
+                data-ocid="staff_profile.photo.panel"
+                className="p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <p className="text-slate-300 text-sm font-semibold mb-3">
+                  📸 Profil Fotoğrafı
+                </p>
+                {staffProfilePhoto && (
+                  <div className="flex items-center gap-4 mb-3">
+                    <img
+                      src={staffProfilePhoto}
+                      alt="Profil"
+                      className="w-16 h-16 rounded-2xl object-cover"
+                    />
+                    <button
+                      type="button"
+                      data-ocid="staff_profile.delete_button"
+                      onClick={() => {
+                        saveStaffPhoto(session.staffId ?? "", "");
+                        setStaffProfilePhoto("");
+                        toast.success("Fotoğraf silindi.");
+                      }}
+                      className="px-3 py-1.5 rounded-lg text-xs text-red-400 hover:opacity-80"
+                      style={{
+                        background: "rgba(239,68,68,0.1)",
+                        border: "1px solid rgba(239,68,68,0.25)",
+                      }}
+                    >
+                      Sil
+                    </button>
+                  </div>
+                )}
+                <div className="flex gap-2 flex-wrap">
+                  <label
+                    data-ocid="staff_profile.upload_button"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all hover:opacity-80"
+                    style={{
+                      background: "rgba(14,165,233,0.15)",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                      color: "#0ea5e9",
+                    }}
+                  >
+                    📤 Yükle
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          const base64 = ev.target?.result as string;
+                          saveStaffPhoto(session.staffId ?? "", base64);
+                          setStaffProfilePhoto(base64);
+                          toast.success("Fotoğraf kaydedildi.");
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
 
@@ -8400,6 +9398,783 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           type={checklistType}
           onClose={() => setChecklistOpen(false)}
         />
+      )}
+
+      {/* Gate Pass Modal */}
+      {gateModalVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(20,184,166,0.3)",
+            }}
+          >
+            <h3 className="text-white font-bold text-base mb-4">
+              🚪 Kapıyı Aç — {gateModalVisitor.name}
+            </h3>
+            <div className="space-y-3 mb-5">
+              <div>
+                <p className="text-slate-400 text-sm mb-1">Kapı Seç</p>
+                <select
+                  data-ocid="gate_modal.gate.select"
+                  value={selectedGate}
+                  onChange={(e) => setSelectedGate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                  style={{
+                    background: "#0a0f1e",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                >
+                  {["Ana Giriş", "Yan Kapı", "Otopark Kapısı"].map((g) => (
+                    <option key={g} value={g} className="bg-[#0a0f1e]">
+                      {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="text-slate-400 text-sm mb-1">Yön</p>
+                <div className="flex gap-2">
+                  {(["in", "out"] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      data-ocid={`gate_modal.direction.${d}`}
+                      onClick={() => setGateDirection(d)}
+                      className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
+                      style={{
+                        background:
+                          gateDirection === d
+                            ? d === "in"
+                              ? "rgba(34,197,94,0.3)"
+                              : "rgba(239,68,68,0.3)"
+                            : "rgba(255,255,255,0.05)",
+                        color:
+                          gateDirection === d
+                            ? d === "in"
+                              ? "#4ade80"
+                              : "#f87171"
+                            : "#94a3b8",
+                        border: `1px solid ${gateDirection === d ? (d === "in" ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)") : "rgba(255,255,255,0.1)"}`,
+                      }}
+                    >
+                      {d === "in" ? "▶ Giriş" : "◀ Çıkış"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-ocid="gate_modal.confirm_button"
+                onClick={() => {
+                  addGatePassLog({
+                    id: generateId(),
+                    companyId: session.companyId,
+                    visitorId: gateModalVisitor.visitorId,
+                    visitorName: gateModalVisitor.name,
+                    staffId: session.staffId ?? "",
+                    staffName: staff.name,
+                    gate: selectedGate,
+                    passedAt: Date.now(),
+                    direction: gateDirection,
+                  });
+                  toast.success(
+                    `🚪 ${selectedGate} ${gateDirection === "in" ? "açıldı (giriş)" : "açıldı (çıkış)"}`,
+                  );
+                  setGateModalVisitor(null);
+                }}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#14b8a6,#0d9488)",
+                }}
+              >
+                Kapıyı Aç ✓
+              </button>
+              <button
+                type="button"
+                data-ocid="gate_modal.cancel_button"
+                onClick={() => setGateModalVisitor(null)}
+                className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Badge Reprint Modal */}
+      {reprintVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(168,85,247,0.3)",
+            }}
+          >
+            <h3 className="text-white font-bold text-base mb-4">
+              🖨️ Rozet Yeniden Bas — {reprintVisitor.name}
+            </h3>
+            <div className="space-y-3 mb-5">
+              <div>
+                <p className="text-slate-400 text-sm mb-1">Neden</p>
+                <select
+                  data-ocid="reprint_modal.reason.select"
+                  value={reprintReason}
+                  onChange={(e) =>
+                    setReprintReason(e.target.value as typeof reprintReason)
+                  }
+                  className="w-full px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+                  style={{
+                    background: "#0a0f1e",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                >
+                  {["Kayıp", "Hasar Gördü", "Diğer"].map((r) => (
+                    <option key={r} value={r} className="bg-[#0a0f1e]">
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="text-slate-400 text-sm mb-1">
+                  Not (isteğe bağlı)
+                </p>
+                <input
+                  data-ocid="reprint_modal.note.input"
+                  value={reprintNote}
+                  onChange={(e) => setReprintNote(e.target.value)}
+                  placeholder="Açıklama..."
+                  className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-ocid="reprint_modal.confirm_button"
+                onClick={async () => {
+                  addBadgeReprintLog({
+                    id: generateId(),
+                    companyId: session.companyId,
+                    visitorId: reprintVisitor.visitorId,
+                    visitorName: reprintVisitor.name,
+                    reason: reprintReason,
+                    note: reprintNote || undefined,
+                    reprintedBy: staff.name,
+                    reprintedAt: Date.now(),
+                  });
+                  const hostName =
+                    staffList.find(
+                      (s) => s.staffId === reprintVisitor.hostStaffId,
+                    )?.name ?? "";
+                  try {
+                    await generateVisitorBadgePDF(
+                      reprintVisitor,
+                      company?.name ?? "Safentry",
+                      hostName,
+                    );
+                    toast.success("Rozet yeniden basıldı");
+                  } catch {
+                    toast.error("Rozet basım hatası");
+                  }
+                  setReprintVisitor(null);
+                }}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#a855f7,#9333ea)",
+                }}
+              >
+                Bas ✓
+              </button>
+              <button
+                type="button"
+                data-ocid="reprint_modal.cancel_button"
+                onClick={() => setReprintVisitor(null)}
+                className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Appointment Modal */}
+      {transferAppt && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(20,184,166,0.3)",
+            }}
+          >
+            <h3 className="text-white font-bold text-base mb-1">
+              🔀 Randevu Devret
+            </h3>
+            <p className="text-slate-400 text-sm mb-4">
+              {transferAppt.visitorName} — {transferAppt.appointmentDate}{" "}
+              {transferAppt.appointmentTime}
+            </p>
+            <div className="mb-4">
+              <p className="text-slate-400 text-sm mb-2">Yeni Personel Seç</p>
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {staffList
+                  .filter(
+                    (s) =>
+                      !s.isAbsent &&
+                      s.staffId !== (transferAppt.hostStaffId ?? ""),
+                  )
+                  .map((s) => (
+                    <button
+                      key={s.staffId}
+                      type="button"
+                      data-ocid="transfer_modal.staff.button"
+                      onClick={() => setTransferTargetId(s.staffId)}
+                      className="w-full text-left px-3 py-2 rounded-xl text-sm transition-all"
+                      style={{
+                        background:
+                          transferTargetId === s.staffId
+                            ? "rgba(20,184,166,0.2)"
+                            : "rgba(255,255,255,0.03)",
+                        border: `1px solid ${transferTargetId === s.staffId ? "rgba(20,184,166,0.5)" : "rgba(255,255,255,0.1)"}`,
+                        color:
+                          transferTargetId === s.staffId
+                            ? "#2dd4bf"
+                            : "#94a3b8",
+                      }}
+                    >
+                      {s.name}{" "}
+                      <span className="text-xs opacity-60">({s.role})</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                data-ocid="transfer_modal.confirm_button"
+                onClick={() => {
+                  const target = staffList.find(
+                    (s) => s.staffId === transferTargetId,
+                  );
+                  if (!target) {
+                    toast.error("Personel seçin.");
+                    return;
+                  }
+                  const updated = {
+                    ...transferAppt,
+                    hostName: target.name,
+                    hostStaffId: target.staffId,
+                    hostApprovalStatus: "pending" as const,
+                  };
+                  saveAppointment(updated);
+                  addAuditLog(
+                    session.companyId,
+                    staff.name,
+                    session.staffId ?? "",
+                    "RANDEVU_DEVİR",
+                    `${transferAppt.visitorName} için randevu ${target.name} adlı personele devredildi (önceki: ${transferAppt.hostName})`,
+                  );
+                  toast.success(
+                    `Randevu ${target.name} adlı personele devredildi`,
+                  );
+                  setTransferAppt(null);
+                  setTransferTargetId("");
+                  reload();
+                }}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#14b8a6,#0d9488)",
+                }}
+                disabled={!transferTargetId}
+              >
+                Devret ✓
+              </button>
+              <button
+                type="button"
+                data-ocid="transfer_modal.cancel_button"
+                onClick={() => setTransferAppt(null)}
+                className="px-4 py-2 rounded-xl text-sm text-slate-400 border border-white/15 hover:bg-white/5"
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Biometric Verification Modal */}
+      {biometricModalVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm p-6 rounded-2xl space-y-5"
+            style={{
+              background: "#1e293b",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <div className="text-center">
+              <div className="text-3xl mb-2">👤</div>
+              <h3 className="text-white font-bold text-lg">Kimlik Doğrulama</h3>
+              <p className="text-slate-400 text-sm mt-1">
+                Rozetteki fotoğrafı önünüzdeki kişiyle karşılaştırın
+              </p>
+            </div>
+            {biometricModalVisitor.visitorPhoto && (
+              <div className="flex justify-center">
+                <img
+                  src={biometricModalVisitor.visitorPhoto}
+                  alt="Ziyaretçi Fotoğrafı"
+                  className="w-32 h-32 rounded-full object-cover"
+                  style={{ border: "3px solid rgba(14,165,233,0.5)" }}
+                />
+              </div>
+            )}
+            <div className="text-center">
+              <p className="text-white font-semibold">
+                {biometricModalVisitor.name}
+              </p>
+              <p className="text-slate-400 text-sm">
+                {biometricModalVisitor.category}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                data-ocid="biometric.verified.button"
+                onClick={() => {
+                  const updated = {
+                    ...biometricModalVisitor,
+                    biometricCheckResult: "verified" as const,
+                  };
+                  saveVisitor(updated);
+                  setBiometricModalVisitor(null);
+                  toast.success("Kimlik doğrulandı ✓");
+                }}
+                className="py-3 rounded-xl font-semibold text-white"
+                style={{
+                  background: "rgba(34,197,94,0.3)",
+                  border: "1px solid rgba(34,197,94,0.5)",
+                }}
+              >
+                ✓ Doğrulandı
+              </button>
+              <button
+                type="button"
+                data-ocid="biometric.flagged.button"
+                onClick={() => {
+                  const updated = {
+                    ...biometricModalVisitor,
+                    biometricCheckResult: "flagged" as const,
+                    privateNote: `${biometricModalVisitor.privateNote ? `${biometricModalVisitor.privateNote} | ` : ""}⚠️ Biyometrik doğrulama şüpheli (${new Date().toLocaleString("tr-TR")})`,
+                  };
+                  saveVisitor(updated);
+                  addNotification({
+                    id: `biometric_flag_${Date.now()}`,
+                    companyId: session.companyId,
+                    type: "warning",
+                    message: `⚠️ Şüpheli kimlik: ${biometricModalVisitor.name} — biyometrik eşleşme başarısız`,
+                    createdAt: Date.now(),
+                    read: false,
+                  });
+                  setBiometricModalVisitor(null);
+                  toast.error("Şüpheli kimlik bildirimi oluşturuldu");
+                }}
+                className="py-3 rounded-xl font-semibold"
+                style={{
+                  background: "rgba(239,68,68,0.2)",
+                  border: "1px solid rgba(239,68,68,0.4)",
+                  color: "#f87171",
+                }}
+              >
+                ⚠️ Şüpheli
+              </button>
+            </div>
+            <button
+              type="button"
+              data-ocid="biometric.skip.button"
+              onClick={() => setBiometricModalVisitor(null)}
+              className="w-full text-center text-slate-500 text-xs py-1 hover:text-slate-400"
+            >
+              Atla
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Evacuation Modal for Staff */}
+
+      {showEvacModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl p-6 max-h-[90vh] overflow-y-auto"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(239,68,68,0.4)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-red-400 font-bold text-lg">
+                🚨 Acil Tahliye Listesi — {company?.name}
+              </h3>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  data-ocid="evacuation_modal.print_button"
+                  onClick={() => window.print()}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                  style={{
+                    background: "rgba(239,68,68,0.3)",
+                    border: "1px solid rgba(239,68,68,0.5)",
+                  }}
+                >
+                  🖨️ Yazdır
+                </button>
+                <button
+                  type="button"
+                  data-ocid="evacuation_modal.close_button"
+                  onClick={() => setShowEvacModal(false)}
+                  className="px-3 py-1.5 rounded-lg text-xs text-slate-400 border border-white/15 hover:bg-white/5"
+                >
+                  ✕ Kapat
+                </button>
+              </div>
+            </div>
+            <p className="text-slate-400 text-sm mb-4">
+              Aktif ziyaretçiler — {new Date().toLocaleString("tr-TR")}
+            </p>
+            {(() => {
+              const active = visitors.filter((v) => v.status === "active");
+              if (active.length === 0)
+                return (
+                  <div className="text-center py-8 text-slate-500">
+                    <div className="text-3xl mb-2">✅</div>
+                    <p>Şu an binada ziyaretçi yok.</p>
+                  </div>
+                );
+              const byFloor: Record<string, typeof active> = {};
+              for (const v of active) {
+                const fl = v.floor || "Belirtilmemiş";
+                if (!byFloor[fl]) byFloor[fl] = [];
+                byFloor[fl].push(v);
+              }
+              return Object.entries(byFloor).map(([floor, vs]) => (
+                <div key={floor} className="mb-5">
+                  <h4 className="text-amber-400 font-semibold text-sm mb-2">
+                    📍 {floor} ({vs.length} kişi)
+                  </h4>
+                  <div className="space-y-2">
+                    {vs.map((v) => {
+                      const masked =
+                        v.idNumber.length >= 5
+                          ? `${v.idNumber.slice(0, 3)}******${v.idNumber.slice(-2)}`
+                          : v.idNumber;
+                      const host = staffList.find(
+                        (s) => s.staffId === v.hostStaffId,
+                      );
+                      return (
+                        <div
+                          key={v.visitorId}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg"
+                          style={{
+                            background: "rgba(239,68,68,0.06)",
+                            border: "1px solid rgba(239,68,68,0.15)",
+                          }}
+                        >
+                          <span className="text-white font-medium text-sm flex-1">
+                            {v.name}
+                          </span>
+                          <span className="text-slate-500 text-xs">
+                            {masked}
+                          </span>
+                          <span className="text-slate-400 text-xs">
+                            Host: {host?.name ?? "—"}
+                          </span>
+                          <span className="text-slate-500 text-xs">
+                            {new Date(v.arrivalTime).toLocaleTimeString(
+                              "tr-TR",
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Navigation */}
+      <nav
+        data-ocid="staff_dashboard.mobile_nav"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-50 flex border-t border-white/10"
+        style={{ background: "#0a0f1e" }}
+      >
+        {(
+          [
+            { key: "register", icon: "👤", label: "Ziyaretçi" },
+            { key: "appointments", icon: "📅", label: "Randevular" },
+            { key: "gorevler", icon: "📋", label: "Görevler" },
+            { key: "profile", icon: "⚙️", label: "Hesabım" },
+          ] as { key: Tab; icon: string; label: string }[]
+        ).map(({ key, icon, label }) => (
+          <button
+            type="button"
+            key={key}
+            data-ocid={`staff_dashboard.mobile_${key}.tab`}
+            onClick={() => setTab(key)}
+            className="flex-1 flex flex-col items-center py-3 gap-1 transition-all"
+            style={{ color: tab === key ? "#f59e0b" : "#64748b" }}
+          >
+            <span className="text-xl">{icon}</span>
+            <span className="text-xs font-medium">{label}</span>
+          </button>
+        ))}
+      </nav>
+      {cardReturnModalVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm p-6 rounded-2xl space-y-4"
+            style={{
+              background: "linear-gradient(135deg,#0f1729,#141d2e)",
+              border: "1px solid rgba(245,158,11,0.4)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg">
+              💳 Erişim Kartı İadesi
+            </h3>
+            <p className="text-slate-300 text-sm">
+              <strong>{cardReturnModalVisitor.name}</strong> isimli ziyaretçiye{" "}
+              <span className="font-mono text-amber-400">
+                {cardReturnModalVisitor.accessCardNumber}
+              </span>{" "}
+              numaralı kart verilmişti.
+            </p>
+            <p className="text-slate-400 text-sm">Kart iade edildi mi?</p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="cardreturn.confirm_button"
+                onClick={() => {
+                  saveVisitor({
+                    ...cardReturnModalVisitor,
+                    accessCardReturned: true,
+                  });
+                  setCardReturnModalVisitor(null);
+                  openExitModal({
+                    ...cardReturnModalVisitor,
+                    accessCardReturned: true,
+                  });
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                }}
+              >
+                ✓ Evet, İade Edildi
+              </button>
+              <button
+                type="button"
+                data-ocid="cardreturn.cancel_button"
+                onClick={() => {
+                  setCardReturnModalVisitor(null);
+                  openExitModal(cardReturnModalVisitor);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold"
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  color: "#94a3b8",
+                }}
+              >
+                Henüz Değil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {hostReviewModalVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="w-full max-w-sm p-6 rounded-2xl space-y-4"
+            style={{
+              background: "linear-gradient(135deg,#0f1729,#141d2e)",
+              border: "1px solid rgba(14,165,233,0.4)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg">
+              ⭐ Ziyaret Değerlendirmesi
+            </h3>
+            <p className="text-slate-400 text-sm">
+              <strong className="text-white">
+                {hostReviewModalVisitor.name}
+              </strong>{" "}
+              için değerlendirmenizi girin.
+            </p>
+            <div>
+              <p className="text-slate-300 text-sm mb-2">
+                Ziyaret amacı gerçekleşti mi?
+              </p>
+              <div className="flex gap-2">
+                {[true, false].map((v) => (
+                  <button
+                    key={String(v)}
+                    type="button"
+                    data-ocid={
+                      v
+                        ? "hostreview.purpose_yes.button"
+                        : "hostreview.purpose_no.button"
+                    }
+                    onClick={() =>
+                      setHostReviewForm((f) => ({ ...f, purposeAchieved: v }))
+                    }
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
+                    style={
+                      hostReviewForm.purposeAchieved === v
+                        ? {
+                            background: "rgba(14,165,233,0.3)",
+                            border: "1.5px solid rgba(14,165,233,0.6)",
+                            color: "#38bdf8",
+                          }
+                        : {
+                            background: "rgba(255,255,255,0.07)",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            color: "#94a3b8",
+                          }
+                    }
+                  >
+                    {v ? "✅ Evet" : "❌ Hayır"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-slate-300 text-sm mb-2">
+                Tekrar davet edilsin mi?
+              </p>
+              <div className="flex gap-2">
+                {[true, false].map((v) => (
+                  <button
+                    key={String(v)}
+                    type="button"
+                    data-ocid={
+                      v
+                        ? "hostreview.reinvite_yes.button"
+                        : "hostreview.reinvite_no.button"
+                    }
+                    onClick={() =>
+                      setHostReviewForm((f) => ({ ...f, reinvite: v }))
+                    }
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold transition-all"
+                    style={
+                      hostReviewForm.reinvite === v
+                        ? {
+                            background: "rgba(14,165,233,0.3)",
+                            border: "1.5px solid rgba(14,165,233,0.6)",
+                            color: "#38bdf8",
+                          }
+                        : {
+                            background: "rgba(255,255,255,0.07)",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            color: "#94a3b8",
+                          }
+                    }
+                  >
+                    {v ? "✅ Evet" : "❌ Hayır"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-slate-300 text-sm mb-1">Not (isteğe bağlı)</p>
+              <textarea
+                data-ocid="hostreview.note.textarea"
+                rows={2}
+                value={hostReviewForm.note}
+                onChange={(e) =>
+                  setHostReviewForm((f) => ({ ...f, note: e.target.value }))
+                }
+                placeholder="Ziyaret hakkında notunuz..."
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/15 text-white text-sm focus:outline-none focus:border-[#0ea5e9] resize-none"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="hostreview.save_button"
+                onClick={() => {
+                  if (!hostReviewModalVisitor || !session) return;
+                  const review: HostReview = {
+                    id: generateId(),
+                    companyId: session.companyId,
+                    visitorId: hostReviewModalVisitor.visitorId,
+                    visitorName: hostReviewModalVisitor.name,
+                    visitedAt:
+                      hostReviewModalVisitor.departureTime ?? Date.now(),
+                    hostStaffId: session.staffId ?? "",
+                    hostStaffName: staff?.name ?? "Personel",
+                    purposeAchieved: hostReviewForm.purposeAchieved,
+                    reinvite: hostReviewForm.reinvite,
+                    note: hostReviewForm.note,
+                    createdAt: Date.now(),
+                  };
+                  saveHostReview(review);
+                  setHostReviewModalVisitor(null);
+                  toast.success("Değerlendirme kaydedildi");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                💾 Kaydet
+              </button>
+              <button
+                type="button"
+                data-ocid="hostreview.close_button"
+                onClick={() => setHostReviewModalVisitor(null)}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  color: "#94a3b8",
+                }}
+              >
+                Atla
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { addAuditLog } from "../auditLog";
 import SignatureCanvas from "../components/SignatureCanvas";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
@@ -56,6 +57,7 @@ const EMPTY_FORM = {
   ndaExpanded: false,
   specialNeeds: "Yok",
   visitorPhoto: "",
+  policyAccepted: false,
 };
 
 export default function KioskMode({ companyId, onNavigate }: Props) {
@@ -69,7 +71,13 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   const customFields = company?.customFields ?? [];
 
   const [screen, setScreen] = useState<
-    "welcome" | "form" | "waiting" | "pin" | "checkout" | "checkout-success"
+    | "welcome"
+    | "form"
+    | "waiting"
+    | "pin"
+    | "checkout"
+    | "checkout-feedback"
+    | "checkout-success"
   >("welcome");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [pinTc, setPinTc] = useState("");
@@ -95,6 +103,14 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   >("waiting");
   const [rejectionReason, setRejectionReason] = useState<string>("");
 
+  // Offline support
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+
+  const [checkoutFeedbackRating, setCheckoutFeedbackRating] = useState(0);
+  const [checkoutFeedbackComment, setCheckoutFeedbackComment] = useState("");
+  const [policyModalOpen, setPolicyModalOpen] = useState(false);
+
   // QR Scanner
   const [showQrScanner, setShowQrScanner] = useState(false);
   const qrScanner = useQRScanner();
@@ -113,6 +129,38 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     camera.stopCamera();
     setScreen("welcome");
   }, [qrScanner, camera]);
+
+  // Online/offline detection
+  useEffect(() => {
+    const offlineKey = `offlineQueue_${companyId}`;
+    const handleOnline = () => {
+      setIsOffline(false);
+      // Process offline queue
+      const queue: import("../types").Visitor[] = JSON.parse(
+        localStorage.getItem(offlineKey) || "[]",
+      );
+      if (queue.length > 0) {
+        for (const v of queue) {
+          saveVisitor(v);
+        }
+        localStorage.removeItem(offlineKey);
+        setOfflineQueueCount(0);
+        toast.success(
+          `Bağlantı sağlandı. ${queue.length} bekleyen giriş aktarıldı.`,
+        );
+      }
+    };
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    // Load current offline queue count
+    const q = JSON.parse(localStorage.getItem(offlineKey) || "[]");
+    setOfflineQueueCount(q.length);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [companyId]);
 
   // Handle QR scan result - auto-fill from invite code
   useEffect(() => {
@@ -255,6 +303,10 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       setFormError("Gizlilik sözleşmesini onaylamalısınız.");
       return;
     }
+    if (company?.visitorPolicyEnabled && !form.policyAccepted) {
+      setFormError("Ziyaretçi politikasını okuyup kabul etmeniz gerekiyor.");
+      return;
+    }
     if (!form.signatureData) {
       setFormError("Lütfen dijital imza atın.");
       return;
@@ -337,6 +389,17 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     setQueueNo(nextQueueNo);
     setCurrentVisitorId(visitorId);
 
+    if (!navigator.onLine) {
+      // Offline: save to offline queue
+      const offlineKey = `offlineQueue_${companyId}`;
+      const queue = JSON.parse(localStorage.getItem(offlineKey) || "[]");
+      queue.push({ ...visitor });
+      localStorage.setItem(offlineKey, JSON.stringify(queue));
+      setOfflineQueueCount(queue.length);
+      setScreen("waiting");
+      return;
+    }
+
     // Save to pending localStorage instead of directly saving
     const pending = JSON.parse(localStorage.getItem(KIOSK_PENDING_KEY) ?? "[]");
     pending.push({ ...visitor, _submittedAt: now });
@@ -368,6 +431,15 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
         className="min-h-screen flex flex-col items-center justify-center p-8"
         style={{ background: "#0a0f1e" }}
       >
+        {isOffline && (
+          <div
+            data-ocid="kiosk.offline_banner"
+            className="fixed top-0 left-0 right-0 px-6 py-3 text-sm font-semibold text-center z-50"
+            style={{ background: "rgba(239,68,68,0.85)", color: "#fff" }}
+          >
+            📡 Çevrimdışı mod — Girişler bağlantı gelince aktarılacak
+          </div>
+        )}
         <button
           type="button"
           data-ocid="kiosk.back_button"
@@ -750,7 +822,39 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               <p className="text-green-400 text-base mb-2">
                 Güvenlik personeliniz sizi karşılamak için yolda.
               </p>
-              <p className="text-slate-500 text-sm">Lütfen bekleyiniz...</p>
+              <p className="text-slate-500 text-sm mb-4">
+                Lütfen bekleyiniz...
+              </p>
+              {company?.wifiSSID && (
+                <div
+                  data-ocid="kiosk.wifi_info.card"
+                  className="mt-4 p-4 rounded-2xl text-left"
+                  style={{
+                    background: "rgba(14,165,233,0.08)",
+                    border: "1px solid rgba(14,165,233,0.25)",
+                  }}
+                >
+                  <p className="text-[#38bdf8] font-semibold text-sm mb-2">
+                    📶 Misafir WiFi
+                  </p>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Ağ Adı:</span>
+                      <span className="text-white font-mono">
+                        {company.wifiSSID}
+                      </span>
+                    </div>
+                    {company.wifiPassword && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Şifre:</span>
+                        <span className="text-white font-mono">
+                          {company.wifiPassword}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           ) : approvalStatus === "rejected" ? (
             <>
@@ -920,8 +1024,9 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                     saveVisitor(updated);
                     setCheckoutFound(null);
                     setCheckoutTc("");
-                    setScreen("checkout-success");
-                    setTimeout(() => setScreen("welcome"), 4000);
+                    setCheckoutFeedbackRating(0);
+                    setCheckoutFeedbackComment("");
+                    setScreen("checkout-feedback");
                   }}
                   className="mt-3 w-full py-3 rounded-xl font-semibold text-white"
                   style={{
@@ -965,6 +1070,90 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   }
 
   // Self checkout success screen
+  if (screen === "checkout-feedback") {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.checkout_feedback_screen"
+      >
+        <div
+          className="w-full max-w-sm p-10 rounded-3xl text-center"
+          style={{
+            background: "rgba(14,165,233,0.07)",
+            border: "1.5px solid rgba(14,165,233,0.3)",
+          }}
+        >
+          <div className="text-5xl mb-4">✅</div>
+          <h2 className="text-2xl font-bold text-white mb-2">
+            Ziyaretiniz Tamamlandı!
+          </h2>
+          <p className="text-slate-400 text-sm mb-6">
+            Lütfen ziyaretinizi değerlendirin.
+          </p>
+          <div className="flex justify-center gap-2 mb-4">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                type="button"
+                data-ocid={`kiosk.feedback_star.${star}`}
+                onClick={() => setCheckoutFeedbackRating(star)}
+                className="text-4xl transition-transform hover:scale-110"
+                style={{
+                  color:
+                    star <= checkoutFeedbackRating
+                      ? "#f59e0b"
+                      : "rgba(255,255,255,0.2)",
+                }}
+              >
+                ★
+              </button>
+            ))}
+          </div>
+          <textarea
+            data-ocid="kiosk.feedback_comment.textarea"
+            value={checkoutFeedbackComment}
+            onChange={(e) => setCheckoutFeedbackComment(e.target.value)}
+            rows={2}
+            placeholder="Ek yorum (isteğe bağlı)..."
+            className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none mb-4"
+          />
+          <div className="flex gap-3">
+            <button
+              type="button"
+              data-ocid="kiosk.feedback_skip.button"
+              onClick={() => {
+                setScreen("checkout-success");
+                setTimeout(() => setScreen("welcome"), 4000);
+              }}
+              className="flex-1 py-3 rounded-xl text-slate-300 font-medium"
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+            >
+              Geç
+            </button>
+            <button
+              type="button"
+              data-ocid="kiosk.feedback_send.button"
+              disabled={checkoutFeedbackRating === 0}
+              onClick={() => {
+                // Feedback already saved via checkout; here we just proceed
+                setScreen("checkout-success");
+                setTimeout(() => setScreen("welcome"), 3000);
+              }}
+              className="flex-1 py-3 rounded-xl text-white font-semibold disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+            >
+              Gönder
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (screen === "checkout-success") {
     return (
       <div
@@ -999,6 +1188,21 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       className="min-h-screen overflow-y-auto"
       style={{ background: "#0a0f1e" }}
     >
+      {isOffline && (
+        <div
+          data-ocid="kiosk.offline_banner"
+          className="w-full px-6 py-3 text-sm font-semibold text-center"
+          style={{
+            background: "rgba(239,68,68,0.15)",
+            borderBottom: "1px solid rgba(239,68,68,0.4)",
+            color: "#fca5a5",
+          }}
+        >
+          📡 Çevrimdışı mod — Girişler kaydediliyor
+          {offlineQueueCount > 0 ? ` (${offlineQueueCount} bekleyen)` : ""},
+          bağlantı gelince aktarılacak
+        </div>
+      )}
       <div
         className="sticky top-0 z-10 px-6 py-4 border-b border-white/10 flex items-center justify-between"
         style={{ background: "#0a0f1e" }}
@@ -1318,6 +1522,60 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
             </div>
           </label>
         </div>
+
+        {/* Visitor Policy */}
+        {company?.visitorPolicyEnabled && company.visitorPolicy && (
+          <div
+            className="mt-6 p-5 rounded-xl"
+            style={{
+              background: form.policyAccepted
+                ? "rgba(14,165,233,0.06)"
+                : "rgba(255,255,255,0.04)",
+              border: form.policyAccepted
+                ? "1.5px solid rgba(14,165,233,0.3)"
+                : "1.5px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <p className="text-slate-200 font-semibold text-base mb-2">
+              📋 Ziyaretçi Politikası
+            </p>
+            <button
+              type="button"
+              data-ocid="kiosk.policy_read.button"
+              onClick={() => setPolicyModalOpen((v) => !v)}
+              className="text-[#0ea5e9] text-sm hover:underline mb-3 block"
+            >
+              {policyModalOpen ? "Gizle ▲" : "Politikayı Oku ▼"}
+            </button>
+            {policyModalOpen && (
+              <p
+                className="text-slate-400 text-sm leading-relaxed p-3 rounded-lg mb-3 whitespace-pre-wrap"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  maxHeight: 150,
+                  overflowY: "auto",
+                }}
+              >
+                {company.visitorPolicy}
+              </p>
+            )}
+            <label className="flex items-start gap-4 cursor-pointer">
+              <input
+                data-ocid="kiosk.policy_accept.checkbox"
+                type="checkbox"
+                checked={form.policyAccepted}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, policyAccepted: e.target.checked }))
+                }
+                className="w-6 h-6 mt-0.5 rounded accent-[#0ea5e9] shrink-0"
+                style={{ minWidth: "24px" }}
+              />
+              <span className="text-slate-200 text-base font-medium">
+                Politikayı okudum ve kabul ediyorum *
+              </span>
+            </label>
+          </div>
+        )}
 
         {/* Signature */}
         <div className="mt-6">
