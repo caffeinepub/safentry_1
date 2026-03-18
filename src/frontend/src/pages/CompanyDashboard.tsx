@@ -26,7 +26,9 @@ import BranchManager from "../components/BranchManager";
 import ConfirmModal from "../components/ConfirmModal";
 import CsvImportModal from "../components/CsvImportModal";
 import EmptyState from "../components/EmptyState";
+import EscortTab from "../components/EscortTab";
 import LangSwitcher from "../components/LangSwitcher";
+import LostFoundTab from "../components/LostFoundTab";
 import NotificationCenter from "../components/NotificationCenter";
 import ParkingManager from "../components/ParkingManager";
 import ReinviteModal from "../components/ReinviteModal";
@@ -46,7 +48,9 @@ import {
   clearSession,
   deleteApprovedVisitor,
   deleteDepartment,
+  deleteEscort,
   deleteIncident,
+  deleteLostFound,
   deleteMeetingRoom,
   deletePermit,
   deleteScheduledReport,
@@ -66,12 +70,15 @@ import {
   getCompanyFloors,
   getDepartments,
   getDeptTodayVisitorCount,
+  getEscorts,
   getGatePassLogs,
   getHostReviews,
   getIncidents,
   getKioskContent,
   getLockdown,
+  getLostFound,
   getMeetingRooms,
+  getPermitRenewals,
   getPermits,
   getScheduledReports,
   getSession,
@@ -94,11 +101,14 @@ import {
   saveBlacklistAppeal,
   saveCompany,
   saveDepartment,
+  saveEscort,
   saveIncident,
   saveInviteCode,
   saveKioskContent,
+  saveLostFound,
   saveMeetingRoom,
   savePermit,
+  savePermitRenewal,
   saveScheduledReport,
   saveStaff,
   saveVisitor,
@@ -214,7 +224,9 @@ type Tab =
   | "appeals"
   | "scheduledreports"
   | "feedback"
-  | "parking";
+  | "parking"
+  | "escorts"
+  | "lostfound";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -2528,6 +2540,8 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       label: `💬 Geri Bildirimler (${getVisitorFeedback(session.companyId).filter((x) => x.status === "new").length})`,
     },
     { key: "parking", label: "🅿️ Otopark" },
+    { key: "escorts", label: "🛡️ Refakatçiler" },
+    { key: "lostfound", label: "🔍 Kayıp & Bulunan" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -7126,6 +7140,87 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
         {tab === "permits" && (
           <div data-ocid="permits.section">
+            {/* Pending Renewal Requests */}
+            {getPermitRenewals(session.companyId).filter(
+              (r) => r.status === "pending",
+            ).length > 0 && (
+              <div
+                className="mb-6 p-4 rounded-2xl space-y-3"
+                style={{
+                  background: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.3)",
+                }}
+              >
+                <h3 className="text-amber-400 font-semibold text-sm">
+                  ⏳ Yenileme Talepleri (
+                  {
+                    getPermitRenewals(session.companyId).filter(
+                      (r) => r.status === "pending",
+                    ).length
+                  }{" "}
+                  bekliyor)
+                </h3>
+                {getPermitRenewals(session.companyId)
+                  .filter((r) => r.status === "pending")
+                  .map((r, ri) => (
+                    <div
+                      key={r.id}
+                      data-ocid={`permits.renewal.item.${ri + 1}`}
+                      className="flex items-center justify-between gap-3 flex-wrap"
+                    >
+                      <div>
+                        <p className="text-white text-sm font-medium">
+                          {r.contractorName}
+                        </p>
+                        <p className="text-slate-400 text-xs">
+                          {new Date(r.requestedAt).toLocaleString("tr-TR")}{" "}
+                          tarihinde talep edildi
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          data-ocid={`permits.renewal.approve.${ri + 1}`}
+                          onClick={() => {
+                            savePermitRenewal({
+                              ...r,
+                              status: "approved",
+                              reviewedAt: Date.now(),
+                              reviewedBy: session.staffId ?? "admin",
+                            });
+                            toast.success("Yenileme onaylandı.");
+                            reload();
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                          style={{
+                            background:
+                              "linear-gradient(135deg,#22c55e,#16a34a)",
+                          }}
+                        >
+                          Onayla
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid={`permits.renewal.reject.${ri + 1}`}
+                          onClick={() => {
+                            savePermitRenewal({
+                              ...r,
+                              status: "rejected",
+                              reviewedAt: Date.now(),
+                              reviewedBy: session.staffId ?? "admin",
+                            });
+                            toast.error("Yenileme reddedildi.");
+                            reload();
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-500/30 hover:bg-red-900/20"
+                        >
+                          Reddet
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
             {/* Compliance Dashboard */}
             {permits.length > 0 &&
               (() => {
@@ -7470,6 +7565,39 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                           >
                             Sil
                           </button>
+                          {(status === "expired" || status === "expiring") &&
+                            !getPermitRenewals(session.companyId).some(
+                              (r) =>
+                                r.permitId === p.id && r.status === "pending",
+                            ) && (
+                              <button
+                                type="button"
+                                data-ocid={`permits.renew_button.${i + 1}`}
+                                onClick={() => {
+                                  savePermitRenewal({
+                                    id: generateId(),
+                                    companyId: session.companyId,
+                                    permitId: p.id,
+                                    contractorName: p.contractorName,
+                                    requestedAt: Date.now(),
+                                    status: "pending",
+                                  });
+                                  toast.success("Yenileme talebi oluşturuldu.");
+                                  reload();
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs text-amber-400 border border-amber-500/30 hover:bg-amber-900/20"
+                              >
+                                🔄 Yenileme Talep Et
+                              </button>
+                            )}
+                          {getPermitRenewals(session.companyId).some(
+                            (r) =>
+                              r.permitId === p.id && r.status === "pending",
+                          ) && (
+                            <span className="px-3 py-1.5 rounded-lg text-xs text-amber-400 bg-amber-900/20">
+                              ⏳ Talep Bekliyor
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -8371,6 +8499,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         )}
 
         {tab === "parking" && <ParkingManager companyId={session.companyId} />}
+
+        {tab === "escorts" && (
+          <EscortTab
+            companyId={session.companyId}
+            visitors={visitors}
+            staffList={staffList}
+          />
+        )}
+
+        {tab === "lostfound" && <LostFoundTab companyId={session.companyId} />}
 
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">

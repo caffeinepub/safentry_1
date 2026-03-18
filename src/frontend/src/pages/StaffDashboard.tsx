@@ -20,6 +20,7 @@ import DailyBriefing from "../components/DailyBriefing";
 import EmptyState from "../components/EmptyState";
 import LangSwitcher from "../components/LangSwitcher";
 import NotificationCenter from "../components/NotificationCenter";
+import PatrolTab from "../components/PatrolTab";
 import QRCode from "../components/QRCode";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistModal } from "../components/SecurityChecklist";
@@ -37,6 +38,7 @@ import {
   clearSession,
   computeVisitorTrustScore,
   deleteIncident,
+  deletePatrol,
   findApprovedByIdNumber,
   findCompanyById,
   findPermitByIdNumber,
@@ -59,6 +61,7 @@ import {
   getInvitations,
   getLockdown,
   getMeetingRooms,
+  getPatrols,
   getSession,
   getStaffByCompany,
   getStaffMessages,
@@ -78,6 +81,7 @@ import {
   saveHostReview,
   saveIncident,
   saveInvitation,
+  savePatrol,
   saveSession,
   saveStaff,
   saveStaffMessage,
@@ -182,7 +186,8 @@ type Tab =
   | "gorevler"
   | "mycalendar"
   | "messages"
-  | "incidents";
+  | "incidents"
+  | "patrol";
 
 const EMPTY_FORM = {
   name: "",
@@ -1843,6 +1848,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       "invitations",
       `✉️ Davetler${invitations.length > 0 ? ` (${invitations.length})` : ""}`,
     ],
+    ["patrol" as Tab, "🗺️ Devriye Logu"] as [Tab, string],
     ["profile", "Hesabım"],
     (() => {
       const myPending = tasks.filter(
@@ -8285,6 +8291,18 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           )}
 
           {/* PROFILE TAB */}
+          {tab === "patrol" && (
+            <PatrolTab
+              companyId={session.companyId}
+              staffId={session.staffId ?? ""}
+              staffName={
+                staffList.find((s) => s.staffId === session.staffId)?.name ??
+                session.staffId ??
+                "Personel"
+              }
+            />
+          )}
+
           {tab === "profile" && (
             <div className="max-w-xl space-y-6">
               <div className="flex items-center gap-4">

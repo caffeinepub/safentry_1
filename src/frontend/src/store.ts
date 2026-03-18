@@ -1241,3 +1241,130 @@ export function getSelfPreRegEntriesByCompanyId(
   if (!company) return [];
   return getSelfPreRegEntries(company.loginCode);
 }
+
+// ─── Escorts ────────────────────────────────────────────────────────────────
+export interface EscortAssignment {
+  id: string;
+  companyId: string;
+  visitorId: string;
+  visitorName: string;
+  staffId: string;
+  staffName: string;
+  status: "assigned" | "active" | "completed";
+  assignedAt: number;
+  takenAt?: number;
+  handedAt?: number;
+  notes?: string;
+}
+export function getEscorts(companyId: string): EscortAssignment[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_escorts_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveEscort(e: EscortAssignment) {
+  const list = getEscorts(e.companyId).filter((x) => x.id !== e.id);
+  localStorage.setItem(
+    `safentry_escorts_${e.companyId}`,
+    JSON.stringify([e, ...list]),
+  );
+}
+export function deleteEscort(companyId: string, id: string) {
+  const list = getEscorts(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_escorts_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Permit Renewals ─────────────────────────────────────────────────────────
+export interface PermitRenewal {
+  id: string;
+  companyId: string;
+  permitId: string;
+  contractorName: string;
+  requestedAt: number;
+  status: "pending" | "approved" | "rejected";
+  reviewedAt?: number;
+  reviewedBy?: string;
+}
+export function getPermitRenewals(companyId: string): PermitRenewal[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_permit_renewals_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function savePermitRenewal(r: PermitRenewal) {
+  const list = getPermitRenewals(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_permit_renewals_${r.companyId}`,
+    JSON.stringify([r, ...list]),
+  );
+}
+
+// ─── Patrol Logs ──────────────────────────────────────────────────────────────
+export interface PatrolEntry {
+  id: string;
+  companyId: string;
+  staffId: string;
+  staffName: string;
+  checkpoint: string;
+  notes: string;
+  loggedAt: number;
+}
+export function getPatrols(companyId: string): PatrolEntry[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_patrols_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function savePatrol(p: PatrolEntry) {
+  const list = getPatrols(p.companyId);
+  localStorage.setItem(
+    `safentry_patrols_${p.companyId}`,
+    JSON.stringify([p, ...list].slice(0, 1000)),
+  );
+}
+export function deletePatrol(companyId: string, id: string) {
+  const list = getPatrols(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_patrols_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Lost & Found ─────────────────────────────────────────────────────────────
+export interface LostFoundItem {
+  id: string;
+  companyId: string;
+  description: string;
+  foundLocation: string;
+  foundDate: string;
+  finderName: string;
+  status: "found" | "claimed";
+  claimantName?: string;
+  claimedAt?: number;
+}
+export function getLostFound(companyId: string): LostFoundItem[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_lostfound_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveLostFound(item: LostFoundItem) {
+  const list = getLostFound(item.companyId).filter((x) => x.id !== item.id);
+  localStorage.setItem(
+    `safentry_lostfound_${item.companyId}`,
+    JSON.stringify([item, ...list]),
+  );
+}
+export function deleteLostFound(companyId: string, id: string) {
+  const list = getLostFound(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_lostfound_${companyId}`, JSON.stringify(list));
+}
