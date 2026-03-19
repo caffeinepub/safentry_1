@@ -1,5 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { useCallback, useEffect, useState } from "react";
+import { setBackendActor } from "./backendSync";
+import { useActor } from "./hooks/useActor";
 import { getLang } from "./i18n";
 import InvitePage from "./pages/InvitePage";
 import {
@@ -74,6 +76,10 @@ function getAppealParams(): { tc: string } | null {
 export default function App() {
   const [, forceRender] = useState(0);
   const refresh = () => forceRender((x) => x + 1);
+  const { actor } = useActor();
+  useEffect(() => {
+    setBackendActor(actor);
+  }, [actor]);
 
   const hasLang = !!localStorage.getItem("safentry_lang");
   const session = getSession();

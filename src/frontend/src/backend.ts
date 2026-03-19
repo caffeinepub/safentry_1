@@ -96,6 +96,37 @@ export interface Staff {
     role: StaffRole;
     companyId: string;
 }
+export interface BlacklistEntry {
+    name: string;
+    idNumber: string;
+    addedAt: bigint;
+    addedBy: string;
+    category?: Category;
+    reason: string;
+    companyId: string;
+}
+export interface Visitor {
+    status: VisitorStatus;
+    accessCardReturned: boolean;
+    accessCardNumber?: string;
+    arrivalTime: bigint;
+    departureTime?: bigint;
+    host: string;
+    name: string;
+    createdAt: bigint;
+    visitorId: bigint;
+    badgeExpired: boolean;
+    company: string;
+    idNumber: string;
+    badgeQr: string;
+    notes: string;
+    category: Category;
+    phone: string;
+    photo?: Uint8Array;
+    department: Department;
+    purpose: string;
+    companyId: string;
+}
 export interface Company {
     loginCode: string;
     name: string;
@@ -105,75 +136,181 @@ export interface Company {
     authorizedPerson: string;
     companyId: string;
 }
+export enum Category {
+    internal = "internal",
+    external = "external"
+}
+export enum Department {
+    hr = "hr",
+    finance = "finance",
+    sales = "sales",
+    engineering = "engineering"
+}
 export enum StaffRole {
     admin = "admin",
     security = "security"
 }
+export enum VisitorStatus {
+    active = "active",
+    rejected = "rejected",
+    departed = "departed"
+}
 export interface backendInterface {
+    addBlacklistEntry(entry: BlacklistEntry): Promise<void>;
+    addVisitor(visitor: Visitor): Promise<void>;
+    getBlacklistEntries(companyId: string): Promise<Array<BlacklistEntry>>;
     getCompanyById(companyId: string): Promise<Company | null>;
     getStaffByCompanyId(companyId: string): Promise<Array<Staff>>;
+    getVisitor(visitorId: bigint): Promise<Visitor | null>;
+    getVisitorsByCompany(companyId: string): Promise<Array<Visitor>>;
+    isBlacklisted(companyId: string, idNumber: string): Promise<boolean>;
     loginCompany(loginCode: string): Promise<Company | null>;
     loginStaff(staffId: string, companyId: string): Promise<Staff | null>;
     registerCompany(companyId: string, loginCode: string, name: string, sector: string, address: string, authorizedPerson: string): Promise<Company>;
     registerStaff(staffId: string, companyId: string, name: string, role: StaffRole): Promise<Staff>;
+    removeBlacklistEntry(companyId: string, idNumber: string): Promise<boolean>;
 }
-import type { Company as _Company, Staff as _Staff, StaffRole as _StaffRole } from "./declarations/backend.did.d.ts";
+import type { BlacklistEntry as _BlacklistEntry, Category as _Category, Company as _Company, Department as _Department, Staff as _Staff, StaffRole as _StaffRole, Visitor as _Visitor, VisitorStatus as _VisitorStatus } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async addBlacklistEntry(arg0: BlacklistEntry): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.addBlacklistEntry(to_candid_BlacklistEntry_n1(this._uploadFile, this._downloadFile, arg0));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.addBlacklistEntry(to_candid_BlacklistEntry_n1(this._uploadFile, this._downloadFile, arg0));
+            return result;
+        }
+    }
+    async addVisitor(arg0: Visitor): Promise<void> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.addVisitor(to_candid_Visitor_n5(this._uploadFile, this._downloadFile, arg0));
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.addVisitor(to_candid_Visitor_n5(this._uploadFile, this._downloadFile, arg0));
+            return result;
+        }
+    }
+    async getBlacklistEntries(arg0: string): Promise<Array<BlacklistEntry>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getBlacklistEntries(arg0);
+                return from_candid_vec_n11(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getBlacklistEntries(arg0);
+            return from_candid_vec_n11(this._uploadFile, this._downloadFile, result);
+        }
+    }
     async getCompanyById(arg0: string): Promise<Company | null> {
         if (this.processError) {
             try {
                 const result = await this.actor.getCompanyById(arg0);
-                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+                return from_candid_opt_n17(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.getCompanyById(arg0);
-            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+            return from_candid_opt_n17(this._uploadFile, this._downloadFile, result);
         }
     }
     async getStaffByCompanyId(arg0: string): Promise<Array<Staff>> {
         if (this.processError) {
             try {
                 const result = await this.actor.getStaffByCompanyId(arg0);
-                return from_candid_vec_n2(this._uploadFile, this._downloadFile, result);
+                return from_candid_vec_n18(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.getStaffByCompanyId(arg0);
-            return from_candid_vec_n2(this._uploadFile, this._downloadFile, result);
+            return from_candid_vec_n18(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getVisitor(arg0: bigint): Promise<Visitor | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getVisitor(arg0);
+                return from_candid_opt_n23(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getVisitor(arg0);
+            return from_candid_opt_n23(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getVisitorsByCompany(arg0: string): Promise<Array<Visitor>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getVisitorsByCompany(arg0);
+                return from_candid_vec_n33(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getVisitorsByCompany(arg0);
+            return from_candid_vec_n33(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async isBlacklisted(arg0: string, arg1: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.isBlacklisted(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.isBlacklisted(arg0, arg1);
+            return result;
         }
     }
     async loginCompany(arg0: string): Promise<Company | null> {
         if (this.processError) {
             try {
                 const result = await this.actor.loginCompany(arg0);
-                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+                return from_candid_opt_n17(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.loginCompany(arg0);
-            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+            return from_candid_opt_n17(this._uploadFile, this._downloadFile, result);
         }
     }
     async loginStaff(arg0: string, arg1: string): Promise<Staff | null> {
         if (this.processError) {
             try {
                 const result = await this.actor.loginStaff(arg0, arg1);
-                return from_candid_opt_n7(this._uploadFile, this._downloadFile, result);
+                return from_candid_opt_n34(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.loginStaff(arg0, arg1);
-            return from_candid_opt_n7(this._uploadFile, this._downloadFile, result);
+            return from_candid_opt_n34(this._uploadFile, this._downloadFile, result);
         }
     }
     async registerCompany(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string, arg5: string): Promise<Company> {
@@ -193,31 +330,102 @@ export class Backend implements backendInterface {
     async registerStaff(arg0: string, arg1: string, arg2: string, arg3: StaffRole): Promise<Staff> {
         if (this.processError) {
             try {
-                const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n8(this._uploadFile, this._downloadFile, arg3));
-                return from_candid_Staff_n3(this._uploadFile, this._downloadFile, result);
+                const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n35(this._uploadFile, this._downloadFile, arg3));
+                return from_candid_Staff_n19(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n8(this._uploadFile, this._downloadFile, arg3));
-            return from_candid_Staff_n3(this._uploadFile, this._downloadFile, result);
+            const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n35(this._uploadFile, this._downloadFile, arg3));
+            return from_candid_Staff_n19(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async removeBlacklistEntry(arg0: string, arg1: string): Promise<boolean> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.removeBlacklistEntry(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.removeBlacklistEntry(arg0, arg1);
+            return result;
         }
     }
 }
-function from_candid_StaffRole_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _StaffRole): StaffRole {
-    return from_candid_variant_n6(_uploadFile, _downloadFile, value);
+function from_candid_BlacklistEntry_n12(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _BlacklistEntry): BlacklistEntry {
+    return from_candid_record_n13(_uploadFile, _downloadFile, value);
 }
-function from_candid_Staff_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Staff): Staff {
-    return from_candid_record_n4(_uploadFile, _downloadFile, value);
+function from_candid_Category_n15(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Category): Category {
+    return from_candid_variant_n16(_uploadFile, _downloadFile, value);
 }
-function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Company]): Company | null {
+function from_candid_Department_n31(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Department): Department {
+    return from_candid_variant_n32(_uploadFile, _downloadFile, value);
+}
+function from_candid_StaffRole_n21(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _StaffRole): StaffRole {
+    return from_candid_variant_n22(_uploadFile, _downloadFile, value);
+}
+function from_candid_Staff_n19(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Staff): Staff {
+    return from_candid_record_n20(_uploadFile, _downloadFile, value);
+}
+function from_candid_VisitorStatus_n26(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _VisitorStatus): VisitorStatus {
+    return from_candid_variant_n27(_uploadFile, _downloadFile, value);
+}
+function from_candid_Visitor_n24(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Visitor): Visitor {
+    return from_candid_record_n25(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n14(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Category]): Category | null {
+    return value.length === 0 ? null : from_candid_Category_n15(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_opt_n17(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Company]): Company | null {
     return value.length === 0 ? null : value[0];
 }
-function from_candid_opt_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Staff]): Staff | null {
-    return value.length === 0 ? null : from_candid_Staff_n3(_uploadFile, _downloadFile, value[0]);
+function from_candid_opt_n23(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Visitor]): Visitor | null {
+    return value.length === 0 ? null : from_candid_Visitor_n24(_uploadFile, _downloadFile, value[0]);
 }
-function from_candid_record_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+function from_candid_opt_n28(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [string]): string | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n29(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [bigint]): bigint | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n30(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [Uint8Array]): Uint8Array | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n34(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Staff]): Staff | null {
+    return value.length === 0 ? null : from_candid_Staff_n19(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_record_n13(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    name: string;
+    idNumber: string;
+    addedAt: bigint;
+    addedBy: string;
+    category: [] | [_Category];
+    reason: string;
+    companyId: string;
+}): {
+    name: string;
+    idNumber: string;
+    addedAt: bigint;
+    addedBy: string;
+    category?: Category;
+    reason: string;
+    companyId: string;
+} {
+    return {
+        name: value.name,
+        idNumber: value.idNumber,
+        addedAt: value.addedAt,
+        addedBy: value.addedBy,
+        category: record_opt_to_undefined(from_candid_opt_n14(_uploadFile, _downloadFile, value.category)),
+        reason: value.reason,
+        companyId: value.companyId
+    };
+}
+function from_candid_record_n20(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     staffId: string;
     name: string;
     createdAt: bigint;
@@ -234,24 +442,250 @@ function from_candid_record_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint
         staffId: value.staffId,
         name: value.name,
         createdAt: value.createdAt,
-        role: from_candid_StaffRole_n5(_uploadFile, _downloadFile, value.role),
+        role: from_candid_StaffRole_n21(_uploadFile, _downloadFile, value.role),
         companyId: value.companyId
     };
 }
-function from_candid_variant_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+function from_candid_record_n25(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    status: _VisitorStatus;
+    accessCardReturned: boolean;
+    accessCardNumber: [] | [string];
+    arrivalTime: bigint;
+    departureTime: [] | [bigint];
+    host: string;
+    name: string;
+    createdAt: bigint;
+    visitorId: bigint;
+    badgeExpired: boolean;
+    company: string;
+    idNumber: string;
+    badgeQr: string;
+    notes: string;
+    category: _Category;
+    phone: string;
+    photo: [] | [Uint8Array];
+    department: _Department;
+    purpose: string;
+    companyId: string;
+}): {
+    status: VisitorStatus;
+    accessCardReturned: boolean;
+    accessCardNumber?: string;
+    arrivalTime: bigint;
+    departureTime?: bigint;
+    host: string;
+    name: string;
+    createdAt: bigint;
+    visitorId: bigint;
+    badgeExpired: boolean;
+    company: string;
+    idNumber: string;
+    badgeQr: string;
+    notes: string;
+    category: Category;
+    phone: string;
+    photo?: Uint8Array;
+    department: Department;
+    purpose: string;
+    companyId: string;
+} {
+    return {
+        status: from_candid_VisitorStatus_n26(_uploadFile, _downloadFile, value.status),
+        accessCardReturned: value.accessCardReturned,
+        accessCardNumber: record_opt_to_undefined(from_candid_opt_n28(_uploadFile, _downloadFile, value.accessCardNumber)),
+        arrivalTime: value.arrivalTime,
+        departureTime: record_opt_to_undefined(from_candid_opt_n29(_uploadFile, _downloadFile, value.departureTime)),
+        host: value.host,
+        name: value.name,
+        createdAt: value.createdAt,
+        visitorId: value.visitorId,
+        badgeExpired: value.badgeExpired,
+        company: value.company,
+        idNumber: value.idNumber,
+        badgeQr: value.badgeQr,
+        notes: value.notes,
+        category: from_candid_Category_n15(_uploadFile, _downloadFile, value.category),
+        phone: value.phone,
+        photo: record_opt_to_undefined(from_candid_opt_n30(_uploadFile, _downloadFile, value.photo)),
+        department: from_candid_Department_n31(_uploadFile, _downloadFile, value.department),
+        purpose: value.purpose,
+        companyId: value.companyId
+    };
+}
+function from_candid_variant_n16(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    internal: null;
+} | {
+    external: null;
+}): Category {
+    return "internal" in value ? Category.internal : "external" in value ? Category.external : value;
+}
+function from_candid_variant_n22(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
     admin: null;
 } | {
     security: null;
 }): StaffRole {
     return "admin" in value ? StaffRole.admin : "security" in value ? StaffRole.security : value;
 }
-function from_candid_vec_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_Staff>): Array<Staff> {
-    return value.map((x)=>from_candid_Staff_n3(_uploadFile, _downloadFile, x));
+function from_candid_variant_n27(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    active: null;
+} | {
+    rejected: null;
+} | {
+    departed: null;
+}): VisitorStatus {
+    return "active" in value ? VisitorStatus.active : "rejected" in value ? VisitorStatus.rejected : "departed" in value ? VisitorStatus.departed : value;
 }
-function to_candid_StaffRole_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): _StaffRole {
-    return to_candid_variant_n9(_uploadFile, _downloadFile, value);
+function from_candid_variant_n32(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    hr: null;
+} | {
+    finance: null;
+} | {
+    sales: null;
+} | {
+    engineering: null;
+}): Department {
+    return "hr" in value ? Department.hr : "finance" in value ? Department.finance : "sales" in value ? Department.sales : "engineering" in value ? Department.engineering : value;
 }
-function to_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): {
+function from_candid_vec_n11(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_BlacklistEntry>): Array<BlacklistEntry> {
+    return value.map((x)=>from_candid_BlacklistEntry_n12(_uploadFile, _downloadFile, x));
+}
+function from_candid_vec_n18(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_Staff>): Array<Staff> {
+    return value.map((x)=>from_candid_Staff_n19(_uploadFile, _downloadFile, x));
+}
+function from_candid_vec_n33(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_Visitor>): Array<Visitor> {
+    return value.map((x)=>from_candid_Visitor_n24(_uploadFile, _downloadFile, x));
+}
+function to_candid_BlacklistEntry_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: BlacklistEntry): _BlacklistEntry {
+    return to_candid_record_n2(_uploadFile, _downloadFile, value);
+}
+function to_candid_Category_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Category): _Category {
+    return to_candid_variant_n4(_uploadFile, _downloadFile, value);
+}
+function to_candid_Department_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Department): _Department {
+    return to_candid_variant_n10(_uploadFile, _downloadFile, value);
+}
+function to_candid_StaffRole_n35(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): _StaffRole {
+    return to_candid_variant_n36(_uploadFile, _downloadFile, value);
+}
+function to_candid_VisitorStatus_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: VisitorStatus): _VisitorStatus {
+    return to_candid_variant_n8(_uploadFile, _downloadFile, value);
+}
+function to_candid_Visitor_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Visitor): _Visitor {
+    return to_candid_record_n6(_uploadFile, _downloadFile, value);
+}
+function to_candid_record_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    name: string;
+    idNumber: string;
+    addedAt: bigint;
+    addedBy: string;
+    category?: Category;
+    reason: string;
+    companyId: string;
+}): {
+    name: string;
+    idNumber: string;
+    addedAt: bigint;
+    addedBy: string;
+    category: [] | [_Category];
+    reason: string;
+    companyId: string;
+} {
+    return {
+        name: value.name,
+        idNumber: value.idNumber,
+        addedAt: value.addedAt,
+        addedBy: value.addedBy,
+        category: value.category ? candid_some(to_candid_Category_n3(_uploadFile, _downloadFile, value.category)) : candid_none(),
+        reason: value.reason,
+        companyId: value.companyId
+    };
+}
+function to_candid_record_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    status: VisitorStatus;
+    accessCardReturned: boolean;
+    accessCardNumber?: string;
+    arrivalTime: bigint;
+    departureTime?: bigint;
+    host: string;
+    name: string;
+    createdAt: bigint;
+    visitorId: bigint;
+    badgeExpired: boolean;
+    company: string;
+    idNumber: string;
+    badgeQr: string;
+    notes: string;
+    category: Category;
+    phone: string;
+    photo?: Uint8Array;
+    department: Department;
+    purpose: string;
+    companyId: string;
+}): {
+    status: _VisitorStatus;
+    accessCardReturned: boolean;
+    accessCardNumber: [] | [string];
+    arrivalTime: bigint;
+    departureTime: [] | [bigint];
+    host: string;
+    name: string;
+    createdAt: bigint;
+    visitorId: bigint;
+    badgeExpired: boolean;
+    company: string;
+    idNumber: string;
+    badgeQr: string;
+    notes: string;
+    category: _Category;
+    phone: string;
+    photo: [] | [Uint8Array];
+    department: _Department;
+    purpose: string;
+    companyId: string;
+} {
+    return {
+        status: to_candid_VisitorStatus_n7(_uploadFile, _downloadFile, value.status),
+        accessCardReturned: value.accessCardReturned,
+        accessCardNumber: value.accessCardNumber ? candid_some(value.accessCardNumber) : candid_none(),
+        arrivalTime: value.arrivalTime,
+        departureTime: value.departureTime ? candid_some(value.departureTime) : candid_none(),
+        host: value.host,
+        name: value.name,
+        createdAt: value.createdAt,
+        visitorId: value.visitorId,
+        badgeExpired: value.badgeExpired,
+        company: value.company,
+        idNumber: value.idNumber,
+        badgeQr: value.badgeQr,
+        notes: value.notes,
+        category: to_candid_Category_n3(_uploadFile, _downloadFile, value.category),
+        phone: value.phone,
+        photo: value.photo ? candid_some(value.photo) : candid_none(),
+        department: to_candid_Department_n9(_uploadFile, _downloadFile, value.department),
+        purpose: value.purpose,
+        companyId: value.companyId
+    };
+}
+function to_candid_variant_n10(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Department): {
+    hr: null;
+} | {
+    finance: null;
+} | {
+    sales: null;
+} | {
+    engineering: null;
+} {
+    return value == Department.hr ? {
+        hr: null
+    } : value == Department.finance ? {
+        finance: null
+    } : value == Department.sales ? {
+        sales: null
+    } : value == Department.engineering ? {
+        engineering: null
+    } : value;
+}
+function to_candid_variant_n36(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): {
     admin: null;
 } | {
     security: null;
@@ -260,6 +694,32 @@ function to_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8
         admin: null
     } : value == StaffRole.security ? {
         security: null
+    } : value;
+}
+function to_candid_variant_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Category): {
+    internal: null;
+} | {
+    external: null;
+} {
+    return value == Category.internal ? {
+        internal: null
+    } : value == Category.external ? {
+        external: null
+    } : value;
+}
+function to_candid_variant_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: VisitorStatus): {
+    active: null;
+} | {
+    rejected: null;
+} | {
+    departed: null;
+} {
+    return value == VisitorStatus.active ? {
+        active: null
+    } : value == VisitorStatus.rejected ? {
+        rejected: null
+    } : value == VisitorStatus.departed ? {
+        departed: null
     } : value;
 }
 export interface CreateActorOptions {

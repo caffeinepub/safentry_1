@@ -1,3 +1,8 @@
+import {
+  syncAddBlacklist,
+  syncRemoveBlacklist,
+  syncSaveVisitor,
+} from "./backendSync";
 import type {
   Announcement,
   Appointment,
@@ -163,6 +168,7 @@ export function saveVisitor(v: Visitor) {
     `safentry_visitors_${v.companyId}`,
     JSON.stringify([...list, v]),
   );
+  syncSaveVisitor(v);
 }
 export function findVisitorByCode(
   code: string,
@@ -211,10 +217,12 @@ export function addToBlacklist(entry: BlacklistEntry) {
     `safentry_bl_${entry.companyId}`,
     JSON.stringify([...list, entry]),
   );
+  syncAddBlacklist(entry);
 }
 export function removeFromBlacklist(companyId: string, idNumber: string) {
   const list = getBlacklist(companyId).filter((x) => x.idNumber !== idNumber);
   localStorage.setItem(`safentry_bl_${companyId}`, JSON.stringify(list));
+  syncRemoveBlacklist(companyId, idNumber);
 }
 export function isBlacklisted(companyId: string, idNumber: string): boolean {
   return getBlacklist(companyId).some((x) => x.idNumber === idNumber);

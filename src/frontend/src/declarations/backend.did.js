@@ -8,6 +8,52 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
+export const Category = IDL.Variant({
+  'internal' : IDL.Null,
+  'external' : IDL.Null,
+});
+export const BlacklistEntry = IDL.Record({
+  'name' : IDL.Text,
+  'idNumber' : IDL.Text,
+  'addedAt' : IDL.Int,
+  'addedBy' : IDL.Text,
+  'category' : IDL.Opt(Category),
+  'reason' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const VisitorStatus = IDL.Variant({
+  'active' : IDL.Null,
+  'rejected' : IDL.Null,
+  'departed' : IDL.Null,
+});
+export const Department = IDL.Variant({
+  'hr' : IDL.Null,
+  'finance' : IDL.Null,
+  'sales' : IDL.Null,
+  'engineering' : IDL.Null,
+});
+export const Visitor = IDL.Record({
+  'status' : VisitorStatus,
+  'accessCardReturned' : IDL.Bool,
+  'accessCardNumber' : IDL.Opt(IDL.Text),
+  'arrivalTime' : IDL.Int,
+  'departureTime' : IDL.Opt(IDL.Int),
+  'host' : IDL.Text,
+  'name' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'visitorId' : IDL.Nat,
+  'badgeExpired' : IDL.Bool,
+  'company' : IDL.Text,
+  'idNumber' : IDL.Text,
+  'badgeQr' : IDL.Text,
+  'notes' : IDL.Text,
+  'category' : Category,
+  'phone' : IDL.Text,
+  'photo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+  'department' : Department,
+  'purpose' : IDL.Text,
+  'companyId' : IDL.Text,
+});
 export const Company = IDL.Record({
   'loginCode' : IDL.Text,
   'name' : IDL.Text,
@@ -30,8 +76,18 @@ export const Staff = IDL.Record({
 });
 
 export const idlService = IDL.Service({
+  'addBlacklistEntry' : IDL.Func([BlacklistEntry], [], []),
+  'addVisitor' : IDL.Func([Visitor], [], []),
+  'getBlacklistEntries' : IDL.Func(
+      [IDL.Text],
+      [IDL.Vec(BlacklistEntry)],
+      ['query'],
+    ),
   'getCompanyById' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
   'getStaffByCompanyId' : IDL.Func([IDL.Text], [IDL.Vec(Staff)], ['query']),
+  'getVisitor' : IDL.Func([IDL.Nat], [IDL.Opt(Visitor)], ['query']),
+  'getVisitorsByCompany' : IDL.Func([IDL.Text], [IDL.Vec(Visitor)], ['query']),
+  'isBlacklisted' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], ['query']),
   'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
   'loginStaff' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(Staff)], ['query']),
   'registerCompany' : IDL.Func(
@@ -44,11 +100,58 @@ export const idlService = IDL.Service({
       [Staff],
       [],
     ),
+  'removeBlacklistEntry' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
 });
 
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
+  const Category = IDL.Variant({
+    'internal' : IDL.Null,
+    'external' : IDL.Null,
+  });
+  const BlacklistEntry = IDL.Record({
+    'name' : IDL.Text,
+    'idNumber' : IDL.Text,
+    'addedAt' : IDL.Int,
+    'addedBy' : IDL.Text,
+    'category' : IDL.Opt(Category),
+    'reason' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const VisitorStatus = IDL.Variant({
+    'active' : IDL.Null,
+    'rejected' : IDL.Null,
+    'departed' : IDL.Null,
+  });
+  const Department = IDL.Variant({
+    'hr' : IDL.Null,
+    'finance' : IDL.Null,
+    'sales' : IDL.Null,
+    'engineering' : IDL.Null,
+  });
+  const Visitor = IDL.Record({
+    'status' : VisitorStatus,
+    'accessCardReturned' : IDL.Bool,
+    'accessCardNumber' : IDL.Opt(IDL.Text),
+    'arrivalTime' : IDL.Int,
+    'departureTime' : IDL.Opt(IDL.Int),
+    'host' : IDL.Text,
+    'name' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'visitorId' : IDL.Nat,
+    'badgeExpired' : IDL.Bool,
+    'company' : IDL.Text,
+    'idNumber' : IDL.Text,
+    'badgeQr' : IDL.Text,
+    'notes' : IDL.Text,
+    'category' : Category,
+    'phone' : IDL.Text,
+    'photo' : IDL.Opt(IDL.Vec(IDL.Nat8)),
+    'department' : Department,
+    'purpose' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
   const Company = IDL.Record({
     'loginCode' : IDL.Text,
     'name' : IDL.Text,
@@ -68,8 +171,22 @@ export const idlFactory = ({ IDL }) => {
   });
   
   return IDL.Service({
+    'addBlacklistEntry' : IDL.Func([BlacklistEntry], [], []),
+    'addVisitor' : IDL.Func([Visitor], [], []),
+    'getBlacklistEntries' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(BlacklistEntry)],
+        ['query'],
+      ),
     'getCompanyById' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
     'getStaffByCompanyId' : IDL.Func([IDL.Text], [IDL.Vec(Staff)], ['query']),
+    'getVisitor' : IDL.Func([IDL.Nat], [IDL.Opt(Visitor)], ['query']),
+    'getVisitorsByCompany' : IDL.Func(
+        [IDL.Text],
+        [IDL.Vec(Visitor)],
+        ['query'],
+      ),
+    'isBlacklisted' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], ['query']),
     'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
     'loginStaff' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(Staff)], ['query']),
     'registerCompany' : IDL.Func(
@@ -82,6 +199,7 @@ export const idlFactory = ({ IDL }) => {
         [Staff],
         [],
       ),
+    'removeBlacklistEntry' : IDL.Func([IDL.Text, IDL.Text], [IDL.Bool], []),
   });
 };
 

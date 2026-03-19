@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { syncFromBackend } from "../backendSync";
 import LangSwitcher from "../components/LangSwitcher";
 import { useActor } from "../hooks/useActor";
 import { getLang, t } from "../i18n";
@@ -60,6 +61,9 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
     }
 
     purgeExpiredVisitors(companyId);
+    if (actor) {
+      syncFromBackend(actor, companyId).catch(() => {});
+    }
     saveSession({
       type: "company",
       companyId,

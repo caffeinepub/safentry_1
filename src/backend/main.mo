@@ -2,10 +2,8 @@ import Map "mo:core/Map";
 import List "mo:core/List";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
-import Migration "migration";
 import Iter "mo:core/Iter";
 
-(with migration = Migration.run)
 actor {
   type Company = {
     companyId : Text;
@@ -30,20 +28,42 @@ actor {
     createdAt : Int;
   };
 
-  // Use persistent Map data structure for storing companies and staff lists
+  type Visitor = {
+    visitorId : Text;
+    companyId : Text;
+    name : Text;
+    idNumber : Text;
+    phone : Text;
+    company : Text;
+    purpose : Text;
+    category : Text;
+    department : Text;
+    host : Text;
+    arrivalTime : Int;
+    departureTime : ?Int;
+    status : Text;
+    badgeQr : Text;
+    badgeExpired : Bool;
+    accessCardNumber : ?Text;
+    accessCardReturned : Bool;
+    notes : Text;
+    createdAt : Int;
+  };
+
+  type BlacklistEntry = {
+    companyId : Text;
+    idNumber : Text;
+    name : Text;
+    reason : Text;
+    category : Text;
+    addedAt : Int;
+    addedBy : Text;
+  };
+
   let companies = Map.empty<Text, Company>();
   let staff = Map.empty<Text, List.List<Staff>>();
-
-  func arrayToList<K, V>(map : Map.Map<K, V>) : List.List<{ key : K; value : V }> {
-    let iter = map.entries();
-    let result = List.empty<{ key : K; value : V }>();
-    iter.forEach(
-      func((k, v)) {
-        result.add({ key = k; value = v });
-      }
-    );
-    result;
-  };
+  let visitors = Map.empty<Text, List.List<Visitor>>();
+  let blacklists = Map.empty<Text, List.List<BlacklistEntry>>();
 
   public shared ({ caller }) func registerCompany(
     companyId : Text,
@@ -67,12 +87,7 @@ actor {
   };
 
   public query ({ caller }) func loginCompany(loginCode : Text) : async ?Company {
-    let result = companies.values().find(
-      func(c) {
-        Text.equal(c.loginCode, loginCode);
-      }
-    );
-    result;
+    companies.values().find(func(c) { Text.equal(c.loginCode, loginCode) });
   };
 
   public shared ({ caller }) func registerStaff(
@@ -88,7 +103,6 @@ actor {
       role;
       createdAt = Time.now();
     };
-
     let existingStaff = staff.get(companyId);
     switch (existingStaff) {
       case (null) {
@@ -100,7 +114,6 @@ actor {
         list.add(staffMember);
       };
     };
-
     staffMember;
   };
 
@@ -108,9 +121,7 @@ actor {
     switch (staff.get(companyId)) {
       case (null) { null };
       case (?staffList) {
-        staffList.find(
-          func(s) { Text.equal(s.staffId, staffId) }
-        );
+        staffList.find(func(s) { Text.equal(s.staffId, staffId) });
       };
     };
   };
@@ -123,6 +134,54 @@ actor {
     switch (staff.get(companyId)) {
       case (null) { [] };
       case (?staffList) { staffList.toArray() };
+    };
+  };
+
+  // ── Visitor Management ──────────────────────────────────────────
+
+  public shared ({ caller }) func saveVisitor(v : Visitor) : async () {
+    let list = switch (visitors.get(v.companyId)) {
+      case (null) { List.empty<Visitor>() };
+      case (?l) { l };
+    };
+    let filtered = list.filter(func(x) { not Text.equal(x.visitorId, v.visitorId) });
+    filtered.add(v);
+    visitors.add(v.companyId, filtered);
+  };
+
+  public query ({ caller }) func getVisitors(companyId : Text) : async [Visitor] {
+    switch (visitors.get(companyId)) {
+      case (null) { [] };
+      case (?list) { list.toArray() };
+    };
+  };
+
+  // ── Blacklist Management ─────────────────────────────────────────
+
+  public shared ({ caller }) func addBlacklistEntry(entry : BlacklistEntry) : async () {
+    let list = switch (blacklists.get(entry.companyId)) {
+      case (null) { List.empty<BlacklistEntry>() };
+      case (?l) { l };
+    };
+    let filtered = list.filter(func(x) { not Text.equal(x.idNumber, entry.idNumber) });
+    filtered.add(entry);
+    blacklists.add(entry.companyId, filtered);
+  };
+
+  public shared ({ caller }) func removeBlacklistEntry(companyId : Text, idNumber : Text) : async () {
+    switch (blacklists.get(companyId)) {
+      case (null) {};
+      case (?list) {
+        let filtered = list.filter(func(x) { not Text.equal(x.idNumber, idNumber) });
+        blacklists.add(companyId, filtered);
+      };
+    };
+  };
+
+  public query ({ caller }) func getBlacklist(companyId : Text) : async [BlacklistEntry] {
+    switch (blacklists.get(companyId)) {
+      case (null) { [] };
+      case (?list) { list.toArray() };
     };
   };
 };
