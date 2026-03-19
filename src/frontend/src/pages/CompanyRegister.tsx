@@ -1,6 +1,6 @@
 import { useState } from "react";
+import { useActor } from "../hooks/useActor";
 import { getLang, t } from "../i18n";
-
 import { saveCompany } from "../store";
 import type { AppScreen, Company } from "../types";
 import {
@@ -25,6 +25,7 @@ const FIELDS: {
 
 export default function CompanyRegister({ onNavigate }: Props) {
   const lang = getLang();
+  const { actor } = useActor();
   const [form, setForm] = useState({
     name: "",
     sector: "",
@@ -33,8 +34,9 @@ export default function CompanyRegister({ onNavigate }: Props) {
   });
   const [result, setResult] = useState<Company | null>(null);
   const [copied, setCopied] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.name || !form.sector || !form.address || !form.authorizedPerson)
       return;
     const company: Company = {
@@ -48,7 +50,23 @@ export default function CompanyRegister({ onNavigate }: Props) {
       dataRetentionDays: 365,
       createdAt: Date.now(),
     };
+    setLoading(true);
     saveCompany(company);
+    if (actor) {
+      try {
+        await actor.registerCompany(
+          company.companyId,
+          company.loginCode,
+          company.name,
+          company.sector,
+          company.address,
+          company.authorizedPerson,
+        );
+      } catch (_e) {
+        // silent failure — localStorage already saved
+      }
+    }
+    setLoading(false);
     setResult(company);
   };
 
@@ -170,10 +188,33 @@ export default function CompanyRegister({ onNavigate }: Props) {
             type="button"
             data-ocid="company_register.submit_button"
             onClick={handleSubmit}
-            className="w-full py-3 rounded-xl font-semibold text-white"
+            disabled={loading}
+            className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-70"
             style={{ background: "linear-gradient(135deg, #00d4aa, #0088ff)" }}
           >
-            {t(lang, "register")}
+            {loading && (
+              <svg
+                aria-hidden="true"
+                className="animate-spin h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8v8z"
+                />
+              </svg>
+            )}
+            {loading ? "Kaydediliyor..." : t(lang, "register")}
           </button>
         </div>
       </div>

@@ -1,9 +1,11 @@
 import { useState } from "react";
 import LangSwitcher from "../components/LangSwitcher";
+import { useActor } from "../hooks/useActor";
 import { getLang, t } from "../i18n";
 import {
   findCompanyByLoginCode,
   purgeExpiredVisitors,
+  saveCompany,
   saveSession,
 } from "../store";
 import type { AppScreen } from "../types";
@@ -15,20 +17,52 @@ interface Props {
 
 export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
+  const { actor } = useActor();
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [focused, setFocused] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = () => {
-    const company = findCompanyByLoginCode(code.toUpperCase());
-    if (!company) {
+  const handleLogin = async () => {
+    setLoading(true);
+    setError("");
+    let companyId: string | null = null;
+
+    if (actor) {
+      try {
+        const backendCompany = await actor.loginCompany(code.toUpperCase());
+        if (backendCompany) {
+          saveCompany({
+            ...backendCompany,
+            createdAt: Number(backendCompany.createdAt),
+            maxConcurrentVisitors: 50,
+            dataRetentionDays: 365,
+          });
+          companyId = backendCompany.companyId;
+        }
+      } catch (_e) {
+        // fall through to localStorage
+      }
+    }
+
+    if (!companyId) {
+      const localCompany = findCompanyByLoginCode(code.toUpperCase());
+      if (localCompany) {
+        companyId = localCompany.companyId;
+      }
+    }
+
+    setLoading(false);
+
+    if (!companyId) {
       setError("Geçersiz giriş kodu.");
       return;
     }
-    purgeExpiredVisitors(company.companyId);
+
+    purgeExpiredVisitors(companyId);
     saveSession({
       type: "company",
-      companyId: company.companyId,
+      companyId,
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
     onNavigate("company-dashboard");
@@ -109,12 +143,35 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
               type="button"
               data-ocid="company.login.submit_button"
               onClick={handleLogin}
-              className="w-full py-3 rounded-xl font-semibold text-white transition-opacity hover:opacity-90"
+              disabled={loading}
+              className="w-full py-3 rounded-xl font-semibold text-white transition-opacity hover:opacity-90 flex items-center justify-center gap-2 disabled:opacity-70"
               style={{
                 background: "linear-gradient(135deg, #0ea5e9, #0284c7)",
               }}
             >
-              {t(lang, "login")}
+              {loading && (
+                <svg
+                  aria-hidden="true"
+                  className="animate-spin h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8z"
+                  />
+                </svg>
+              )}
+              {loading ? "Giriş yapılıyor..." : t(lang, "login")}
             </button>
           </div>
         </div>

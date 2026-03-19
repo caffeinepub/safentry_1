@@ -89,10 +89,178 @@ export class ExternalBlob {
         return this;
     }
 }
-export interface backendInterface {
+export interface Staff {
+    staffId: string;
+    name: string;
+    createdAt: bigint;
+    role: StaffRole;
+    companyId: string;
 }
+export interface Company {
+    loginCode: string;
+    name: string;
+    createdAt: bigint;
+    sector: string;
+    address: string;
+    authorizedPerson: string;
+    companyId: string;
+}
+export enum StaffRole {
+    admin = "admin",
+    security = "security"
+}
+export interface backendInterface {
+    getCompanyById(companyId: string): Promise<Company | null>;
+    getStaffByCompanyId(companyId: string): Promise<Array<Staff>>;
+    loginCompany(loginCode: string): Promise<Company | null>;
+    loginStaff(staffId: string, companyId: string): Promise<Staff | null>;
+    registerCompany(companyId: string, loginCode: string, name: string, sector: string, address: string, authorizedPerson: string): Promise<Company>;
+    registerStaff(staffId: string, companyId: string, name: string, role: StaffRole): Promise<Staff>;
+}
+import type { Company as _Company, Staff as _Staff, StaffRole as _StaffRole } from "./declarations/backend.did.d.ts";
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async getCompanyById(arg0: string): Promise<Company | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCompanyById(arg0);
+                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCompanyById(arg0);
+            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async getStaffByCompanyId(arg0: string): Promise<Array<Staff>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getStaffByCompanyId(arg0);
+                return from_candid_vec_n2(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getStaffByCompanyId(arg0);
+            return from_candid_vec_n2(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loginCompany(arg0: string): Promise<Company | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loginCompany(arg0);
+                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loginCompany(arg0);
+            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async loginStaff(arg0: string, arg1: string): Promise<Staff | null> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.loginStaff(arg0, arg1);
+                return from_candid_opt_n7(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.loginStaff(arg0, arg1);
+            return from_candid_opt_n7(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async registerCompany(arg0: string, arg1: string, arg2: string, arg3: string, arg4: string, arg5: string): Promise<Company> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.registerCompany(arg0, arg1, arg2, arg3, arg4, arg5);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.registerCompany(arg0, arg1, arg2, arg3, arg4, arg5);
+            return result;
+        }
+    }
+    async registerStaff(arg0: string, arg1: string, arg2: string, arg3: StaffRole): Promise<Staff> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n8(this._uploadFile, this._downloadFile, arg3));
+                return from_candid_Staff_n3(this._uploadFile, this._downloadFile, result);
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.registerStaff(arg0, arg1, arg2, to_candid_StaffRole_n8(this._uploadFile, this._downloadFile, arg3));
+            return from_candid_Staff_n3(this._uploadFile, this._downloadFile, result);
+        }
+    }
+}
+function from_candid_StaffRole_n5(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _StaffRole): StaffRole {
+    return from_candid_variant_n6(_uploadFile, _downloadFile, value);
+}
+function from_candid_Staff_n3(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: _Staff): Staff {
+    return from_candid_record_n4(_uploadFile, _downloadFile, value);
+}
+function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Company]): Company | null {
+    return value.length === 0 ? null : value[0];
+}
+function from_candid_opt_n7(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [_Staff]): Staff | null {
+    return value.length === 0 ? null : from_candid_Staff_n3(_uploadFile, _downloadFile, value[0]);
+}
+function from_candid_record_n4(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    staffId: string;
+    name: string;
+    createdAt: bigint;
+    role: _StaffRole;
+    companyId: string;
+}): {
+    staffId: string;
+    name: string;
+    createdAt: bigint;
+    role: StaffRole;
+    companyId: string;
+} {
+    return {
+        staffId: value.staffId,
+        name: value.name,
+        createdAt: value.createdAt,
+        role: from_candid_StaffRole_n5(_uploadFile, _downloadFile, value.role),
+        companyId: value.companyId
+    };
+}
+function from_candid_variant_n6(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: {
+    admin: null;
+} | {
+    security: null;
+}): StaffRole {
+    return "admin" in value ? StaffRole.admin : "security" in value ? StaffRole.security : value;
+}
+function from_candid_vec_n2(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: Array<_Staff>): Array<Staff> {
+    return value.map((x)=>from_candid_Staff_n3(_uploadFile, _downloadFile, x));
+}
+function to_candid_StaffRole_n8(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): _StaffRole {
+    return to_candid_variant_n9(_uploadFile, _downloadFile, value);
+}
+function to_candid_variant_n9(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: StaffRole): {
+    admin: null;
+} | {
+    security: null;
+} {
+    return value == StaffRole.admin ? {
+        admin: null
+    } : value == StaffRole.security ? {
+        security: null
+    } : value;
 }
 export interface CreateActorOptions {
     agent?: Agent;

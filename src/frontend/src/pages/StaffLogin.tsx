@@ -1,11 +1,13 @@
 import { useState } from "react";
 import LangSwitcher from "../components/LangSwitcher";
+import { useActor } from "../hooks/useActor";
 import { getLang, t } from "../i18n";
 import {
   addStaffSession,
   findStaffById,
   purgeExpiredVisitors,
   saveSession,
+  saveStaff,
 } from "../store";
 import type { AppScreen } from "../types";
 
@@ -16,19 +18,60 @@ interface Props {
 
 export default function StaffLogin({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
+  const { actor } = useActor();
   const [staffId, setStaffId] = useState("");
   const [companyId, setCompanyId] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<"staff" | "company" | null>(
     null,
   );
 
-  const handleLogin = () => {
-    const staff = findStaffById(staffId);
-    if (!staff || staff.companyId !== companyId) {
+  const handleLogin = async () => {
+    setLoading(true);
+    setError("");
+    let foundStaff: { name: string; role: string } | null = null;
+
+    if (actor) {
+      try {
+        const backendStaff = await actor.loginStaff(staffId, companyId);
+        if (backendStaff) {
+          const localStaff = {
+            staffId: backendStaff.staffId,
+            companyId: backendStaff.companyId,
+            name: backendStaff.name,
+            role: (backendStaff.role === "admin" ? "admin" : "staff") as
+              | "admin"
+              | "receptionist"
+              | "staff",
+            availabilityStatus: "available" as const,
+            createdAt: Number(backendStaff.createdAt),
+          };
+          saveStaff(localStaff);
+          foundStaff = {
+            name: backendStaff.name,
+            role: backendStaff.role as string,
+          };
+        }
+      } catch (_e) {
+        // fall through to localStorage
+      }
+    }
+
+    if (!foundStaff) {
+      const localStaff = findStaffById(staffId);
+      if (localStaff && localStaff.companyId === companyId) {
+        foundStaff = { name: localStaff.name, role: localStaff.role };
+      }
+    }
+
+    setLoading(false);
+
+    if (!foundStaff) {
       setError("Geçersiz personel kodu veya şirket kodu.");
       return;
     }
+
     purgeExpiredVisitors(companyId);
     const sessionId =
       Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -36,14 +79,14 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
       type: "staff",
       companyId,
       staffId,
-      staffRole: staff.role,
+      staffRole: foundStaff.role,
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
     addStaffSession({
       id: sessionId,
       companyId,
       staffId,
-      staffName: staff.name,
+      staffName: foundStaff.name,
       loginTime: Date.now(),
     });
     localStorage.setItem(`safentry_current_session_id_${staffId}`, sessionId);
@@ -155,12 +198,35 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
               type="button"
               data-ocid="staff.login.submit_button"
               onClick={handleLogin}
-              className="w-full py-3 rounded-xl font-semibold text-white transition-opacity hover:opacity-90"
+              disabled={loading}
+              className="w-full py-3 rounded-xl font-semibold text-white transition-opacity hover:opacity-90 flex items-center justify-center gap-2 disabled:opacity-70"
               style={{
                 background: "linear-gradient(135deg, #f59e0b, #ef4444)",
               }}
             >
-              {t(lang, "login")}
+              {loading && (
+                <svg
+                  aria-hidden="true"
+                  className="animate-spin h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v8z"
+                  />
+                </svg>
+              )}
+              {loading ? "Giriş yapılıyor..." : t(lang, "login")}
             </button>
           </div>
         </div>

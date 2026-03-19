@@ -10,7 +10,35 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
-export interface _SERVICE {}
+export interface Company {
+  'loginCode' : string,
+  'name' : string,
+  'createdAt' : bigint,
+  'sector' : string,
+  'address' : string,
+  'authorizedPerson' : string,
+  'companyId' : string,
+}
+export interface Staff {
+  'staffId' : string,
+  'name' : string,
+  'createdAt' : bigint,
+  'role' : StaffRole,
+  'companyId' : string,
+}
+export type StaffRole = { 'admin' : null } |
+  { 'security' : null };
+export interface _SERVICE {
+  'getCompanyById' : ActorMethod<[string], [] | [Company]>,
+  'getStaffByCompanyId' : ActorMethod<[string], Array<Staff>>,
+  'loginCompany' : ActorMethod<[string], [] | [Company]>,
+  'loginStaff' : ActorMethod<[string, string], [] | [Staff]>,
+  'registerCompany' : ActorMethod<
+    [string, string, string, string, string, string],
+    Company
+  >,
+  'registerStaff' : ActorMethod<[string, string, string, StaffRole], Staff>,
+}
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];
 export declare const idlFactory: IDL.InterfaceFactory;

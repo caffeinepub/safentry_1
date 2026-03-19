@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { StaffRole } from "../backend";
+import { useActor } from "../hooks/useActor";
 import { getLang, t } from "../i18n";
-
 import { lookupInviteCode, saveStaff } from "../store";
 import type { AppScreen, Staff } from "../types";
 import { copyToClipboard, generateStaffId } from "../utils";
@@ -11,6 +12,7 @@ interface Props {
 
 export default function StaffRegister({ onNavigate }: Props) {
   const lang = getLang();
+  const { actor } = useActor();
   const [form, setForm] = useState({
     name: "",
     companyId: "",
@@ -20,8 +22,9 @@ export default function StaffRegister({ onNavigate }: Props) {
   const [result, setResult] = useState<Staff | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.name) return;
     let companyId = form.companyId;
     if (form.inviteCode) {
@@ -40,7 +43,23 @@ export default function StaffRegister({ onNavigate }: Props) {
       availabilityStatus: "available",
       createdAt: Date.now(),
     };
+    setLoading(true);
     saveStaff(staff);
+    if (actor) {
+      try {
+        const backendRole =
+          form.role === "admin" ? StaffRole.admin : StaffRole.security;
+        await actor.registerStaff(
+          staff.staffId,
+          companyId,
+          staff.name,
+          backendRole,
+        );
+      } catch (_e) {
+        // silent failure — localStorage already saved
+      }
+    }
+    setLoading(false);
     setResult(staff);
   };
 
@@ -212,10 +231,33 @@ export default function StaffRegister({ onNavigate }: Props) {
             type="button"
             data-ocid="staff_register.submit_button"
             onClick={handleSubmit}
-            className="w-full py-3 rounded-xl font-semibold text-white"
+            disabled={loading}
+            className="w-full py-3 rounded-xl font-semibold text-white flex items-center justify-center gap-2 disabled:opacity-70"
             style={{ background: "linear-gradient(135deg, #f59e0b, #ef4444)" }}
           >
-            {t(lang, "register")}
+            {loading && (
+              <svg
+                aria-hidden="true"
+                className="animate-spin h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8v8z"
+                />
+              </svg>
+            )}
+            {loading ? "Kaydediliyor..." : t(lang, "register")}
           </button>
         </div>
       </div>

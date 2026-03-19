@@ -8,10 +8,81 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
-export const idlService = IDL.Service({});
+export const Company = IDL.Record({
+  'loginCode' : IDL.Text,
+  'name' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'sector' : IDL.Text,
+  'address' : IDL.Text,
+  'authorizedPerson' : IDL.Text,
+  'companyId' : IDL.Text,
+});
+export const StaffRole = IDL.Variant({
+  'admin' : IDL.Null,
+  'security' : IDL.Null,
+});
+export const Staff = IDL.Record({
+  'staffId' : IDL.Text,
+  'name' : IDL.Text,
+  'createdAt' : IDL.Int,
+  'role' : StaffRole,
+  'companyId' : IDL.Text,
+});
+
+export const idlService = IDL.Service({
+  'getCompanyById' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
+  'getStaffByCompanyId' : IDL.Func([IDL.Text], [IDL.Vec(Staff)], ['query']),
+  'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
+  'loginStaff' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(Staff)], ['query']),
+  'registerCompany' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
+      [Company],
+      [],
+    ),
+  'registerStaff' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text, StaffRole],
+      [Staff],
+      [],
+    ),
+});
 
 export const idlInitArgs = [];
 
-export const idlFactory = ({ IDL }) => { return IDL.Service({}); };
+export const idlFactory = ({ IDL }) => {
+  const Company = IDL.Record({
+    'loginCode' : IDL.Text,
+    'name' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'sector' : IDL.Text,
+    'address' : IDL.Text,
+    'authorizedPerson' : IDL.Text,
+    'companyId' : IDL.Text,
+  });
+  const StaffRole = IDL.Variant({ 'admin' : IDL.Null, 'security' : IDL.Null });
+  const Staff = IDL.Record({
+    'staffId' : IDL.Text,
+    'name' : IDL.Text,
+    'createdAt' : IDL.Int,
+    'role' : StaffRole,
+    'companyId' : IDL.Text,
+  });
+  
+  return IDL.Service({
+    'getCompanyById' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
+    'getStaffByCompanyId' : IDL.Func([IDL.Text], [IDL.Vec(Staff)], ['query']),
+    'loginCompany' : IDL.Func([IDL.Text], [IDL.Opt(Company)], ['query']),
+    'loginStaff' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(Staff)], ['query']),
+    'registerCompany' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text, IDL.Text],
+        [Company],
+        [],
+      ),
+    'registerStaff' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text, StaffRole],
+        [Staff],
+        [],
+      ),
+  });
+};
 
 export const init = ({ IDL }) => { return []; };
