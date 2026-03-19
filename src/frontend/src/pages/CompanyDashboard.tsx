@@ -23,20 +23,36 @@ import {
 import { toast } from "sonner";
 import { addAuditLog, getAuditLogs } from "../auditLog";
 import BranchManager from "../components/BranchManager";
+import BroadcastModal from "../components/BroadcastModal";
 import ConfirmModal from "../components/ConfirmModal";
+import CorporateCrmTab from "../components/CorporateCrmTab";
 import CsvImportModal from "../components/CsvImportModal";
+import DataExportTab from "../components/DataExportTab";
+import DocumentTemplateTab from "../components/DocumentTemplateTab";
 import EmptyState from "../components/EmptyState";
 import EscortTab from "../components/EscortTab";
+import GlobalSearch from "../components/GlobalSearch";
+import HelpCenter from "../components/HelpCenter";
+import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
 import LostFoundTab from "../components/LostFoundTab";
 import NotificationCenter from "../components/NotificationCenter";
+import NotificationRulesTab from "../components/NotificationRulesTab";
+import OnboardingWizard, {
+  shouldShowOnboarding,
+} from "../components/OnboardingWizard";
 import ParkingManager from "../components/ParkingManager";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistHistoryPanel } from "../components/SecurityChecklist";
 import SegmentationAnalysis from "../components/SegmentationAnalysis";
 import ShiftCalendar from "../components/ShiftCalendar";
+import StaffPerformanceTab from "../components/StaffPerformanceTab";
+import SurveyTemplateTab from "../components/SurveyTemplateTab";
+import SystemHealthPanel from "../components/SystemHealthPanel";
+import VisitTimeline from "../components/VisitTimeline";
 import VisitorComments from "../components/VisitorComments";
 import VisitorHeatmap from "../components/VisitorHeatmap";
+import VisitorProfileModal from "../components/VisitorProfileModal";
 import WorkingCalendar from "../components/WorkingCalendar";
 import { getLang, t } from "../i18n";
 
@@ -48,12 +64,15 @@ import {
   clearSession,
   deleteApprovedVisitor,
   deleteDepartment,
+  deleteDocumentTemplate,
   deleteEscort,
   deleteIncident,
   deleteLostFound,
   deleteMeetingRoom,
+  deleteNotificationRule,
   deletePermit,
   deleteScheduledReport,
+  deleteSurveyTemplate,
   findApprovedByIdNumber,
   findCompanyById,
   getAlertHistory,
@@ -68,8 +87,10 @@ import {
   getBranches,
   getCompanyDepartments,
   getCompanyFloors,
+  getDashboardWidgetConfig,
   getDepartments,
   getDeptTodayVisitorCount,
+  getDocumentTemplates,
   getEscorts,
   getGatePassLogs,
   getHostReviews,
@@ -78,12 +99,14 @@ import {
   getLockdown,
   getLostFound,
   getMeetingRooms,
+  getNotificationRules,
   getPermitRenewals,
   getPermits,
   getScheduledReports,
   getSession,
   getStaffByCompany,
   getStaffPhoto,
+  getSurveyTemplates,
   getUnreturnedCards,
   getVisitorFeedback,
   getVisitorPins,
@@ -100,17 +123,21 @@ import {
   saveBelonging,
   saveBlacklistAppeal,
   saveCompany,
+  saveDashboardWidgetConfig,
   saveDepartment,
+  saveDocumentTemplate,
   saveEscort,
   saveIncident,
   saveInviteCode,
   saveKioskContent,
   saveLostFound,
   saveMeetingRoom,
+  saveNotificationRule,
   savePermit,
   savePermitRenewal,
   saveScheduledReport,
   saveStaff,
+  saveSurveyTemplate,
   saveVisitor,
   saveVisitorFeedback,
   saveVisitorPin,
@@ -133,15 +160,18 @@ import type {
   Company,
   ContractorPermit,
   Department,
+  DocumentTemplate,
   ExitQuestion,
   GatePassLog,
   HostReview,
   MeetingRoom,
+  NotificationRule,
   ParkingSpace,
   ScheduledReport,
   ScreeningQuestion,
   SecurityIncident,
   Staff,
+  SurveyTemplate,
   Visitor,
   VisitorFeedback,
   MeetingTemplate as _MeetingTemplate,
@@ -226,7 +256,14 @@ type Tab =
   | "feedback"
   | "parking"
   | "escorts"
-  | "lostfound";
+  | "lostfound"
+  | "systemhealth"
+  | "performans"
+  | "dataexport"
+  | "firmalar"
+  | "anketler"
+  | "sablonlar"
+  | "bildirimkurallari";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -1592,6 +1629,89 @@ function FeedbackTab({
   );
 }
 
+// ─── Wrapper components for new tabs ─────────────────────────────────────────
+
+function SurveyTabWrapper({ companyId }: { companyId: string }) {
+  const [templates, setTemplates] = React.useState(() =>
+    getSurveyTemplates(companyId),
+  );
+  const reload = React.useCallback(
+    () => setTemplates(getSurveyTemplates(companyId)),
+    [companyId],
+  );
+  return (
+    <SurveyTemplateTab
+      companyId={companyId}
+      templates={templates}
+      onSave={saveSurveyTemplate}
+      onDelete={(id) => deleteSurveyTemplate(id, companyId)}
+      onReload={reload}
+    />
+  );
+}
+
+function DocTemplateTabWrapper({
+  companyId,
+  company,
+  onCompanySave,
+}: {
+  companyId: string;
+  company: Company;
+  onCompanySave: (c: Company) => void;
+}) {
+  const [templates, setTemplates] = React.useState(() =>
+    getDocumentTemplates(companyId),
+  );
+  const reload = React.useCallback(
+    () => setTemplates(getDocumentTemplates(companyId)),
+    [companyId],
+  );
+  const badgeFields = company.badgeFields ?? [
+    "qrCode",
+    "companyLogo",
+    "hostName",
+  ];
+  return (
+    <DocumentTemplateTab
+      companyId={companyId}
+      templates={templates}
+      badgeFields={badgeFields}
+      onSave={saveDocumentTemplate}
+      onDelete={(id) => deleteDocumentTemplate(id, companyId)}
+      onBadgeFieldsChange={(fields) =>
+        onCompanySave({ ...company, badgeFields: fields })
+      }
+      onReload={reload}
+    />
+  );
+}
+
+function NotifRulesTabWrapper({
+  companyId,
+  onTestRule,
+}: {
+  companyId: string;
+  onTestRule: (rule: NotificationRule) => void;
+}) {
+  const [rules, setRules] = React.useState(() =>
+    getNotificationRules(companyId),
+  );
+  const reload = React.useCallback(
+    () => setRules(getNotificationRules(companyId)),
+    [companyId],
+  );
+  return (
+    <NotificationRulesTab
+      companyId={companyId}
+      rules={rules}
+      onSave={saveNotificationRule}
+      onDelete={(id) => deleteNotificationRule(id, companyId)}
+      onReload={reload}
+      onTestRule={onTestRule}
+    />
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
@@ -1852,6 +1972,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
   // Lobby display
   const [lobbyOpen, setLobbyOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() =>
+    shouldShowOnboarding(session.companyId),
+  );
+  const [showHelpCenter, setShowHelpCenter] = useState(false);
+  const [showBroadcast, setShowBroadcast] = useState(false);
   const [lobbyTime, setLobbyTime] = useState(new Date());
 
   // Custom report builder
@@ -2542,6 +2667,13 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "parking", label: "🅿️ Otopark" },
     { key: "escorts", label: "🛡️ Refakatçiler" },
     { key: "lostfound", label: "🔍 Kayıp & Bulunan" },
+    { key: "systemhealth", label: "⚙️ Sistem" },
+    { key: "performans", label: "📊 Personel Performansı" },
+    { key: "dataexport", label: "📤 Veri Dışa Aktarım" },
+    { key: "firmalar", label: "🏢 Kurumsal CRM" },
+    { key: "anketler", label: "📋 Anket Şablonları" },
+    { key: "sablonlar", label: "🗂️ Şablonlar" },
+    { key: "bildirimkurallari", label: "🔔 Bildirim Kuralları" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -3040,6 +3172,10 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         </div>
         <div className="flex items-center gap-3">
           <NotificationCenter companyId={session.companyId} />
+          <GlobalSearch
+            companyId={session.companyId}
+            onNavigate={(t) => setTab(t as Tab)}
+          />
           <button
             type="button"
             data-ocid="company_dashboard.self_reg_portal.button"
@@ -3086,6 +3222,33 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           <LangSwitcher onChange={onRefresh} />
           <button
             type="button"
+            data-ocid="company_dashboard.help.button"
+            onClick={() => setShowHelpCenter(true)}
+            title="Yardu0131m Merkezi"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-300 border border-white/15 hover:bg-white/10 transition-colors"
+          >
+            u2753 Yardu0131m
+          </button>
+          <button
+            type="button"
+            data-ocid="company_dashboard.broadcast.open_modal_button"
+            onClick={() => setShowBroadcast(true)}
+            title="Personel Duyurusu Yayu0131nla"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-amber-300 border border-amber-500/30 hover:bg-amber-900/20 transition-colors"
+          >
+            ud83dudce2 Duyuru
+          </button>
+          <button
+            type="button"
+            data-ocid="company_dashboard.onboarding.button"
+            onClick={() => setShowOnboarding(true)}
+            title="Kurulum Sihirbazu0131"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-teal-300 border border-teal-500/30 hover:bg-teal-900/20 transition-colors"
+          >
+            ud83eudded Kurulum
+          </button>
+          <button
+            type="button"
             data-ocid="company_dashboard.lobby.button"
             onClick={() => setLobbyOpen(true)}
             className="px-3 py-1.5 rounded-xl text-xs font-bold text-white transition-all"
@@ -3124,6 +3287,29 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
       </div>
 
       {/* Lobby Display */}
+      {showOnboarding && (
+        <OnboardingWizard
+          companyId={session.companyId}
+          onClose={() => setShowOnboarding(false)}
+        />
+      )}
+      {showHelpCenter && (
+        <HelpCenter onClose={() => setShowHelpCenter(false)} />
+      )}
+      {showBroadcast && (
+        <BroadcastModal
+          companyId={session.companyId}
+          staffName={company?.name ?? "Admin"}
+          onClose={() => setShowBroadcast(false)}
+        />
+      )}
+      {profileVisitor && (
+        <VisitorProfileModal
+          visitor={profileVisitor}
+          allVisitors={visitors}
+          onClose={() => setProfileVisitor(null)}
+        />
+      )}
       {showCsvImport && (
         <CsvImportModal
           companyId={session.companyId}
@@ -3742,9 +3928,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-white font-medium text-sm">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setProfileVisitor(v);
+                              }}
+                              className="text-white font-medium text-sm hover:text-[#38bdf8] hover:underline transition-colors bg-transparent border-none cursor-pointer p-0"
+                            >
                               {v.name}
-                            </span>
+                            </button>
                             {statusBadge(v)}
                             {v.category && (
                               <span
@@ -5557,6 +5750,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             }}
           >
             <VisitorHeatmap visitors={visitors} />
+          </div>
+        )}
+        {tab === "statistics" && (
+          <div className="mt-6">
+            <KpiTargets companyId={session.companyId} />
           </div>
         )}
 
@@ -8509,6 +8707,57 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         )}
 
         {tab === "lostfound" && <LostFoundTab companyId={session.companyId} />}
+        {tab === "systemhealth" && (
+          <SystemHealthPanel
+            companyId={session.companyId}
+            hasBackend={
+              !!localStorage.getItem(`safentry_last_sync_${session.companyId}`)
+            }
+          />
+        )}
+
+        {tab === "performans" && (
+          <StaffPerformanceTab
+            companyId={session.companyId}
+            staffList={staffList}
+            visitors={visitors}
+          />
+        )}
+
+        {tab === "dataexport" && (
+          <DataExportTab companyId={session.companyId} />
+        )}
+
+        {tab === "firmalar" && <CorporateCrmTab visitors={visitors} />}
+
+        {tab === "anketler" && (
+          <SurveyTabWrapper companyId={session.companyId} />
+        )}
+
+        {tab === "sablonlar" && company && (
+          <DocTemplateTabWrapper
+            companyId={session.companyId}
+            company={company}
+            onCompanySave={saveCompany}
+          />
+        )}
+
+        {tab === "bildirimkurallari" && (
+          <NotifRulesTabWrapper
+            companyId={session.companyId}
+            onTestRule={(rule) => {
+              addNotification({
+                id: `rule_test_${rule.id}_${Date.now()}`,
+                companyId: session.companyId,
+                type: "info",
+                message: `[TEST] ${rule.message}`,
+                createdAt: Date.now(),
+                read: false,
+              });
+              toast.success("Test bildirimi gönderildi");
+            }}
+          />
+        )}
 
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">

@@ -3,7 +3,9 @@ import List "mo:core/List";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
 import Iter "mo:core/Iter";
+import Migration "migration";
 
+(with migration = Migration.run)
 actor {
   type Company = {
     companyId : Text;
@@ -60,10 +62,42 @@ actor {
     addedBy : Text;
   };
 
+  type AppointmentStatus = {
+    #pending;
+    #approved;
+    #cancelled;
+  };
+
+  type HostApprovalStatus = {
+    #pending;
+    #approved;
+    #rejected;
+  };
+
+  type Appointment = {
+    id : Text;
+    companyId : Text;
+    visitorName : Text;
+    visitorId : Text;
+    hostName : Text;
+    appointmentDate : Int;
+    appointmentTime : Text;
+    purpose : Text;
+    notes : Text;
+    status : AppointmentStatus;
+    createdBy : Text;
+    createdAt : Int;
+    hostStaffId : Text;
+    noShow : Bool;
+    hostApprovalStatus : HostApprovalStatus;
+    meetingRoomId : Text;
+  };
+
   let companies = Map.empty<Text, Company>();
   let staff = Map.empty<Text, List.List<Staff>>();
   let visitors = Map.empty<Text, List.List<Visitor>>();
   let blacklists = Map.empty<Text, List.List<BlacklistEntry>>();
+  let appointments = Map.empty<Text, List.List<Appointment>>();
 
   public shared ({ caller }) func registerCompany(
     companyId : Text,
@@ -182,6 +216,35 @@ actor {
     switch (blacklists.get(companyId)) {
       case (null) { [] };
       case (?list) { list.toArray() };
+    };
+  };
+
+  // ── Appointment Management ───────────────────────────────────────
+
+  public shared ({ caller }) func saveAppointment(appointment : Appointment) : async () {
+    let list = switch (appointments.get(appointment.companyId)) {
+      case (null) { List.empty<Appointment>() };
+      case (?l) { l };
+    };
+    let filtered = list.filter(func(x) { not Text.equal(x.id, appointment.id) });
+    filtered.add(appointment);
+    appointments.add(appointment.companyId, filtered);
+  };
+
+  public query ({ caller }) func getAppointments(companyId : Text) : async [Appointment] {
+    switch (appointments.get(companyId)) {
+      case (null) { [] };
+      case (?list) { list.toArray() };
+    };
+  };
+
+  public shared ({ caller }) func deleteAppointment(companyId : Text, appointmentId : Text) : async () {
+    switch (appointments.get(companyId)) {
+      case (null) {};
+      case (?list) {
+        let filtered = list.filter(func(x) { not Text.equal(x.id, appointmentId) });
+        appointments.add(companyId, filtered);
+      };
     };
   };
 };

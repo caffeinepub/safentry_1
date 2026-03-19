@@ -109,6 +109,12 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
 
   const [checkoutFeedbackRating, setCheckoutFeedbackRating] = useState(0);
   const [checkoutFeedbackComment, setCheckoutFeedbackComment] = useState("");
+  const [returningVisitor, setReturningVisitor] = useState<{
+    name: string;
+    visitCount: number;
+    lastVisit: number;
+    lastHost: string;
+  } | null>(null);
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
 
   // QR Scanner
@@ -1232,6 +1238,34 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       <div className="max-w-2xl mx-auto p-6 pb-16">
         <h2 className="text-2xl font-bold text-white mb-6">Ziyaretçi Kaydı</h2>
 
+        {/* Personalized welcome banner for returning visitors */}
+        {returningVisitor && (
+          <div
+            className="mb-5 p-4 rounded-xl"
+            style={{
+              background:
+                "linear-gradient(135deg, rgba(14,165,233,0.12), rgba(245,158,11,0.08))",
+              border: "1px solid rgba(14,165,233,0.3)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">👋</span>
+              <div>
+                <p className="text-white font-semibold text-base">
+                  Hoş geldiniz, {returningVisitor.name}!
+                </p>
+                <p className="text-slate-300 text-sm">
+                  Bu {returningVisitor.visitCount + 1}. ziyaretiniz
+                  {returningVisitor.lastHost
+                    ? ` u2022 Son ev sahibi: ${returningVisitor.lastHost.slice(0, 8)}...`
+                    : ""}
+                  . Bilgileriniz otomatik dolduruldu.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {formError && (
           <div className="mb-5 p-4 rounded-xl border border-red-500/40 bg-red-900/25 flex items-start gap-3">
             <span className="text-red-400 text-lg mt-0.5">⛔</span>
@@ -1257,9 +1291,36 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
             </p>
             <input
               value={form.idNumber}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, idNumber: e.target.value }))
-              }
+              onChange={(e) => {
+                const val = e.target.value;
+                setForm((f) => ({ ...f, idNumber: val }));
+                if (val.length === 11) {
+                  const prevVisits = getVisitors(companyId)
+                    .filter((v) => v.idNumber === val)
+                    .sort((a, b) => b.arrivalTime - a.arrivalTime);
+                  if (prevVisits.length > 0) {
+                    const last = prevVisits[0];
+                    setReturningVisitor({
+                      name: last.name,
+                      visitCount: prevVisits.length,
+                      lastVisit: last.arrivalTime,
+                      lastHost: last.hostStaffId,
+                    });
+                    if (last.name && !form.name) {
+                      setForm((f) => ({
+                        ...f,
+                        idNumber: val,
+                        name: last.name,
+                        phone: last.phone ?? f.phone,
+                      }));
+                    }
+                  } else {
+                    setReturningVisitor(null);
+                  }
+                } else {
+                  setReturningVisitor(null);
+                }
+              }}
               maxLength={11}
               className="w-full px-5 py-4 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b] font-mono text-lg"
               style={{ minHeight: "56px" }}

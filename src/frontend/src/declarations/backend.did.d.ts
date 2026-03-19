@@ -10,17 +10,36 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
+export interface Appointment {
+  'id' : string,
+  'status' : AppointmentStatus,
+  'noShow' : boolean,
+  'hostName' : string,
+  'createdAt' : bigint,
+  'createdBy' : string,
+  'hostStaffId' : string,
+  'hostApprovalStatus' : HostApprovalStatus,
+  'appointmentDate' : bigint,
+  'meetingRoomId' : string,
+  'visitorId' : string,
+  'appointmentTime' : string,
+  'visitorName' : string,
+  'notes' : string,
+  'purpose' : string,
+  'companyId' : string,
+}
+export type AppointmentStatus = { 'cancelled' : null } |
+  { 'pending' : null } |
+  { 'approved' : null };
 export interface BlacklistEntry {
   'name' : string,
   'idNumber' : string,
   'addedAt' : bigint,
   'addedBy' : string,
-  'category' : [] | [Category],
+  'category' : string,
   'reason' : string,
   'companyId' : string,
 }
-export type Category = { 'internal' : null } |
-  { 'external' : null };
 export interface Company {
   'loginCode' : string,
   'name' : string,
@@ -30,10 +49,9 @@ export interface Company {
   'authorizedPerson' : string,
   'companyId' : string,
 }
-export type Department = { 'hr' : null } |
-  { 'finance' : null } |
-  { 'sales' : null } |
-  { 'engineering' : null };
+export type HostApprovalStatus = { 'pending' : null } |
+  { 'approved' : null } |
+  { 'rejected' : null };
 export interface Staff {
   'staffId' : string,
   'name' : string,
@@ -44,7 +62,7 @@ export interface Staff {
 export type StaffRole = { 'admin' : null } |
   { 'security' : null };
 export interface Visitor {
-  'status' : VisitorStatus,
+  'status' : string,
   'accessCardReturned' : boolean,
   'accessCardNumber' : [] | [string],
   'arrivalTime' : bigint,
@@ -52,31 +70,26 @@ export interface Visitor {
   'host' : string,
   'name' : string,
   'createdAt' : bigint,
-  'visitorId' : bigint,
+  'visitorId' : string,
   'badgeExpired' : boolean,
   'company' : string,
   'idNumber' : string,
   'badgeQr' : string,
   'notes' : string,
-  'category' : Category,
+  'category' : string,
   'phone' : string,
-  'photo' : [] | [Uint8Array],
-  'department' : Department,
+  'department' : string,
   'purpose' : string,
   'companyId' : string,
 }
-export type VisitorStatus = { 'active' : null } |
-  { 'rejected' : null } |
-  { 'departed' : null };
 export interface _SERVICE {
   'addBlacklistEntry' : ActorMethod<[BlacklistEntry], undefined>,
-  'addVisitor' : ActorMethod<[Visitor], undefined>,
-  'getBlacklistEntries' : ActorMethod<[string], Array<BlacklistEntry>>,
+  'deleteAppointment' : ActorMethod<[string, string], undefined>,
+  'getAppointments' : ActorMethod<[string], Array<Appointment>>,
+  'getBlacklist' : ActorMethod<[string], Array<BlacklistEntry>>,
   'getCompanyById' : ActorMethod<[string], [] | [Company]>,
   'getStaffByCompanyId' : ActorMethod<[string], Array<Staff>>,
-  'getVisitor' : ActorMethod<[bigint], [] | [Visitor]>,
-  'getVisitorsByCompany' : ActorMethod<[string], Array<Visitor>>,
-  'isBlacklisted' : ActorMethod<[string, string], boolean>,
+  'getVisitors' : ActorMethod<[string], Array<Visitor>>,
   'loginCompany' : ActorMethod<[string], [] | [Company]>,
   'loginStaff' : ActorMethod<[string, string], [] | [Staff]>,
   'registerCompany' : ActorMethod<
@@ -84,7 +97,9 @@ export interface _SERVICE {
     Company
   >,
   'registerStaff' : ActorMethod<[string, string, string, StaffRole], Staff>,
-  'removeBlacklistEntry' : ActorMethod<[string, string], boolean>,
+  'removeBlacklistEntry' : ActorMethod<[string, string], undefined>,
+  'saveAppointment' : ActorMethod<[Appointment], undefined>,
+  'saveVisitor' : ActorMethod<[Visitor], undefined>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

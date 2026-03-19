@@ -317,7 +317,8 @@ export type AppScreen =
   | "prereg"
   | "blacklist-appeal"
   | "visitor-feedback"
-  | "self-prereg";
+  | "self-prereg"
+  | "super-admin";
 
 export interface ParkingSpace {
   id: string;
@@ -515,4 +516,47 @@ export interface SelfPreRegEntry {
   time?: string;
   status: "pending" | "approved" | "rejected";
   submittedAt: number;
+}
+
+export interface SurveyQuestion {
+  id: string;
+  type: "star" | "yesno" | "multiple" | "text";
+  label: string;
+  options?: string[];
+}
+
+export interface SurveyTemplate {
+  id: string;
+  companyId: string;
+  name: string;
+  questions: SurveyQuestion[];
+  isActive: boolean;
+}
+
+export interface DocumentTemplate {
+  id: string;
+  companyId: string;
+  name: string;
+  category: "NDA" | "ISG" | "policy" | "custom";
+  content: string;
+  isActive: boolean;
+}
+
+export interface NotificationRule {
+  id: string;
+  companyId: string;
+  trigger:
+    | "vip_entry"
+    | "ungreeted_N_min"
+    | "permit_expiry_soon"
+    | "blacklist_hit"
+    | "capacity_threshold";
+  triggerValue?: number;
+  target: "admin" | "security" | "all";
+  message: string;
+  enabled: boolean;
+}
+
+export interface DashboardWidgetConfig {
+  hiddenWidgets: string[];
 }

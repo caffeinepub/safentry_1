@@ -18,6 +18,8 @@ import { addAuditLog } from "../auditLog";
 import CsvImportModal from "../components/CsvImportModal";
 import DailyBriefing from "../components/DailyBriefing";
 import EmptyState from "../components/EmptyState";
+import GlobalSearch from "../components/GlobalSearch";
+import HelpCenter from "../components/HelpCenter";
 import LangSwitcher from "../components/LangSwitcher";
 import NotificationCenter from "../components/NotificationCenter";
 import PatrolTab from "../components/PatrolTab";
@@ -46,6 +48,7 @@ import {
   findVisitorByCode,
   getAlertHistory,
   getAllStaff,
+  getAnnouncements,
   getAppointments,
   getApprovalChainConfig,
   getApprovedVisitors,
@@ -496,6 +499,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   // CSV Bulk Import
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
   const [showCsvImportModal, setShowCsvImportModal] = useState(false);
+  const [showHelpCenter, setShowHelpCenter] = useState(false);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState<string[]>([]);
   const [highContrast, setHighContrast] = useState(
     () => localStorage.getItem("safentry_high_contrast") === "1",
   );
@@ -768,6 +773,14 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     return () => clearInterval(t2);
   }, []);
 
+  // Check for unread announcements
+  useEffect(() => {
+    const readKey = `safentry_ann_read_${session.companyId}`;
+    const readIds: string[] = JSON.parse(localStorage.getItem(readKey) ?? "[]");
+    const allAnns = getAnnouncements(session.companyId);
+    const unread = allAnns.filter((a) => !readIds.includes(a.id));
+    setUnreadAnnouncements(unread.map((a) => a.message));
+  }, [session.companyId]);
   // Auto-checkout effect
   useEffect(() => {
     const autoHours = company?.autoCheckoutHours ?? 0;
@@ -3759,6 +3772,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
               🚨
             </button>
             <NotificationCenter companyId={session.companyId} />
+            <GlobalSearch
+              companyId={session.companyId}
+              onNavigate={(t) => setTab(t as Tab)}
+            />
             <button
               type="button"
               data-ocid="staff_dashboard.checklist_start.button"
@@ -3864,6 +3881,15 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             <LangSwitcher onChange={onRefresh} />
             <button
               type="button"
+              data-ocid="staff_dashboard.help.button"
+              onClick={() => setShowHelpCenter(true)}
+              title="Yardu0131m Merkezi"
+              className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-300 border border-white/15 hover:bg-white/10 transition-colors"
+            >
+              u2753 Yardu0131m
+            </button>
+            <button
+              type="button"
               data-ocid="staff_dashboard.logout.button"
               onClick={logout}
               className="text-slate-400 hover:text-white text-sm"
@@ -3874,6 +3900,41 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         </div>
 
         {/* Shift notes unread banner */}
+        {showHelpCenter && (
+          <HelpCenter onClose={() => setShowHelpCenter(false)} />
+        )}
+
+        {/* Announcement banner */}
+        {unreadAnnouncements.length > 0 && (
+          <div className="mx-6 mt-3 px-4 py-3 rounded-xl border border-[#f59e0b]/30 bg-[#f59e0b]/10 flex items-center justify-between gap-3">
+            <span className="text-amber-300 text-sm flex items-center gap-2">
+              ud83dudce2 <strong>Duyuru:</strong> {unreadAnnouncements[0]}
+              {unreadAnnouncements.length > 1 && (
+                <span className="text-amber-400 text-xs">
+                  (+{unreadAnnouncements.length - 1} daha)
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              data-ocid="announcement.dismiss.button"
+              onClick={() => {
+                const readKey = `safentry_ann_read_${session.companyId}`;
+                const allAnns = getAnnouncements(session.companyId);
+                const ids = allAnns.map((a) => a.id);
+                localStorage.setItem(readKey, JSON.stringify(ids));
+                setUnreadAnnouncements([]);
+              }}
+              className="px-3 py-1 rounded-lg text-xs font-semibold text-white shrink-0"
+              style={{
+                background: "rgba(245,158,11,0.3)",
+                border: "1px solid rgba(245,158,11,0.5)",
+              }}
+            >
+              Tamam
+            </button>
+          </div>
+        )}
         {shiftNotesBanner > 0 && (
           <div className="mx-6 mt-3 px-4 py-3 rounded-xl border border-[#0ea5e9]/30 bg-[#0ea5e9]/10 flex items-center justify-between gap-3">
             <span className="text-[#38bdf8] text-sm">

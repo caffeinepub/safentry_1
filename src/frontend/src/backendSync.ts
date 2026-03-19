@@ -4,8 +4,13 @@
  * localStorage remains the source of truth for reads; backend is written
  * fire-and-forget and read once on login to hydrate local state.
  */
-import { StaffRole, type backendInterface } from "./backend";
-import type { BlacklistEntry, Staff, Visitor } from "./types";
+import {
+  AppointmentStatus,
+  HostApprovalStatus,
+  StaffRole,
+  type backendInterface,
+} from "./backend";
+import type { Appointment, BlacklistEntry, Staff, Visitor } from "./types";
 
 let _actor: backendInterface | null = null;
 
@@ -18,12 +23,8 @@ export function setBackendActor(actor: backendInterface | null) {
 /** Fire-and-forget: write visitor to backend */
 export function syncSaveVisitor(visitor: Visitor): void {
   if (!_actor) return;
-  // Generate a numeric id from the visitorId string
-  const numericId = BigInt(
-    visitor.visitorId.replace(/\D/g, "").slice(0, 15) || "1",
-  );
   const backendVisitor = {
-    visitorId: numericId,
+    visitorId: visitor.visitorId,
     companyId: visitor.companyId,
     name: visitor.name,
     idNumber: visitor.idNumber,
@@ -48,7 +49,7 @@ export function syncSaveVisitor(visitor: Visitor): void {
     notes: visitor.notes,
     createdAt: BigInt(visitor.createdAt),
   };
-  _actor.addVisitor(backendVisitor as any).catch(() => {
+  _actor.saveVisitor(backendVisitor as any).catch(() => {
     // silent — localStorage already saved
   });
 }
@@ -88,6 +89,54 @@ export function syncSaveStaff(staff: Staff): void {
     .catch(() => {});
 }
 
+/** Fire-and-forget: remove staff member from backend */
+export function syncRemoveStaff(staffId: string, companyId: string): void {
+  if (!_actor) return;
+  (_actor as any).removeStaff?.(staffId, companyId)?.catch(() => {});
+}
+
+// ─── Appointments ────────────────────────────────────────────────────────────
+
+/** Fire-and-forget: write appointment to backend */
+export function syncSaveAppointment(appt: Appointment): void {
+  if (!_actor) return;
+  const backendAppt = {
+    id: appt.id,
+    companyId: appt.companyId,
+    visitorName: appt.visitorName,
+    visitorId: appt.visitorId,
+    hostName: appt.hostName,
+    appointmentDate: BigInt(new Date(appt.appointmentDate).getTime()),
+    appointmentTime: appt.appointmentTime,
+    purpose: appt.purpose,
+    notes: appt.notes ?? "",
+    status:
+      appt.status === "approved"
+        ? AppointmentStatus.approved
+        : appt.status === "cancelled"
+          ? AppointmentStatus.cancelled
+          : AppointmentStatus.pending,
+    createdBy: appt.createdBy,
+    createdAt: BigInt(appt.createdAt),
+    hostStaffId: appt.hostStaffId ?? "",
+    noShow: appt.noShow ?? false,
+    hostApprovalStatus:
+      appt.hostApprovalStatus === "approved"
+        ? HostApprovalStatus.approved
+        : appt.hostApprovalStatus === "rejected"
+          ? HostApprovalStatus.rejected
+          : HostApprovalStatus.pending,
+    meetingRoomId: appt.meetingRoomId ?? "",
+  };
+  _actor.saveAppointment(backendAppt as any).catch(() => {});
+}
+
+/** Fire-and-forget: delete appointment from backend */
+export function syncDeleteAppointment(companyId: string, id: string): void {
+  if (!_actor) return;
+  _actor.deleteAppointment(companyId, id).catch(() => {});
+}
+
 // ─── Full sync on login ───────────────────────────────────────────────────────
 
 /**
@@ -99,13 +148,9 @@ export async function syncFromBackend(
   companyId: string,
 ): Promise<void> {
   try {
-    const [backendVisitors, backendBlacklist, backendStaff] = await Promise.all(
-      [
-        actor.getVisitorsByCompany(companyId),
-        actor.getBlacklistEntries(companyId),
-        actor.getStaffByCompanyId(companyId),
-      ],
-    );
+    const backendVisitors = await actor.getVisitors(companyId);
+    const backendBlacklist = await actor.getBlacklist(companyId);
+    const backendStaff = await actor.getStaffByCompanyId(companyId);
 
     // ── Merge visitors ──────────────────────────────────────────────
     if (backendVisitors.length > 0) {
@@ -217,6 +262,45 @@ export async function syncFromBackend(
       }
       localStorage.setItem(
         "safentry_staff",
+        JSON.stringify(Array.from(localMap.values())),
+      );
+    }
+
+    // ── Merge appointments ──────────────────────────────────────────
+    const backendAppointments = await actor.getAppointments(companyId);
+    if (backendAppointments.length > 0) {
+      const localRaw = localStorage.getItem(
+        `safentry_appointments_${companyId}`,
+      );
+      const localAppts: any[] = localRaw ? JSON.parse(localRaw) : [];
+      const localMap = new Map(localAppts.map((a) => [a.id, a]));
+
+      for (const ba of backendAppointments) {
+        if (!localMap.has(ba.id)) {
+          localMap.set(ba.id, {
+            id: ba.id,
+            companyId: ba.companyId,
+            visitorName: ba.visitorName,
+            visitorId: ba.visitorId,
+            hostName: ba.hostName,
+            appointmentDate: new Date(Number(ba.appointmentDate))
+              .toISOString()
+              .split("T")[0],
+            appointmentTime: ba.appointmentTime,
+            purpose: ba.purpose,
+            notes: ba.notes || undefined,
+            status: ba.status,
+            createdBy: ba.createdBy,
+            createdAt: Number(ba.createdAt),
+            hostStaffId: ba.hostStaffId || undefined,
+            noShow: ba.noShow,
+            hostApprovalStatus: ba.hostApprovalStatus || undefined,
+            meetingRoomId: ba.meetingRoomId || undefined,
+          });
+        }
+      }
+      localStorage.setItem(
+        `safentry_appointments_${companyId}`,
         JSON.stringify(Array.from(localMap.values())),
       );
     }

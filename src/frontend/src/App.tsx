@@ -26,6 +26,7 @@ import SelfPreRegPage from "./pages/SelfPreRegPage";
 import StaffDashboard from "./pages/StaffDashboard";
 import StaffLogin from "./pages/StaffLogin";
 import StaffRegister from "./pages/StaffRegister";
+import SuperAdminPanel from "./pages/SuperAdminPanel";
 import Verify from "./pages/Verify";
 import VisitorFeedbackPage from "./pages/VisitorFeedbackPage";
 import Welcome from "./pages/Welcome";
@@ -147,6 +148,70 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto night exit — every 5 minutes, exit visitors whose arrival exceeds closing hour
+  useEffect(() => {
+    const autoNightExit = () => {
+      const companies = getCompanies();
+      const now = new Date();
+      const nowH = now.getHours();
+      const nowM = now.getMinutes();
+      const nowMins = nowH * 60 + nowM;
+
+      for (const company of companies) {
+        // Determine closing time in minutes from midnight
+        let closingMins: number | null = null;
+        if (company.workingHoursEnd != null) {
+          closingMins = company.workingHoursEnd * 60;
+        } else if (company.workingHours) {
+          // Parse "HH:MM-HH:MM" or "08:00-18:00" format
+          const parts = company.workingHours.split("-");
+          if (parts.length === 2) {
+            const end = parts[1].trim().split(":");
+            if (end.length === 2) {
+              closingMins =
+                Number.parseInt(end[0]) * 60 + Number.parseInt(end[1]);
+            }
+          }
+        }
+        // Default: 20:00 (1200 mins)
+        if (closingMins == null) closingMins = 20 * 60;
+
+        // Only run if current time is at or after closing
+        if (nowMins < closingMins) continue;
+
+        const visitors = getVisitors(company.companyId);
+        for (const v of visitors) {
+          if (v.status !== "active") continue;
+          const arrivalMins =
+            new Date(v.arrivalTime).getHours() * 60 +
+            new Date(v.arrivalTime).getMinutes();
+          // Auto-exit only if visitor arrived before closing and is still active
+          if (arrivalMins < closingMins) {
+            const exitTime = Date.now();
+            saveVisitor({
+              ...v,
+              status: "departed",
+              departureTime: exitTime,
+              notes: v.notes
+                ? `${v.notes} | Otomatik gece çıkışı`
+                : "Otomatik gece çıkışı",
+            });
+            addNotification({
+              id: `auto_exit_${v.visitorId}_${exitTime}`,
+              companyId: company.companyId,
+              type: "info",
+              message: `Otomatik gece çıkışı: ${v.name}`,
+              createdAt: exitTime,
+              read: false,
+            });
+          }
+        }
+      }
+    };
+    const interval = setInterval(autoNightExit, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Session timeout check
   useEffect(() => {
     const check = () => {
@@ -243,6 +308,13 @@ export default function App() {
     return (
       <>
         <SelfPreRegPage />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "super-admin")
+    return (
+      <>
+        <SuperAdminPanel onNavigate={navigate} />
         <Toaster richColors position="top-right" />
       </>
     );

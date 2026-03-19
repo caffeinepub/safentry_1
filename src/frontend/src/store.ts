@@ -1,6 +1,10 @@
 import {
   syncAddBlacklist,
+  syncDeleteAppointment,
   syncRemoveBlacklist,
+  syncRemoveStaff,
+  syncSaveAppointment,
+  syncSaveStaff,
   syncSaveVisitor,
 } from "./backendSync";
 import type {
@@ -133,13 +137,16 @@ export function getStaffByCompany(companyId: string): Staff[] {
 export function saveStaff(s: Staff) {
   const list = getAllStaff().filter((x) => x.staffId !== s.staffId);
   localStorage.setItem("safentry_staff", JSON.stringify([...list, s]));
+  syncSaveStaff(s);
 }
 export function findStaffById(staffId: string): Staff | null {
   return getAllStaff().find((s) => s.staffId === staffId) ?? null;
 }
 export function removeStaff(staffId: string) {
+  const s = findStaffById(staffId);
   const list = getAllStaff().filter((s) => s.staffId !== staffId);
   localStorage.setItem("safentry_staff", JSON.stringify(list));
+  if (s) syncRemoveStaff(staffId, s.companyId);
 }
 export function resetStaffCode(staffId: string): string {
   const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
@@ -148,6 +155,7 @@ export function resetStaffCode(staffId: string): string {
   const list = getAllStaff().filter((x) => x.staffId !== staffId);
   const updated: Staff = { ...s, staffId: newCode };
   localStorage.setItem("safentry_staff", JSON.stringify([...list, updated]));
+  syncSaveStaff(updated);
   return newCode;
 }
 
@@ -260,6 +268,7 @@ export function saveAppointment(a: Appointment) {
     `safentry_appointments_${a.companyId}`,
     JSON.stringify([...list, a]),
   );
+  syncSaveAppointment(a);
 }
 export function deleteAppointment(companyId: string, id: string) {
   const list = getAppointments(companyId).filter((x) => x.id !== id);
@@ -267,6 +276,7 @@ export function deleteAppointment(companyId: string, id: string) {
     `safentry_appointments_${companyId}`,
     JSON.stringify(list),
   );
+  syncDeleteAppointment(companyId, id);
 }
 
 export function getSession(): Session | null {
@@ -1375,4 +1385,108 @@ export function saveLostFound(item: LostFoundItem) {
 export function deleteLostFound(companyId: string, id: string) {
   const list = getLostFound(companyId).filter((x) => x.id !== id);
   localStorage.setItem(`safentry_lostfound_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Survey Templates ─────────────────────────────────────────────────────────
+export function getSurveyTemplates(
+  companyId: string,
+): import("./types").SurveyTemplate[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_survey_templates_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveSurveyTemplate(t: import("./types").SurveyTemplate) {
+  const list = getSurveyTemplates(t.companyId).filter((x) => x.id !== t.id);
+  localStorage.setItem(
+    `safentry_survey_templates_${t.companyId}`,
+    JSON.stringify([...list, t]),
+  );
+}
+export function deleteSurveyTemplate(id: string, companyId: string) {
+  const list = getSurveyTemplates(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_survey_templates_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Document Templates ───────────────────────────────────────────────────────
+export function getDocumentTemplates(
+  companyId: string,
+): import("./types").DocumentTemplate[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_doc_templates_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveDocumentTemplate(t: import("./types").DocumentTemplate) {
+  const list = getDocumentTemplates(t.companyId).filter((x) => x.id !== t.id);
+  localStorage.setItem(
+    `safentry_doc_templates_${t.companyId}`,
+    JSON.stringify([...list, t]),
+  );
+}
+export function deleteDocumentTemplate(id: string, companyId: string) {
+  const list = getDocumentTemplates(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_doc_templates_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Notification Rules ───────────────────────────────────────────────────────
+export function getNotificationRules(
+  companyId: string,
+): import("./types").NotificationRule[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_notif_rules_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveNotificationRule(r: import("./types").NotificationRule) {
+  const list = getNotificationRules(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_notif_rules_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteNotificationRule(id: string, companyId: string) {
+  const list = getNotificationRules(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(
+    `safentry_notif_rules_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+
+// ─── Dashboard Widget Config ──────────────────────────────────────────────────
+export function getDashboardWidgetConfig(
+  companyId: string,
+): import("./types").DashboardWidgetConfig {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_widget_config_${companyId}`) ||
+        '{"hiddenWidgets":[]}',
+    );
+  } catch {
+    return { hiddenWidgets: [] };
+  }
+}
+export function saveDashboardWidgetConfig(
+  companyId: string,
+  config: import("./types").DashboardWidgetConfig,
+) {
+  localStorage.setItem(
+    `safentry_widget_config_${companyId}`,
+    JSON.stringify(config),
+  );
 }
