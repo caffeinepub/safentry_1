@@ -149,7 +149,8 @@ export interface UploadedDocument {
   id: string;
   name: string;
   type: string;
-  base64: string;
+  base64?: string;
+  url?: string;
   uploadedAt: number;
 }
 
@@ -199,6 +200,7 @@ export interface Visitor {
   biometricCheckResult?: "verified" | "flagged";
   emergencyContactName?: string;
   emergencyContactPhone?: string;
+  zonePermissions?: string[];
 }
 
 export interface MeetingTemplate {
@@ -281,6 +283,7 @@ export interface Appointment {
   hostApprovalStatus?: "pending" | "approved" | "rejected";
   hostRejectionReason?: string;
   meetingRoomId?: string;
+  attendees?: AppointmentAttendee[];
 }
 
 export interface AuditLog {
@@ -318,7 +321,10 @@ export type AppScreen =
   | "blacklist-appeal"
   | "visitor-feedback"
   | "self-prereg"
-  | "super-admin";
+  | "super-admin"
+  | "reception-desk"
+  | "visitor-ticket"
+  | "self-checkin";
 
 export interface ParkingSpace {
   id: string;
@@ -348,6 +354,13 @@ export interface SecurityIncident {
   severity: "low" | "medium" | "high" | "critical";
   loggedBy: string;
   timestamp: number;
+  escalationLevel?: 1 | 2 | 3;
+  escalationHistory?: Array<{
+    level: 1 | 2 | 3;
+    timestamp: number;
+    by: string;
+    acknowledged?: boolean;
+  }>;
 }
 
 export interface PreRegistration {
@@ -559,4 +572,73 @@ export interface NotificationRule {
 
 export interface DashboardWidgetConfig {
   hiddenWidgets: string[];
+}
+
+export interface AppointmentAttendee {
+  name: string;
+  idNumber: string;
+  checkedIn?: boolean;
+  visitorId?: string;
+}
+
+export interface StaffLeave {
+  leaveId: string;
+  personnelId: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  reason: string;
+  createdAt: number;
+}
+
+export interface VisitorPass {
+  passId: string;
+  companyId: string;
+  visitorName: string;
+  visitorTC: string;
+  validDays: 30 | 90;
+  issuedAt: number;
+  expiresAt: number;
+  qrCode: string;
+  isActive: boolean;
+}
+
+export interface EntryPoint {
+  entryId: string;
+  name: string;
+  categories: string[];
+  instructions: string;
+}
+
+// ─── SLA ─────────────────────────────────────────────────────────────────────
+export interface SlaRule {
+  id: string;
+  companyId: string;
+  name: string;
+  maxWaitMinutes: number;
+  category?: string;
+  createdAt: number;
+}
+
+export interface SlaViolation {
+  id: string;
+  companyId: string;
+  visitorId: string;
+  visitorName: string;
+  ruleId: string;
+  ruleName: string;
+  waitMinutes: number;
+  timestamp: number;
+}
+
+// ─── Maintenance Request ─────────────────────────────────────────────────────
+export interface MaintenanceRequest {
+  id: string;
+  companyId: string;
+  location: string;
+  category: "cleaning" | "technical" | "security" | "other";
+  description: string;
+  status: "open" | "in_progress" | "done";
+  createdBy: string;
+  createdAt: number;
+  updatedAt?: number;
 }

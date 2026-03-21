@@ -73,6 +73,19 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
       return;
     }
 
+    // Track multi-company associations
+    try {
+      const assocKey = "safentry_staff_companies";
+      const assocMap: Record<string, string[]> = JSON.parse(
+        localStorage.getItem(assocKey) || "{}",
+      );
+      const existing = assocMap[staffId] ?? [];
+      if (!existing.includes(companyId)) {
+        assocMap[staffId] = [...existing, companyId];
+        localStorage.setItem(assocKey, JSON.stringify(assocMap));
+      }
+    } catch {}
+
     purgeExpiredVisitors(companyId);
     if (actor) {
       syncFromBackend(actor, companyId).catch(() => {});

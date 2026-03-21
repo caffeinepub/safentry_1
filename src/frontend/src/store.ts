@@ -1490,3 +1490,196 @@ export function saveDashboardWidgetConfig(
     JSON.stringify(config),
   );
 }
+
+// ─── Staff Leaves ─────────────────────────────────────────────────────────────
+export function getStaffLeaves(
+  companyId: string,
+): import("./types").StaffLeave[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_staff_leaves_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveStaffLeave(
+  companyId: string,
+  leave: import("./types").StaffLeave,
+): void {
+  const list = getStaffLeaves(companyId).filter(
+    (l) => l.leaveId !== leave.leaveId,
+  );
+  localStorage.setItem(
+    `safentry_staff_leaves_${companyId}`,
+    JSON.stringify([...list, leave]),
+  );
+}
+export function deleteStaffLeave(companyId: string, leaveId: string): void {
+  const list = getStaffLeaves(companyId).filter((l) => l.leaveId !== leaveId);
+  localStorage.setItem(
+    `safentry_staff_leaves_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+export function isPersonnelOnLeave(
+  companyId: string,
+  personnelId: string,
+  date: string,
+): boolean {
+  return getStaffLeaves(companyId).some(
+    (l) =>
+      l.personnelId === personnelId && l.startDate <= date && l.endDate >= date,
+  );
+}
+
+// ─── Visitor Passes ───────────────────────────────────────────────────────────
+export function getVisitorPasses(
+  companyId: string,
+): import("./types").VisitorPass[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_visitor_passes_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveVisitorPass(
+  companyId: string,
+  pass: import("./types").VisitorPass,
+): void {
+  const list = getVisitorPasses(companyId).filter(
+    (p) => p.passId !== pass.passId,
+  );
+  localStorage.setItem(
+    `safentry_visitor_passes_${companyId}`,
+    JSON.stringify([...list, pass]),
+  );
+}
+export function revokeVisitorPass(companyId: string, passId: string): void {
+  const list = getVisitorPasses(companyId).map((p) =>
+    p.passId === passId ? { ...p, isActive: false } : p,
+  );
+  localStorage.setItem(
+    `safentry_visitor_passes_${companyId}`,
+    JSON.stringify(list),
+  );
+}
+export function findActivePassByTC(
+  companyId: string,
+  tc: string,
+): import("./types").VisitorPass | null {
+  const now = Date.now();
+  return (
+    getVisitorPasses(companyId).find(
+      (p) => p.visitorTC === tc && p.isActive && p.expiresAt > now,
+    ) ?? null
+  );
+}
+export function findActivePassByQrCode(
+  companyId: string,
+  qrCode: string,
+): import("./types").VisitorPass | null {
+  const now = Date.now();
+  return (
+    getVisitorPasses(companyId).find(
+      (p) => p.qrCode === qrCode && p.isActive && p.expiresAt > now,
+    ) ?? null
+  );
+}
+
+// ─── Entry Points ─────────────────────────────────────────────────────────────
+export function getEntryPoints(
+  companyId: string,
+): import("./types").EntryPoint[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_entry_points_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveEntryPoints(
+  companyId: string,
+  points: import("./types").EntryPoint[],
+): void {
+  localStorage.setItem(
+    `safentry_entry_points_${companyId}`,
+    JSON.stringify(points),
+  );
+}
+export function findEntryPointForCategory(
+  companyId: string,
+  category: string,
+): import("./types").EntryPoint | null {
+  return (
+    getEntryPoints(companyId).find(
+      (ep) => ep.categories.length === 0 || ep.categories.includes(category),
+    ) ?? null
+  );
+}
+
+// ─── SLA Rules ────────────────────────────────────────────────────────────────
+export function getSlaRules(companyId: string): import("./types").SlaRule[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_sla_rules_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveSlaRule(r: import("./types").SlaRule): void {
+  const list = getSlaRules(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_sla_rules_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteSlaRule(companyId: string, id: string): void {
+  const list = getSlaRules(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_sla_rules_${companyId}`, JSON.stringify(list));
+}
+
+export function getSlaViolations(
+  companyId: string,
+): import("./types").SlaViolation[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_sla_violations_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveSlaViolation(v: import("./types").SlaViolation): void {
+  const list = getSlaViolations(v.companyId).filter((x) => x.id !== v.id);
+  localStorage.setItem(
+    `safentry_sla_violations_${v.companyId}`,
+    JSON.stringify([...list, v]),
+  );
+}
+
+// ─── Maintenance Requests ─────────────────────────────────────────────────────
+export function getMaintenanceRequests(
+  companyId: string,
+): import("./types").MaintenanceRequest[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_maintenance_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveMaintenanceRequest(
+  r: import("./types").MaintenanceRequest,
+): void {
+  const list = getMaintenanceRequests(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_maintenance_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}

@@ -22,6 +22,8 @@ import CompanyRegister from "./pages/CompanyRegister";
 import KioskMode from "./pages/KioskMode";
 import LanguageSelect from "./pages/LanguageSelect";
 import PreRegPage from "./pages/PreRegPage";
+import ReceptionDeskMode from "./pages/ReceptionDeskMode";
+import SelfCheckinPage from "./pages/SelfCheckinPage";
 import SelfPreRegPage from "./pages/SelfPreRegPage";
 import StaffDashboard from "./pages/StaffDashboard";
 import StaffLogin from "./pages/StaffLogin";
@@ -29,6 +31,7 @@ import StaffRegister from "./pages/StaffRegister";
 import SuperAdminPanel from "./pages/SuperAdminPanel";
 import Verify from "./pages/Verify";
 import VisitorFeedbackPage from "./pages/VisitorFeedbackPage";
+import VisitorTicketPage from "./pages/VisitorTicketPage";
 import Welcome from "./pages/Welcome";
 
 // Check if current URL is a confirm link
@@ -66,7 +69,21 @@ function getSelfPreRegCode(): string | null {
   return match ? match[1] : null;
 }
 
+// Check if current URL is a visitor ticket link
+function getVisitorTicketId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/ticket\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
 // Check if current URL is a blacklist appeal link
+// Check if current URL is a self check-in link
+function getSelfCheckinCompanyId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/selfcheckin\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
 function getAppealParams(): { tc: string } | null {
   const path = window.location.pathname;
   const match = path.match(/^\/appeal(?:\/([a-zA-Z0-9]+))?$/);
@@ -90,6 +107,7 @@ export default function App() {
   const appealParams = getAppealParams();
   const feedbackCode = getFeedbackCode();
   const selfPreRegCode = getSelfPreRegCode();
+  const selfCheckinCompanyId = getSelfCheckinCompanyId();
 
   const getInitialScreen = (): AppScreen => {
     if (confirmToken) return "appointment-confirm";
@@ -97,6 +115,8 @@ export default function App() {
     if (preRegToken) return "prereg";
     if (appealParams) return "blacklist-appeal";
     if (selfPreRegCode) return "self-prereg";
+    if (selfCheckinCompanyId) return "self-checkin";
+    if (visitorTicketId) return "visitor-ticket";
     if (feedbackCode) return "visitor-feedback";
     if (!hasLang) return "language";
     if (!session) return "welcome";
@@ -104,6 +124,7 @@ export default function App() {
   };
 
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
+  const visitorTicketId = getVisitorTicketId();
   const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
   const [currentInviteToken, setCurrentInviteToken] = useState<string | null>(
     inviteToken,
@@ -112,6 +133,8 @@ export default function App() {
   const navigate = useCallback(
     (s: AppScreen, state?: { companyId?: string; token?: string }) => {
       if (s === "kiosk" && state?.companyId) setKioskCompanyId(state.companyId);
+      if (s === "reception-desk" && state?.companyId)
+        setKioskCompanyId(state.companyId);
       if (s === "invite" && state?.token) setCurrentInviteToken(state.token);
       setScreen(s);
     },
@@ -311,6 +334,14 @@ export default function App() {
         <Toaster richColors position="top-right" />
       </>
     );
+  if (screen === "self-checkin")
+    return (
+      <>
+        <SelfCheckinPage companyId={selfCheckinCompanyId ?? ""} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+
   if (screen === "super-admin")
     return (
       <>
@@ -323,6 +354,23 @@ export default function App() {
       <>
         <BlacklistAppealPage
           tcNumber={appealParams?.tc ?? ""}
+          onNavigate={navigate}
+        />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "reception-desk")
+    return (
+      <>
+        <ReceptionDeskMode onNavigate={navigate} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "visitor-ticket")
+    return (
+      <>
+        <VisitorTicketPage
+          visitorId={visitorTicketId ?? ""}
           onNavigate={navigate}
         />
         <Toaster richColors position="top-right" />

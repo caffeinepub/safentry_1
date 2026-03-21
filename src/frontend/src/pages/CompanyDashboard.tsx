@@ -22,17 +22,22 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { addAuditLog, getAuditLogs } from "../auditLog";
+import AuditReportTab from "../components/AuditReportTab";
 import BranchManager from "../components/BranchManager";
 import BroadcastModal from "../components/BroadcastModal";
+import CompetencyTab from "../components/CompetencyTab";
 import ConfirmModal from "../components/ConfirmModal";
 import CorporateCrmTab from "../components/CorporateCrmTab";
 import CsvImportModal from "../components/CsvImportModal";
 import DataExportTab from "../components/DataExportTab";
 import DocumentTemplateTab from "../components/DocumentTemplateTab";
+import DrillTab from "../components/DrillTab";
 import EmptyState from "../components/EmptyState";
+import EntryPointManager from "../components/EntryPointManager";
 import EscortTab from "../components/EscortTab";
 import GlobalSearch from "../components/GlobalSearch";
 import HelpCenter from "../components/HelpCenter";
+import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
 import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
 import LostFoundTab from "../components/LostFoundTab";
@@ -51,9 +56,13 @@ import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
 import VisitTimeline from "../components/VisitTimeline";
 import VisitorComments from "../components/VisitorComments";
+import VisitorCountdown from "../components/VisitorCountdown";
 import VisitorHeatmap from "../components/VisitorHeatmap";
+import VisitorPassTab from "../components/VisitorPassTab";
 import VisitorProfileModal from "../components/VisitorProfileModal";
 import WorkingCalendar from "../components/WorkingCalendar";
+import ZoneControlTab from "../components/ZoneControlTab";
+import { useLiveAlerts } from "../hooks/useLiveAlerts";
 import { getLang, t } from "../i18n";
 
 import {
@@ -72,6 +81,7 @@ import {
   deleteNotificationRule,
   deletePermit,
   deleteScheduledReport,
+  deleteSlaRule,
   deleteSurveyTemplate,
   findApprovedByIdNumber,
   findCompanyById,
@@ -87,6 +97,7 @@ import {
   getBranches,
   getCompanyDepartments,
   getCompanyFloors,
+  getCustomCategories,
   getDashboardWidgetConfig,
   getDepartments,
   getDeptTodayVisitorCount,
@@ -98,12 +109,15 @@ import {
   getKioskContent,
   getLockdown,
   getLostFound,
+  getMaintenanceRequests,
   getMeetingRooms,
   getNotificationRules,
   getPermitRenewals,
   getPermits,
   getScheduledReports,
   getSession,
+  getSlaRules,
+  getSlaViolations,
   getStaffByCompany,
   getStaffPhoto,
   getSurveyTemplates,
@@ -131,11 +145,14 @@ import {
   saveInviteCode,
   saveKioskContent,
   saveLostFound,
+  saveMaintenanceRequest,
   saveMeetingRoom,
   saveNotificationRule,
   savePermit,
   savePermitRenewal,
   saveScheduledReport,
+  saveSlaRule,
+  saveSlaViolation,
   saveStaff,
   saveSurveyTemplate,
   saveVisitor,
@@ -164,12 +181,15 @@ import type {
   ExitQuestion,
   GatePassLog,
   HostReview,
+  MaintenanceRequest,
   MeetingRoom,
   NotificationRule,
   ParkingSpace,
   ScheduledReport,
   ScreeningQuestion,
   SecurityIncident,
+  SlaRule,
+  SlaViolation,
   Staff,
   SurveyTemplate,
   Visitor,
@@ -263,7 +283,15 @@ type Tab =
   | "firmalar"
   | "anketler"
   | "sablonlar"
-  | "bildirimkurallari";
+  | "bildirimkurallari"
+  | "zones"
+  | "drill"
+  | "competency"
+  | "auditreport"
+  | "visitorpasses"
+  | "sla"
+  | "maintenance"
+  | "selfcheckinqr";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -1712,11 +1740,599 @@ function NotifRulesTabWrapper({
   );
 }
 
+function AnnualKvkkReportSection({
+  companyId,
+  companyName,
+  authorizedPerson,
+  address,
+  blacklist,
+}: {
+  companyId: string;
+  companyName?: string;
+  authorizedPerson?: string;
+  address?: string;
+  blacklist: import("../types").BlacklistEntry[];
+}) {
+  const [reportYear, setReportYear] = useState(new Date().getFullYear());
+  const currentYear = new Date().getFullYear();
+
+  const allVisitors = getVisitors(companyId);
+  const yearVisitors = allVisitors.filter(
+    (v) => new Date(v.arrivalTime).getFullYear() === reportYear,
+  );
+  const archivedCount = yearVisitors.filter(
+    (v) => v.status === "departed",
+  ).length;
+  const kvkkReqs: Array<{ status: string }> = (() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem(`safentry_sar_${companyId}`) || "[]",
+      );
+    } catch {
+      return [];
+    }
+  })();
+  const blacklistCount = blacklist.filter(
+    (b) => new Date(b.addedAt).getFullYear() === reportYear,
+  ).length;
+
+  const downloadReport = () => {
+    const html = `<!DOCTYPE html>
+<html lang="tr"><head><meta charset="UTF-8">
+<title>Yıllık KVKK/GDPR Uyum Raporu ${reportYear}</title>
+<style>
+body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#333}
+h1{color:#1e3a5f;border-bottom:3px solid #1e3a5f;padding-bottom:10px}
+h2{color:#2d5a8e;margin-top:30px}
+table{width:100%;border-collapse:collapse;margin:20px 0}
+th,td{border:1px solid #ddd;padding:12px;text-align:left}
+th{background:#f0f4f8;font-weight:bold}
+.badge{display:inline-block;padding:4px 10px;border-radius:20px;font-size:12px;background:#e8f5e9;color:#2e7d32;font-weight:bold}
+footer{margin-top:40px;padding-top:20px;border-top:1px solid #ddd;font-size:12px;color:#888}
+</style></head><body>
+<h1>📋 KVKK/GDPR Yıllık Uyum Raporu</h1>
+<p><strong>Şirket:</strong> ${companyName ?? companyId}<br>
+<strong>Dönem:</strong> ${reportYear} Yılı<br>
+<strong>Oluşturma Tarihi:</strong> ${new Date().toLocaleDateString("tr-TR")}</p>
+<span class="badge">✓ KVKK/GDPR Uyumlu</span>
+<h2>Veri İşleme Özeti</h2>
+<table>
+<tr><th>Kriter</th><th>Değer</th></tr>
+<tr><td>Toplam Ziyaretçi Kaydı</td><td>${yearVisitors.length}</td></tr>
+<tr><td>Tamamlanan / Arşivlenen Kayıt</td><td>${archivedCount}</td></tr>
+<tr><td>KVKK / GDPR Bireysel Başvuru (SAR)</td><td>${kvkkReqs.length}</td></tr>
+<tr><td>Kara Liste Girişi</td><td>${blacklistCount}</td></tr>
+<tr><td>Veri Saklama Politikası</td><td>90 gün (otomatik silme)</td></tr>
+<tr><td>NDA / Onay Mekanizması</td><td>Dijital İmza ile Aktif</td></tr>
+</table>
+<h2>Uyum Beyanı</h2>
+<p>Bu sistem, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) ve AB Genel Veri Koruma Yönetmeliği (GDPR) kapsamında ziyaretçi kişisel verilerini işlemektedir. Tüm veriler yalnızca ziyaret amacıyla toplanmakta, gerekli teknik ve idari tedbirler uygulanmakta, 90 günlük saklama süresi sonunda otomatik olarak silinmektedir.</p>
+<h2>Veri Sorumlusu</h2>
+<p><strong>Şirket:</strong> ${companyName ?? ""}<br>
+<strong>Veri Sorumlusu:</strong> ${authorizedPerson ?? "Yönetici"}<br>
+<strong>Adres:</strong> ${address ?? ""}</p>
+<footer>
+<p>Bu rapor Safentry Ziyaretçi Yönetim Sistemi tarafından otomatik oluşturulmuştur. Oluşturma zamanı: ${new Date().toLocaleString("tr-TR")}</p>
+</footer>
+</body></html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `KVKK_Uyum_Raporu_${reportYear}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div
+      className="p-5 rounded-2xl space-y-4"
+      style={{
+        background: "rgba(168,85,247,0.06)",
+        border: "1px solid rgba(168,85,247,0.2)",
+      }}
+    >
+      <h3 className="text-purple-300 font-semibold text-sm">
+        📊 Yıllık KVKK/GDPR Uyum Raporu
+      </h3>
+      <div className="flex items-center gap-3">
+        <label htmlFor="annual-year-select" className="text-slate-400 text-sm">
+          Yıl seç:
+        </label>
+        <select
+          data-ocid="kvkk.annual_year.select"
+          id="annual-year-select"
+          value={reportYear}
+          onChange={(e) => setReportYear(Number(e.target.value))}
+          className="px-3 py-2 rounded-xl text-sm text-white"
+          style={{
+            background: "#0d1424",
+            border: "1px solid rgba(255,255,255,0.15)",
+            outline: "none",
+          }}
+        >
+          {[currentYear, currentYear - 1, currentYear - 2].map((y) => (
+            <option key={y} value={y}>
+              {y}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          {
+            label: "Toplam Ziyaretçi",
+            value: yearVisitors.length,
+            color: "#00d4aa",
+          },
+          { label: "Arşivlenen Kayıt", value: archivedCount, color: "#22c55e" },
+          { label: "KVKK Başvurusu", value: kvkkReqs.length, color: "#0ea5e9" },
+          {
+            label: "Kara Liste Girişi",
+            value: blacklistCount,
+            color: "#f59e0b",
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="p-3 rounded-xl text-center"
+            style={{
+              background: `${item.color}12`,
+              border: `1px solid ${item.color}25`,
+            }}
+          >
+            <div className="text-xl font-bold" style={{ color: item.color }}>
+              {item.value}
+            </div>
+            <div className="text-slate-500 text-xs mt-1">{item.label}</div>
+          </div>
+        ))}
+      </div>
+      <div
+        className="p-3 rounded-xl text-sm space-y-1"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        <p className="text-slate-400">
+          📅 Veri saklama süresi:{" "}
+          <strong className="text-white">90 gün (otomatik silme)</strong>
+        </p>
+        <p className="text-slate-400">
+          🔒 KVKK/GDPR uyumlu:{" "}
+          <strong className="text-green-400">✓ Aktif</strong>
+        </p>
+      </div>
+      <button
+        type="button"
+        data-ocid="kvkk.annual_report.button"
+        onClick={downloadReport}
+        className="w-full py-3 rounded-xl text-sm font-bold text-white"
+        style={{ background: "linear-gradient(135deg,#a855f7,#9333ea)" }}
+      >
+        📥 {reportYear} Yılı Raporunu İndir (HTML)
+      </button>
+    </div>
+  );
+}
+
+// ─── CompanyMaintenanceTab ─────────────────────────────────────────────────────
+function CompanyMaintenanceTab({ companyId }: { companyId: string }) {
+  const [requests, setRequests] = React.useState<MaintenanceRequest[]>(() =>
+    getMaintenanceRequests(companyId),
+  );
+  const reload = () => setRequests(getMaintenanceRequests(companyId));
+  const statusColor: Record<string, string> = {
+    open: "#f59e0b",
+    in_progress: "#0ea5e9",
+    done: "#4ade80",
+  };
+  const statusLabel: Record<string, string> = {
+    open: "Açık",
+    in_progress: "Devam Ediyor",
+    done: "Tamamlandı",
+  };
+  const catLabel: Record<string, string> = {
+    cleaning: "🧹 Temizlik",
+    technical: "🔧 Teknik",
+    security: "🔒 Güvenlik",
+    other: "📋 Diğer",
+  };
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <h2 className="text-white font-bold text-xl">
+          🔧 Bakım ve Temizlik Talepleri
+        </h2>
+        <span className="text-slate-400 text-sm">
+          {requests.filter((r) => r.status === "open").length} açık
+        </span>
+      </div>
+      <div className="space-y-3">
+        {requests.length === 0 ? (
+          <div
+            className="p-8 rounded-2xl text-center"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <p className="text-slate-400">Henüz talep yok.</p>
+          </div>
+        ) : (
+          [...requests].reverse().map((req) => (
+            <div
+              key={req.id}
+              className="p-4 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-white">
+                      {catLabel[req.category]}
+                    </span>
+                    <span
+                      className="text-xs px-2 py-0.5 rounded-full font-medium"
+                      style={{
+                        background: `${statusColor[req.status]}22`,
+                        color: statusColor[req.status],
+                        border: `1px solid ${statusColor[req.status]}44`,
+                      }}
+                    >
+                      {statusLabel[req.status]}
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-sm">📍 {req.location}</p>
+                  <p className="text-slate-400 text-xs mt-1">
+                    {req.description}
+                  </p>
+                  <p className="text-slate-500 text-xs mt-1">
+                    Talep eden: {req.createdBy} •{" "}
+                    {new Date(req.createdAt).toLocaleString("tr-TR")}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-1">
+                  {req.status !== "done" && (
+                    <>
+                      {req.status === "open" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            saveMaintenanceRequest({
+                              ...req,
+                              status: "in_progress",
+                              updatedAt: Date.now(),
+                            });
+                            reload();
+                          }}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-[#0ea5e9] hover:bg-[#0ea5e9]/10 transition-colors whitespace-nowrap"
+                        >
+                          ▶ Başlat
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          saveMaintenanceRequest({
+                            ...req,
+                            status: "done",
+                            updatedAt: Date.now(),
+                          });
+                          reload();
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-green-400 hover:bg-green-400/10 transition-colors"
+                      >
+                        ✓ Tamam
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── CompanySelfCheckinQrTab ───────────────────────────────────────────────────
+function CompanySelfCheckinQrTab({ companyId }: { companyId: string }) {
+  const [copied, setCopied] = React.useState(false);
+  const url = `${window.location.origin}/selfcheckin/${companyId}`;
+  const copy = () => {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <div className="max-w-lg space-y-6">
+      <h2 className="text-white font-bold text-xl">📱 Self Check-in QR Kodu</h2>
+      <div
+        className="p-6 rounded-2xl text-center space-y-4"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <p className="text-slate-300 text-sm">
+          Ziyaretçiler bu bağlantıyı kullanarak kendi cihazlarından giriş
+          formunu doldurabilir.
+        </p>
+        <div
+          className="mx-auto w-48 h-48 rounded-2xl flex items-center justify-center"
+          style={{
+            background: "rgba(0,212,255,0.1)",
+            border: "2px dashed rgba(0,212,255,0.3)",
+          }}
+        >
+          <div className="text-center">
+            <div className="text-4xl mb-2">📱</div>
+            <div className="text-[#00d4ff] text-xs font-mono break-all px-2">
+              Self Check-in
+            </div>
+          </div>
+        </div>
+        <div
+          className="p-3 rounded-xl font-mono text-xs text-[#00d4ff] break-all"
+          style={{
+            background: "rgba(0,212,255,0.06)",
+            border: "1px solid rgba(0,212,255,0.2)",
+          }}
+        >
+          {url}
+        </div>
+        <div className="flex gap-3 justify-center">
+          <button
+            type="button"
+            onClick={copy}
+            className="px-5 py-2.5 rounded-xl text-sm font-medium text-white transition-all"
+            style={{
+              background: copied
+                ? "rgba(34,197,94,0.2)"
+                : "linear-gradient(135deg,#0ea5e9,#0284c7)",
+              border: copied ? "1px solid rgba(34,197,94,0.4)" : "none",
+            }}
+          >
+            {copied ? "✓ Kopyalandı" : "🔗 Linki Kopyala"}
+          </button>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-5 py-2.5 rounded-xl text-sm font-medium text-slate-300 hover:text-white transition-colors"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          >
+            🔗 Önizle
+          </a>
+        </div>
+      </div>
+      <div
+        className="p-4 rounded-xl space-y-2"
+        style={{
+          background: "rgba(245,158,11,0.06)",
+          border: "1px solid rgba(245,158,11,0.2)",
+        }}
+      >
+        <p className="text-amber-400 text-sm font-medium">
+          📌 Nasıl kullanılır?
+        </p>
+        <ul className="text-slate-400 text-xs space-y-1 list-disc list-inside">
+          <li>Bu linki QR kod oluşturucusuna yapıştırarak çıktı alın</li>
+          <li>Girişe veya bekleme alanına asın</li>
+          <li>
+            Ziyaretçiler kendi cihazlarından formu doldurup kaydını
+            oluşturabilir
+          </li>
+          <li>Kayıtlar "Ziyaretçiler" sekmesinde "Bekliyor" olarak görünür</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ─── CompanySlaTab ────────────────────────────────────────────────────────────
+function CompanySlaTab({ companyId }: { companyId: string }) {
+  const [slaRules, setSlaRules] = React.useState<SlaRule[]>(() =>
+    getSlaRules(companyId),
+  );
+  const [slaViolations, setSlaViolations] = React.useState<SlaViolation[]>(() =>
+    getSlaViolations(companyId),
+  );
+  const [newRule, setNewRule] = React.useState({
+    name: "",
+    maxWaitMinutes: 10,
+    category: "",
+  });
+  const categories = getCustomCategories(companyId);
+  const reload = () => {
+    setSlaRules(getSlaRules(companyId));
+    setSlaViolations(getSlaViolations(companyId));
+  };
+  return (
+    <div className="space-y-6">
+      <h2 className="text-white font-bold text-xl">⏱️ SLA Kural Yönetimi</h2>
+      {/* Add Rule */}
+      <div
+        className="p-5 rounded-2xl space-y-4"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <h3 className="text-white font-semibold">Yeni Kural Ekle</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input
+            placeholder="Kural adı"
+            value={newRule.name}
+            onChange={(e) =>
+              setNewRule((r) => ({ ...r, name: e.target.value }))
+            }
+            className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          />
+          <input
+            type="number"
+            min={1}
+            placeholder="Maks. bekleme (dk)"
+            value={newRule.maxWaitMinutes}
+            onChange={(e) =>
+              setNewRule((r) => ({
+                ...r,
+                maxWaitMinutes: Number(e.target.value),
+              }))
+            }
+            className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          />
+          <select
+            value={newRule.category}
+            onChange={(e) =>
+              setNewRule((r) => ({ ...r, category: e.target.value }))
+            }
+            className="px-3 py-2 rounded-xl text-white text-sm focus:outline-none"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          >
+            <option value="" style={{ background: "#0f1729" }}>
+              Tüm kategoriler
+            </option>
+            {categories.map((c) => (
+              <option key={c} value={c} style={{ background: "#0f1729" }}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (!newRule.name.trim()) return;
+            const rule: SlaRule = {
+              id: `sla_${Date.now()}`,
+              companyId: companyId,
+              name: newRule.name.trim(),
+              maxWaitMinutes: newRule.maxWaitMinutes,
+              category: newRule.category || undefined,
+              createdAt: Date.now(),
+            };
+            saveSlaRule(rule);
+            setNewRule({
+              name: "",
+              maxWaitMinutes: 10,
+              category: "",
+            });
+            reload();
+          }}
+          className="px-4 py-2 rounded-xl text-sm font-medium text-white"
+          style={{
+            background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+          }}
+        >
+          + Kural Ekle
+        </button>
+      </div>
+      {/* Rules List */}
+      <div className="space-y-3">
+        <h3 className="text-slate-300 font-medium text-sm">
+          Aktif Kurallar ({slaRules.length})
+        </h3>
+        {slaRules.length === 0 ? (
+          <p className="text-slate-500 text-sm">Henüz kural eklenmedi.</p>
+        ) : (
+          slaRules.map((rule) => (
+            <div
+              key={rule.id}
+              className="flex items-center justify-between p-4 rounded-xl"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div>
+                <p className="text-white font-medium text-sm">{rule.name}</p>
+                <p className="text-slate-400 text-xs mt-0.5">
+                  Maks. {rule.maxWaitMinutes} dakika{" "}
+                  {rule.category ? `• ${rule.category}` : "• Tüm kategoriler"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  deleteSlaRule(companyId, rule.id);
+                  reload();
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-400/10 transition-colors"
+              >
+                Sil
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+      {/* Violations */}
+      <div className="space-y-3">
+        <h3 className="text-slate-300 font-medium text-sm">
+          İhlaller ({slaViolations.length})
+        </h3>
+        {slaViolations.length === 0 ? (
+          <p className="text-slate-500 text-sm">Henüz ihlal kaydı yok.</p>
+        ) : (
+          [...slaViolations]
+            .reverse()
+            .slice(0, 20)
+            .map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{
+                  background: "rgba(239,68,68,0.06)",
+                  border: "1px solid rgba(239,68,68,0.15)",
+                }}
+              >
+                <div>
+                  <p className="text-red-300 font-medium text-sm">
+                    {v.visitorName}
+                  </p>
+                  <p className="text-slate-400 text-xs">
+                    {v.ruleName} • {v.waitMinutes} dk bekledi
+                  </p>
+                </div>
+                <span className="text-slate-500 text-xs">
+                  {new Date(v.timestamp).toLocaleString("tr-TR")}
+                </span>
+              </div>
+            ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
   const company = findCompanyById(session.companyId)!;
   const [tab, setTab] = useState<Tab>("visitors");
+  const [showTour, setShowTour] = useState(() => !isTourDone("company_admin"));
+  useLiveAlerts(session.companyId, true);
   const [sarIdInput, setSarIdInput] = useState("");
   const [sarRequests, setSarRequests] = useState<
     {
@@ -2674,6 +3290,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "anketler", label: "📋 Anket Şablonları" },
     { key: "sablonlar", label: "🗂️ Şablonlar" },
     { key: "bildirimkurallari", label: "🔔 Bildirim Kuralları" },
+    { key: "zones", label: "🗺️ Bölge Kontrolü" },
+    { key: "drill", label: "🚨 Tatbikat" },
+    { key: "competency", label: "🏅 Yetkinlik Takibi" },
+    { key: "auditreport", label: "📋 Denetim Raporu" },
+    { key: "visitorpasses", label: "🎫 Geçici Passlar" },
+    { key: "sla", label: "⏱️ SLA Kuralları" },
+    { key: "maintenance", label: "🔧 Bakım Talepleri" },
+    { key: "selfcheckinqr", label: "📱 Self Check-in QR" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -3963,6 +4587,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                               ? durationLabel(v.arrivalTime)
                               : ""}
                         </div>
+                        {v.status === "active" && (
+                          <VisitorCountdown
+                            arrivalTime={v.arrivalTime}
+                            durationLimitMinutes={
+                              v.category
+                                ? (company?.categoryMaxStay?.[v.category] ?? 0)
+                                : 0
+                            }
+                          />
+                        )}
                         <button
                           type="button"
                           data-ocid={`visitors.reinvite.button.${i + 1}`}
@@ -5757,6 +6391,152 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             <KpiTargets companyId={session.companyId} />
           </div>
         )}
+
+        {/* NPS Analysis - part of statistics */}
+        {tab === "statistics" &&
+          (() => {
+            const feedbacks = getVisitors(session.companyId);
+            const ratings = feedbacks
+              .filter((f) => f.exitRating && f.exitRating > 0)
+              .map((f) => f.exitRating as number);
+            const total = ratings.length;
+            const promoters = ratings.filter((r) => r >= 5).length;
+            const passives = ratings.filter((r) => r === 3 || r === 4).length;
+            const detractors = ratings.filter((r) => r <= 2).length;
+            const nps =
+              total > 0
+                ? Math.round(((promoters - detractors) / total) * 100)
+                : null;
+            return (
+              <div
+                className="mt-6 p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <h3 className="text-white font-bold text-base mb-4">
+                  📊 NPS (Net Promoter Score) Analizi
+                </h3>
+                {total === 0 ? (
+                  <p className="text-slate-400 text-sm">
+                    Henüz memnuniyet değerlendirmesi yok.
+                  </p>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-6">
+                      <div className="text-center">
+                        <div
+                          className="text-5xl font-bold"
+                          style={{
+                            color:
+                              nps! >= 50
+                                ? "#4ade80"
+                                : nps! >= 0
+                                  ? "#fbbf24"
+                                  : "#f87171",
+                          }}
+                        >
+                          {nps! > 0 ? "+" : ""}
+                          {nps}
+                        </div>
+                        <div className="text-slate-400 text-sm mt-1">
+                          NPS Skoru
+                        </div>
+                      </div>
+                      <div className="flex-1 space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-green-400">
+                            😊 Destekçiler (5★)
+                          </span>
+                          <span className="text-white font-medium">
+                            {promoters}{" "}
+                            <span className="text-slate-400">
+                              (
+                              {total > 0
+                                ? Math.round((promoters / total) * 100)
+                                : 0}
+                              %)
+                            </span>
+                          </span>
+                        </div>
+                        <div
+                          className="w-full h-2 rounded-full"
+                          style={{ background: "rgba(255,255,255,0.1)" }}
+                        >
+                          <div
+                            className="h-2 rounded-full"
+                            style={{
+                              width: `${total > 0 ? (promoters / total) * 100 : 0}%`,
+                              background: "#4ade80",
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-amber-400">
+                            😐 Pasifler (3-4★)
+                          </span>
+                          <span className="text-white font-medium">
+                            {passives}{" "}
+                            <span className="text-slate-400">
+                              (
+                              {total > 0
+                                ? Math.round((passives / total) * 100)
+                                : 0}
+                              %)
+                            </span>
+                          </span>
+                        </div>
+                        <div
+                          className="w-full h-2 rounded-full"
+                          style={{ background: "rgba(255,255,255,0.1)" }}
+                        >
+                          <div
+                            className="h-2 rounded-full"
+                            style={{
+                              width: `${total > 0 ? (passives / total) * 100 : 0}%`,
+                              background: "#fbbf24",
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-red-400">
+                            😞 Eleştirmenler (1-2★)
+                          </span>
+                          <span className="text-white font-medium">
+                            {detractors}{" "}
+                            <span className="text-slate-400">
+                              (
+                              {total > 0
+                                ? Math.round((detractors / total) * 100)
+                                : 0}
+                              %)
+                            </span>
+                          </span>
+                        </div>
+                        <div
+                          className="w-full h-2 rounded-full"
+                          style={{ background: "rgba(255,255,255,0.1)" }}
+                        >
+                          <div
+                            className="h-2 rounded-full"
+                            style={{
+                              width: `${total > 0 ? (detractors / total) * 100 : 0}%`,
+                              background: "#f87171",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-slate-400 text-xs">
+                      Toplam {total} değerlendirme • NPS = (Destekçiler% -
+                      Eleştirmenler%)
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
         {/* BLACKLIST REPORT TAB */}
         {tab === "blacklistreport" &&
@@ -8350,6 +9130,15 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 </div>
               )}
             </div>
+
+            {/* Annual Compliance Report */}
+            <AnnualKvkkReportSection
+              companyId={session.companyId}
+              companyName={company?.name}
+              authorizedPerson={company?.authorizedPerson}
+              address={company?.address}
+              blacklist={blacklist}
+            />
           </div>
         )}
         {tab === "workcalendar" && (
@@ -8759,6 +9548,48 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           />
         )}
 
+        {tab === "zones" && (
+          <ZoneControlTab
+            companyId={session.companyId}
+            visitors={visitors}
+            reload={reload}
+          />
+        )}
+
+        {tab === "drill" && (
+          <DrillTab
+            companyId={session.companyId}
+            visitors={visitors}
+            staffId={session.staffId ?? "admin"}
+            reload={reload}
+          />
+        )}
+
+        {tab === "competency" && (
+          <CompetencyTab companyId={session.companyId} />
+        )}
+
+        {tab === "auditreport" && (
+          <AuditReportTab
+            companyId={session.companyId}
+            companyName={company?.name}
+          />
+        )}
+        {tab === "visitorpasses" && (
+          <VisitorPassTab companyId={session.companyId} />
+        )}
+
+        {/* SLA TAB */}
+        {tab === "sla" && <CompanySlaTab companyId={session.companyId} />}
+
+        {tab === "maintenance" && (
+          <CompanyMaintenanceTab companyId={session.companyId} />
+        )}
+
+        {tab === "selfcheckinqr" && (
+          <CompanySelfCheckinQrTab companyId={session.companyId} />
+        )}
+
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -8982,6 +9813,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               <p className="text-slate-500 text-xs mt-1">
                 Kiosk giriş ekranında gösterilecek karşılama mesajı
               </p>
+            </div>
+            {/* Giriş Noktaları */}
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <EntryPointManager companyId={session.companyId} />
             </div>
 
             {/* WiFi Bilgisi */}
@@ -11110,6 +11951,49 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         </div>
       )}
+      {/* Interactive Tour */}
+      {showTour && (
+        <InteractiveTour
+          tourKey="company_admin"
+          steps={[
+            {
+              target: "visitors.today.tab",
+              title: "Ziyaretçi Listesi",
+              content:
+                "Günlük, haftalık veya aylık ziyaretçileri bu sekmelerden görüntüleyebilirsiniz.",
+            },
+            {
+              target: "blacklist.input",
+              title: "Kara Liste",
+              content: "Kara listeye kayıt ekleyebilir ve yönetebilirsiniz.",
+            },
+            {
+              target: "appointments.create.button",
+              title: "Randevular",
+              content: "Yeni randevu oluşturun ve mevcut randevuları yönetin.",
+            },
+            {
+              target: "profile.company_code.panel",
+              title: "Şirket Profili",
+              content: "Şirket kodunuzu ve ayarlarınızı buradan yönetin.",
+            },
+          ]}
+          onComplete={() => setShowTour(false)}
+        />
+      )}
+      {/* Floating Tour Button */}
+      <button
+        type="button"
+        onClick={() => setShowTour(true)}
+        title="Tur Başlat"
+        className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full text-white font-bold text-xl flex items-center justify-center shadow-lg"
+        style={{
+          background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+          border: "2px solid rgba(14,165,233,0.4)",
+        }}
+      >
+        ?
+      </button>
     </div>
   );
 }

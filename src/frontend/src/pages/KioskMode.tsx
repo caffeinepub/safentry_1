@@ -9,7 +9,9 @@ import {
   addAlertHistory,
   addNotification,
   addToQueue,
+  findActivePassByQrCode,
   findCompanyById,
+  findEntryPointForCategory,
   findPreRegByToken,
   getCustomCategories,
   getDepartments,
@@ -27,6 +29,7 @@ import {
 } from "../store";
 import type { AppScreen, Visitor } from "../types";
 import { generateId, generateVisitorId } from "../utils";
+import { dataUrlToBytes, uploadBytesToBlob } from "../utils/blobUpload";
 import { validateTcId } from "../utils/tcValidation";
 
 const KIOSK_PENDING_KEY = "safentry_kiosk_pending";
@@ -71,6 +74,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   const customFields = company?.customFields ?? [];
 
   const [screen, setScreen] = useState<
+    | "lang-select"
     | "welcome"
     | "form"
     | "waiting"
@@ -78,11 +82,14 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     | "checkout"
     | "checkout-feedback"
     | "checkout-success"
-  >("welcome");
+    | "pass"
+  >("lang-select");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [pinTc, setPinTc] = useState("");
   const [pinCode, setPinCode] = useState("");
   const [pinError, setPinError] = useState("");
+  const [passCode, setPassCode] = useState("");
+  const [passError, setPassError] = useState("");
   const [checkoutTc, setCheckoutTc] = useState("");
   const [checkoutFound, setCheckoutFound] = useState<
     import("../types").Visitor | null
@@ -123,6 +130,9 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
 
   // Camera for photo
   const [showCamera, setShowCamera] = useState(false);
+  const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(
+    null,
+  );
   const camera = useCamera();
 
   const resetToWelcome = useCallback(() => {
@@ -475,6 +485,79 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     );
   }
 
+  // Language selection screen
+  if (screen === "lang-select") {
+    const browserLang = navigator.language?.slice(0, 2).toLowerCase();
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.lang_select_screen"
+      >
+        <button
+          type="button"
+          data-ocid="kiosk.lang_select.back_button"
+          onClick={() => onNavigate("staff-dashboard")}
+          className="absolute top-6 left-6 px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white transition-colors"
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          ← Personel Paneli
+        </button>
+        <div
+          className="max-w-md w-full p-8 rounded-3xl text-center"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1.5px solid rgba(14,165,233,0.25)",
+          }}
+        >
+          <div className="text-5xl mb-6">🌐</div>
+          <h2 className="text-white font-bold text-2xl mb-2">
+            Dil Seçin / Select Language
+          </h2>
+          <p className="text-slate-400 text-sm mb-8">
+            Sprache wählen / Choisir la langue / Seleccionar idioma
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {LANGUAGES.map((lng) => {
+              const isAuto = lng.code === browserLang;
+              return (
+                <button
+                  key={lng.code}
+                  type="button"
+                  data-ocid={`kiosk.lang_select_${lng.code}.button`}
+                  onClick={() => {
+                    setKioskLang(lng.code);
+                    setScreen("welcome");
+                  }}
+                  className="flex flex-col items-center gap-1 p-4 rounded-2xl transition-all hover:scale-105"
+                  style={{
+                    background: isAuto
+                      ? "rgba(14,165,233,0.15)"
+                      : "rgba(255,255,255,0.05)",
+                    border: isAuto
+                      ? "1.5px solid rgba(14,165,233,0.5)"
+                      : "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <span className="text-2xl">{lng.flag ?? "🌐"}</span>
+                  <span className="text-white text-xs font-medium">
+                    {lng.label}
+                  </span>
+                  {isAuto && (
+                    <span className="text-cyan-400 text-xs">✓ Algılandı</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Welcome screen
   if (screen === "welcome") {
     return (
@@ -631,6 +714,23 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                 }}
               >
                 🔑 PIN ile Hızlı Giriş
+              </button>
+              <button
+                type="button"
+                data-ocid="kiosk.pass_login.button"
+                onClick={() => {
+                  setPassCode("");
+                  setPassError("");
+                  setScreen("pass");
+                }}
+                className="w-full py-3 rounded-2xl font-semibold text-sm transition-opacity hover:opacity-90"
+                style={{
+                  background: "rgba(168,85,247,0.15)",
+                  border: "1.5px solid rgba(168,85,247,0.4)",
+                  color: "#c084fc",
+                }}
+              >
+                🎫 Pass ile Giriş
               </button>
               <button
                 type="button"
@@ -939,6 +1039,83 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   }
 
   // Self checkout screen
+  if (screen === "pass") {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+      >
+        <div
+          className="w-full max-w-md p-8 rounded-3xl"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(168,85,247,0.3)",
+          }}
+        >
+          <h2 className="text-white text-2xl font-bold text-center mb-6">
+            🎫 Pass ile Giriş
+          </h2>
+          <p className="text-slate-400 text-sm text-center mb-6">
+            Pass kodunuzu girin (PASS-XXXXXXXX formatında)
+          </p>
+          <input
+            type="text"
+            value={passCode}
+            onChange={(e) => setPassCode(e.target.value.toUpperCase())}
+            placeholder="PASS-XXXXXXXX"
+            className="w-full px-5 py-4 rounded-xl bg-white/10 border border-white/20 text-white font-mono text-lg focus:outline-none mb-4 text-center tracking-widest"
+          />
+          {passError && (
+            <div
+              className="mb-4 px-3 py-2 rounded-xl text-sm"
+              style={{
+                background: "rgba(239,68,68,0.1)",
+                color: "#f87171",
+                border: "1px solid rgba(239,68,68,0.3)",
+              }}
+            >
+              {passError}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setScreen("welcome")}
+              className="flex-1 py-3 rounded-xl text-slate-400"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+              }}
+            >
+              ← Geri
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const pass = findActivePassByQrCode(companyId, passCode.trim());
+                if (!pass) {
+                  setPassError("Geçersiz veya süresi dolmuş pass kodu.");
+                  return;
+                }
+                setForm((f) => ({
+                  ...f,
+                  name: pass.visitorName,
+                  idNumber: pass.visitorTC,
+                }));
+                toast.success(`Hoş geldiniz, ${pass.visitorName}!`);
+                setScreen("form");
+              }}
+              className="flex-1 py-3 rounded-2xl font-semibold text-white"
+              style={{ background: "linear-gradient(135deg,#7c3aed,#6d28d9)" }}
+            >
+              ✓ Doğrula
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (screen === "checkout") {
     return (
       <div
@@ -1325,6 +1502,19 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               className="w-full px-5 py-4 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b] font-mono text-lg"
               style={{ minHeight: "56px" }}
             />
+            {form.idNumber.length >= 6 &&
+              isBlacklisted(companyId, form.idNumber) && (
+                <div
+                  className="mt-2 px-3 py-2 rounded-lg text-sm font-medium"
+                  style={{
+                    background: "rgba(245,158,11,0.1)",
+                    border: "1px solid rgba(245,158,11,0.3)",
+                    color: "#fbbf24",
+                  }}
+                >
+                  ⚠️ Bu kişi kara listede bulunmaktadır!
+                </div>
+              )}
           </div>
           <div>
             <p className="text-slate-300 text-base mb-2 font-medium">
@@ -1358,6 +1548,33 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               ))}
             </select>
           </div>
+          {/* Entry Point Hint */}
+          {form.category &&
+            (() => {
+              const ep = findEntryPointForCategory(companyId, form.category);
+              if (!ep) return null;
+              return (
+                <div
+                  className="sm:col-span-2 p-4 rounded-xl flex items-start gap-3"
+                  style={{
+                    background: "rgba(14,165,233,0.08)",
+                    border: "1px solid rgba(14,165,233,0.3)",
+                  }}
+                >
+                  <span className="text-2xl">📍</span>
+                  <div>
+                    <p className="text-sky-300 font-semibold text-base">
+                      Giriş Noktası: {ep.name}
+                    </p>
+                    {ep.instructions && (
+                      <p className="text-slate-300 text-sm mt-0.5">
+                        {ep.instructions}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           <div className="sm:col-span-2">
             <p className="text-slate-300 text-base mb-2 font-medium">
               {t(lang, "visitReason")}
@@ -1418,6 +1635,22 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
             <p className="text-slate-300 text-base mb-2 font-medium">
               Fotoğraf (İsteğe Bağlı)
             </p>
+            {photoUploadProgress !== null && (
+              <div className="mb-2">
+                <div className="flex items-center gap-2 text-xs text-teal-400 mb-1">
+                  <span>⬆️ Fotoğraf yükleniyor... {photoUploadProgress}%</span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${photoUploadProgress}%`,
+                      background: "linear-gradient(90deg,#0ea5e9,#14b8a6)",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             {form.visitorPhoto ? (
               <div className="flex items-center gap-4">
                 <img
@@ -1464,9 +1697,27 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                     onClick={async () => {
                       const photo = await camera.capturePhoto();
                       if (photo) {
-                        setForm((f) => ({ ...f, visitorPhoto: photo }));
                         setShowCamera(false);
                         camera.stopCamera();
+                        // Upload to blob storage; fall back to base64 if unavailable
+                        setPhotoUploadProgress(0);
+                        try {
+                          const bytes = await dataUrlToBytes(photo);
+                          const url = await uploadBytesToBlob(bytes, (pct) =>
+                            setPhotoUploadProgress(pct),
+                          );
+                          setForm((f) => ({
+                            ...f,
+                            visitorPhoto: url ?? photo,
+                          }));
+                        } catch {
+                          setForm((f) => ({ ...f, visitorPhoto: photo }));
+                          toast.error(
+                            "Fotoğraf yüklenemedi, yerel kaydedildi.",
+                          );
+                        } finally {
+                          setPhotoUploadProgress(null);
+                        }
                       }
                     }}
                     className="flex-1 py-3 rounded-xl font-semibold text-white"
