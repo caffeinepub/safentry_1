@@ -131,6 +131,8 @@ export interface Company {
   biometricCheckEnabled?: string[];
   visitorPolicy?: string;
   visitorPolicyEnabled?: boolean;
+  healthScreeningEnabled?: boolean;
+  healthQuestions?: HealthQuestion[];
 }
 
 export interface Staff {
@@ -324,7 +326,9 @@ export type AppScreen =
   | "super-admin"
   | "reception-desk"
   | "visitor-ticket"
-  | "self-checkin";
+  | "self-checkin"
+  | "contractor-portal"
+  | "welcome-pkg";
 
 export interface ParkingSpace {
   id: string;
@@ -641,4 +645,71 @@ export interface MaintenanceRequest {
   createdBy: string;
   createdAt: number;
   updatedAt?: number;
+}
+
+// ─── Shift Handover ───────────────────────────────────────────────────────────
+export interface ShiftHandover {
+  id: string;
+  companyId: string;
+  createdBy: string;
+  createdByCode: string;
+  createdAt: number;
+  shiftType: "sabah" | "akşam" | "gece";
+  activeVisitorCount: number;
+  pendingApprovalCount: number;
+  incidentCount: number;
+  openIssues: string;
+  notes: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: number;
+  status: "pending" | "acknowledged";
+}
+
+// ─── Health Declaration ───────────────────────────────────────────────────────
+export interface HealthQuestion {
+  id: string;
+  question: string;
+  type: "yesno" | "text";
+  requiredAnswer?: "yes" | "no";
+}
+
+export interface HealthDeclaration {
+  id: string;
+  companyId: string;
+  visitorId: string;
+  visitorName: string;
+  submittedAt: number;
+  answers: { questionId: string; question: string; answer: string }[];
+  passed: boolean;
+}
+
+// ─── Improvement Task ─────────────────────────────────────────────────────────
+export interface ImprovementTask {
+  id: string;
+  companyId: string;
+  assignedToCode: string;
+  assignedToName: string;
+  visitorName: string;
+  visitorId: string;
+  satisfactionScore: number;
+  visitorFeedback?: string;
+  createdAt: number;
+  dueDate: number;
+  status: "open" | "in_progress" | "resolved";
+  resolution?: string;
+  resolvedAt?: number;
+}
+
+// ─── Contractor Document ───────────────────────────────────────────────────────
+export interface ContractorDocument {
+  id: string;
+  companyId: string;
+  contractorName: string;
+  docType: string;
+  fileName: string;
+  fileBase64: string;
+  expiryDate?: string;
+  uploadedAt: number;
+  status: "pending" | "approved" | "rejected";
+  reviewedAt?: number;
 }

@@ -1,0 +1,16 @@
+{
+  "name": "Safentry",
+  "short_name": "Safentry",
+  "description": "Kurumsal Ziyaretçi Yönetim Sistemi",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "display": "standalone",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

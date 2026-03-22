@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getAutoParkingEnabled, setAutoParkingEnabled } from "../store";
 import { generateId } from "../utils";
 
 interface ParkingZone {
@@ -98,6 +99,14 @@ export default function ParkingManager({ companyId }: Props) {
     spotLabel: "",
     visitorName: "",
   });
+  const [autoParking, setAutoParking] = useState(() =>
+    getAutoParkingEnabled(companyId),
+  );
+
+  const toggleAutoParking = (val: boolean) => {
+    setAutoParkingEnabled(companyId, val);
+    setAutoParking(val);
+  };
   const [vehicleTab, setVehicleTab] = useState<"active" | "add">("active");
   const [, setVehicleTick] = useState(0);
 
@@ -151,6 +160,40 @@ export default function ParkingManager({ companyId }: Props) {
 
   return (
     <div className="space-y-6" data-ocid="parking.section">
+      {/* Auto-Assign Toggle */}
+      <div
+        className="p-4 rounded-2xl flex items-center justify-between"
+        style={{
+          background: "rgba(20,184,166,0.06)",
+          border: "1px solid rgba(20,184,166,0.25)",
+        }}
+      >
+        <div>
+          <p className="text-white font-semibold text-sm">
+            ⚡ Otomatik Spot Atama
+          </p>
+          <p className="text-slate-400 text-xs mt-0.5">
+            Yeni ziyaretçi kaydında ilk boş spot otomatik atanır
+          </p>
+        </div>
+        <button
+          type="button"
+          data-ocid="parking.auto_assign.toggle"
+          onClick={() => toggleAutoParking(!autoParking)}
+          className="px-4 py-2 rounded-xl text-sm font-semibold transition-all"
+          style={{
+            background: autoParking
+              ? "rgba(20,184,166,0.2)"
+              : "rgba(255,255,255,0.07)",
+            border: autoParking
+              ? "1px solid rgba(20,184,166,0.5)"
+              : "1px solid rgba(255,255,255,0.15)",
+            color: autoParking ? "#14b8a6" : "#94a3b8",
+          }}
+        >
+          {autoParking ? "✓ Aktif" : "Pasif"}
+        </button>
+      </div>
       {/* Header stats */}
       <div className="grid grid-cols-3 gap-4">
         {[

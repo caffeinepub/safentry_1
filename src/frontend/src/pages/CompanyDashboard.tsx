@@ -25,22 +25,38 @@ import { addAuditLog, getAuditLogs } from "../auditLog";
 import AuditReportTab from "../components/AuditReportTab";
 import BranchManager from "../components/BranchManager";
 import BroadcastModal from "../components/BroadcastModal";
+import BuildingMapTab from "../components/BuildingMapTab";
+import CampaignTab from "../components/CampaignTab";
 import CompetencyTab from "../components/CompetencyTab";
+import ConfirmDialog from "../components/ConfirmDialog";
 import ConfirmModal from "../components/ConfirmModal";
+import ContractorHoursTab from "../components/ContractorHoursTab";
+import ContractorPortalTab from "../components/ContractorPortalTab";
+import ConversionAnalysisTab from "../components/ConversionAnalysisTab";
 import CorporateCrmTab from "../components/CorporateCrmTab";
 import CsvImportModal from "../components/CsvImportModal";
 import DataExportTab from "../components/DataExportTab";
+import DemographicTab from "../components/DemographicTab";
+import DocumentCalendarTab from "../components/DocumentCalendarTab";
 import DocumentTemplateTab from "../components/DocumentTemplateTab";
 import DrillTab from "../components/DrillTab";
 import EmptyState from "../components/EmptyState";
 import EntryPointManager from "../components/EntryPointManager";
 import EscortTab from "../components/EscortTab";
+import EvacCoordTab from "../components/EvacCoordTab";
 import GlobalSearch from "../components/GlobalSearch";
+import {
+  HealthDeclarationsTab,
+  HealthQuestionsManager,
+} from "../components/HealthScreeningTab";
 import HelpCenter from "../components/HelpCenter";
+import { CompanyImprovementTasksTab } from "../components/ImprovementTasksTab";
 import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
+import InvestigationTab from "../components/InvestigationTab";
 import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
 import LostFoundTab from "../components/LostFoundTab";
+import LoyaltyAnalysisTab from "../components/LoyaltyAnalysisTab";
 import NotificationCenter from "../components/NotificationCenter";
 import NotificationRulesTab from "../components/NotificationRulesTab";
 import OnboardingWizard, {
@@ -50,26 +66,36 @@ import ParkingManager from "../components/ParkingManager";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistHistoryPanel } from "../components/SecurityChecklist";
 import SegmentationAnalysis from "../components/SegmentationAnalysis";
+import ShiftAnalysisTab from "../components/ShiftAnalysisTab";
 import ShiftCalendar from "../components/ShiftCalendar";
+import { HandoverHistoryList } from "../components/ShiftHandoverModal";
 import StaffPerformanceTab from "../components/StaffPerformanceTab";
 import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
+import VehicleLogTab from "../components/VehicleLogTab";
 import VisitTimeline from "../components/VisitTimeline";
 import VisitorComments from "../components/VisitorComments";
 import VisitorCountdown from "../components/VisitorCountdown";
 import VisitorHeatmap from "../components/VisitorHeatmap";
 import VisitorPassTab from "../components/VisitorPassTab";
 import VisitorProfileModal from "../components/VisitorProfileModal";
+import WebhookIntegrationsTab from "../components/WebhookIntegrationsTab";
 import WorkingCalendar from "../components/WorkingCalendar";
 import ZoneControlTab from "../components/ZoneControlTab";
 import { useLiveAlerts } from "../hooks/useLiveAlerts";
 import { getLang, t } from "../i18n";
+import {
+  getHealthDeclarations,
+  getImprovementTasks,
+  getShiftHandovers,
+} from "../store";
 
 import {
   addAlertHistory,
   addGatePassLog,
   addNotification,
   addToBlacklist,
+  autoAssignParkingSpot,
   clearSession,
   deleteApprovedVisitor,
   deleteDepartment,
@@ -90,6 +116,7 @@ import {
   getAppointments,
   getApprovalChainConfig,
   getApprovedVisitors,
+  getAutoParkingEnabled,
   getBadgeReprintLogs,
   getBelongings,
   getBlacklist,
@@ -103,6 +130,7 @@ import {
   getDeptTodayVisitorCount,
   getDocumentTemplates,
   getEscorts,
+  getFrequentVisitors,
   getGatePassLogs,
   getHostReviews,
   getIncidents,
@@ -125,6 +153,7 @@ import {
   getVisitorFeedback,
   getVisitorPins,
   getVisitors,
+  isFrequentVisitor,
   refreshSession,
   removeFromBlacklist,
   removeStaff as removeStaffStore,
@@ -291,7 +320,22 @@ type Tab =
   | "visitorpasses"
   | "sla"
   | "maintenance"
-  | "selfcheckinqr";
+  | "selfcheckinqr"
+  | "yuklenici"
+  | "entegrasyonlar"
+  | "kampanyalar"
+  | "vehiclelog"
+  | "investigations"
+  | "buildingmap"
+  | "handover"
+  | "healthdeclarations"
+  | "imptasks"
+  | "contractorportal"
+  | "conversionanalysis"
+  | "demografik"
+  | "belgetakvim"
+  | "vardiyaanaliz"
+  | "evacuationcoord";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -1375,6 +1419,33 @@ function HeadcountTab({ companyId }: { companyId: string }) {
   );
 }
 
+interface FeedbackReply {
+  feedbackId: string;
+  reply: string;
+  status: "waiting" | "replied" | "closed";
+  repliedAt: number;
+  repliedBy: string;
+}
+
+function getFeedbackReplies(companyId: string): FeedbackReply[] {
+  try {
+    const raw = localStorage.getItem(`safentry_feedback_replies_${companyId}`);
+    if (raw) return JSON.parse(raw);
+  } catch (_) {}
+  return [];
+}
+
+function saveFeedbackReply(companyId: string, reply: FeedbackReply) {
+  const all = getFeedbackReplies(companyId);
+  const idx = all.findIndex((r) => r.feedbackId === reply.feedbackId);
+  if (idx >= 0) all[idx] = reply;
+  else all.push(reply);
+  localStorage.setItem(
+    `safentry_feedback_replies_${companyId}`,
+    JSON.stringify(all),
+  );
+}
+
 function FeedbackTab({
   companyId,
   company,
@@ -1384,10 +1455,19 @@ function FeedbackTab({
   );
   const [filterCat, setFilterCat] = React.useState<string>("all");
   const [filterStatus, setFilterStatus] = React.useState<string>("all");
+  const [replyFilter, setReplyFilter] = React.useState<string>("all");
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const [adminNoteInput, setAdminNoteInput] = React.useState<
     Record<string, string>
   >({});
+  const [replyInputs, setReplyInputs] = React.useState<Record<string, string>>(
+    {},
+  );
+  const [replies, setReplies] = React.useState<FeedbackReply[]>(() =>
+    getFeedbackReplies(companyId),
+  );
+
+  const reloadReplies = () => setReplies(getFeedbackReplies(companyId));
 
   const reload = () => setFeedbacks(getVisitorFeedback(companyId));
 
@@ -1396,6 +1476,11 @@ function FeedbackTab({
   const filtered = feedbacks.filter((f) => {
     if (filterCat !== "all" && f.category !== filterCat) return false;
     if (filterStatus !== "all" && f.status !== filterStatus) return false;
+    if (replyFilter !== "all") {
+      const r = replies.find((r) => r.feedbackId === f.id);
+      const rSt = r?.status ?? "waiting";
+      if (rSt !== replyFilter) return false;
+    }
     return true;
   });
 
@@ -1492,6 +1577,40 @@ function FeedbackTab({
             {st === "all" ? "Tüm Durumlar" : statusLabel[st]}
           </button>
         ))}
+        <div className="w-px bg-white/10 mx-1" />
+        {(["all", "waiting", "replied", "closed"] as const).map((rf) => {
+          const rLabels: Record<string, string> = {
+            all: "Tüm Yanıtlar",
+            waiting: "⏳ Bekliyor",
+            replied: "✅ Yanıtlandı",
+            closed: "🔒 Kapatıldı",
+          };
+          const rColors: Record<string, string> = {
+            all: "#94a3b8",
+            waiting: "#f59e0b",
+            replied: "#22c55e",
+            closed: "#64748b",
+          };
+          return (
+            <button
+              key={rf}
+              type="button"
+              data-ocid={`feedback.reply_filter_${rf}.button`}
+              onClick={() => setReplyFilter(rf)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{
+                background:
+                  replyFilter === rf
+                    ? `${rColors[rf]}22`
+                    : "rgba(255,255,255,0.05)",
+                border: `1px solid ${replyFilter === rf ? `${rColors[rf]}55` : "rgba(255,255,255,0.1)"}`,
+                color: replyFilter === rf ? rColors[rf] : "#94a3b8",
+              }}
+            >
+              {rLabels[rf]}
+            </button>
+          );
+        })}
       </div>
 
       {filtered.length === 0 ? (
@@ -1646,6 +1765,139 @@ function FeedbackTab({
                         💾 Kaydet
                       </button>
                     </div>
+
+                    {/* Reply section */}
+                    {(() => {
+                      const existingReply = replies.find(
+                        (r) => r.feedbackId === fb.id,
+                      );
+                      const replyStatus = existingReply?.status ?? "waiting";
+                      const replyStatusConfig: Record<
+                        string,
+                        { label: string; color: string }
+                      > = {
+                        waiting: { label: "⏳ Bekliyor", color: "#f59e0b" },
+                        replied: { label: "✅ Yanıtlandı", color: "#22c55e" },
+                        closed: { label: "🔒 Kapatıldı", color: "#64748b" },
+                      };
+                      return (
+                        <div
+                          className="mt-2 pt-4 space-y-3"
+                          style={{
+                            borderTop: "1px solid rgba(255,255,255,0.06)",
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-400 text-xs font-semibold">
+                              💬 Yanıt Sistemi
+                            </span>
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-bold"
+                              style={{
+                                background: `${replyStatusConfig[replyStatus].color}22`,
+                                color: replyStatusConfig[replyStatus].color,
+                                border: `1px solid ${replyStatusConfig[replyStatus].color}44`,
+                              }}
+                            >
+                              {replyStatusConfig[replyStatus].label}
+                            </span>
+                          </div>
+                          {existingReply?.reply && (
+                            <div
+                              className="p-3 rounded-xl text-sm text-slate-300"
+                              style={{
+                                background: "rgba(34,197,94,0.06)",
+                                border: "1px solid rgba(34,197,94,0.2)",
+                              }}
+                            >
+                              <div className="text-xs text-slate-500 mb-1">
+                                {new Date(
+                                  existingReply.repliedAt,
+                                ).toLocaleString("tr-TR")}
+                              </div>
+                              {existingReply.reply}
+                            </div>
+                          )}
+                          <textarea
+                            className="w-full px-3 py-2 rounded-xl text-sm text-white outline-none resize-none"
+                            style={{
+                              background: "rgba(255,255,255,0.04)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              minHeight: "56px",
+                            }}
+                            placeholder="Yanıtınızı yazın..."
+                            value={
+                              replyInputs[fb.id] ?? existingReply?.reply ?? ""
+                            }
+                            onChange={(e) =>
+                              setReplyInputs((prev) => ({
+                                ...prev,
+                                [fb.id]: e.target.value,
+                              }))
+                            }
+                          />
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              data-ocid="feedback.reply.button"
+                              onClick={() => {
+                                const replyText = replyInputs[fb.id] ?? "";
+                                if (!replyText.trim()) {
+                                  toast.error("Yanıt metni boş olamaz");
+                                  return;
+                                }
+                                const r: FeedbackReply = {
+                                  feedbackId: fb.id,
+                                  reply: replyText,
+                                  status: "replied",
+                                  repliedAt: Date.now(),
+                                  repliedBy: "Admin",
+                                };
+                                saveFeedbackReply(companyId, r);
+                                reloadReplies();
+                                toast.success("Yanıt kaydedildi");
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                              style={{
+                                background: "rgba(34,197,94,0.25)",
+                                border: "1px solid rgba(34,197,94,0.4)",
+                              }}
+                            >
+                              ✉️ Yanıtla
+                            </button>
+                            <button
+                              type="button"
+                              data-ocid="feedback.close.button"
+                              onClick={() => {
+                                const existing = replies.find(
+                                  (r) => r.feedbackId === fb.id,
+                                );
+                                const r: FeedbackReply = {
+                                  feedbackId: fb.id,
+                                  reply:
+                                    existing?.reply ?? replyInputs[fb.id] ?? "",
+                                  status: "closed",
+                                  repliedAt: existing?.repliedAt ?? Date.now(),
+                                  repliedBy: existing?.repliedBy ?? "Admin",
+                                };
+                                saveFeedbackReply(companyId, r);
+                                reloadReplies();
+                                toast.success("Kapatıldı");
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-300"
+                              style={{
+                                background: "rgba(100,116,139,0.2)",
+                                border: "1px solid rgba(100,116,139,0.35)",
+                              }}
+                            >
+                              🔒 Kapat
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </button>
@@ -2461,6 +2713,15 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<() => void>(() => {});
   const [_confirmMsg, setConfirmMsg] = useState("");
+  const [dangerConfirmOpen, setDangerConfirmOpen] = useState(false);
+  const [dangerConfirmTitle, setDangerConfirmTitle] = useState("");
+  const [dangerConfirmDesc, setDangerConfirmDesc] = useState("");
+  const [dangerConfirmAction, setDangerConfirmAction] = useState<() => void>(
+    () => {},
+  );
+  const [dangerConfirmVariant, setDangerConfirmVariant] = useState<
+    "danger" | "warning"
+  >("danger");
   const [newStaffCode, setNewStaffCode] = useState("");
   const [blIdNumber, setBlIdNumber] = useState("");
   const [blReason, setBlReason] = useState("");
@@ -2639,6 +2900,38 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     null,
   );
   const [showMeetingRoomForm, setShowMeetingRoomForm] = useState(false);
+  const [showMassCheckoutModal, setShowMassCheckoutModal] = useState(false);
+  const [massCheckoutReason, setMassCheckoutReason] = useState<
+    "mesai" | "acil"
+  >("mesai");
+  const [massCheckoutNotes, setMassCheckoutNotes] = useState("");
+
+  const handleMassCheckout = () => {
+    const now = Date.now();
+    const active = visitors.filter((v) => v.status === "active");
+    for (const v of active) {
+      saveVisitor({ ...v, status: "departed", departureTime: now });
+    }
+    const reasonLabel =
+      massCheckoutReason === "mesai" ? "Mesai Sonu" : "Acil Tahliye";
+    const logKey = `safentry_mass_checkouts_${session.companyId}`;
+    const existing = JSON.parse(localStorage.getItem(logKey) || "[]");
+    existing.push({
+      id: `mc_${now}`,
+      timestamp: now,
+      reason: reasonLabel,
+      notes: massCheckoutNotes,
+      visitorCount: active.length,
+      performedBy: session.staffId,
+    });
+    localStorage.setItem(logKey, JSON.stringify(existing));
+    setShowMassCheckoutModal(false);
+    setMassCheckoutNotes("");
+    toast.success(
+      `🚪 ${active.length} ziyaretçi toplu çıkış yapıldı — ${reasonLabel}`,
+    );
+    reload();
+  };
 
   const reload = useCallback(() => {
     setVisitors(getVisitors(session.companyId));
@@ -3298,6 +3591,27 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "sla", label: "⏱️ SLA Kuralları" },
     { key: "maintenance", label: "🔧 Bakım Talepleri" },
     { key: "selfcheckinqr", label: "📱 Self Check-in QR" },
+    { key: "yuklenici", label: "🏗️ Yüklenici Saatleri" },
+    { key: "entegrasyonlar", label: "🔗 Entegrasyonlar" },
+    { key: "kampanyalar", label: "📣 Kampanyalar" },
+    { key: "vehiclelog", label: "🚗 Araç Logu" },
+    { key: "investigations", label: "🔍 Soruşturmalar" },
+    { key: "buildingmap", label: "🗺️ Bina Haritası" },
+    {
+      key: "handover",
+      label: `🔄 Devir-Teslim (${getShiftHandovers(session.companyId).filter((h) => h.status === "pending").length > 0 ? `${getShiftHandovers(session.companyId).filter((h) => h.status === "pending").length} bekliyor` : ""})`,
+    },
+    { key: "healthdeclarations", label: "🏥 Sağlık Beyanları" },
+    {
+      key: "imptasks",
+      label: `📋 İyileştirme Görevleri (${getImprovementTasks(session.companyId).filter((t) => t.status !== "resolved").length})`,
+    },
+    { key: "contractorportal", label: "📋 Müteahhit Belge Portalı" },
+    { key: "conversionanalysis", label: "📊 Dönüşüm Analizi" },
+    { key: "demografik", label: "📊 Demografik" },
+    { key: "belgetakvim", label: "📅 Belge Takvimi" },
+    { key: "vardiyaanaliz", label: "🕐 Vardiya Analizi" },
+    { key: "evacuationcoord", label: "🏢 Tahliye Koordinasyonu" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -3537,6 +3851,17 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         onConfirm={confirmAction}
         onCancel={() => setConfirmOpen(false)}
       />
+      <ConfirmDialog
+        open={dangerConfirmOpen}
+        title={dangerConfirmTitle}
+        description={dangerConfirmDesc}
+        variant={dangerConfirmVariant}
+        onConfirm={() => {
+          dangerConfirmAction();
+          setDangerConfirmOpen(false);
+        }}
+        onCancel={() => setDangerConfirmOpen(false)}
+      />
 
       {/* Lockdown Confirm Dialog */}
       {lockdownConfirm && (
@@ -3667,6 +3992,35 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                                 style={{ background: "rgba(14,165,233,0.3)" }}
                               >
                                 {v.category}
+                              </span>
+                            )}
+                            {isFrequentVisitor(
+                              session.companyId,
+                              v.idNumber,
+                            ) && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs font-semibold"
+                                style={{
+                                  background: "rgba(245,158,11,0.2)",
+                                  color: "#f59e0b",
+                                  border: "1px solid rgba(245,158,11,0.35)",
+                                }}
+                                title="Sık Ziyaretçi"
+                              >
+                                ⭐ Sık Ziyaretçi
+                              </span>
+                            )}
+                            {v.parkingSpace && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs"
+                                style={{
+                                  background: "rgba(34,197,94,0.15)",
+                                  color: "#4ade80",
+                                  border: "1px solid rgba(34,197,94,0.25)",
+                                }}
+                                title="Otopark"
+                              >
+                                🅿️ {v.parkingSpace}
                               </span>
                             )}
                           </div>
@@ -4242,6 +4596,25 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                     {maxCap} kişi.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Mass Checkout Button */}
+            {activeNow.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  data-ocid="visitors.mass_checkout.button"
+                  onClick={() => setShowMassCheckoutModal(true)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all"
+                  style={{
+                    background: "rgba(239,68,68,0.12)",
+                    border: "1px solid rgba(239,68,68,0.35)",
+                    color: "#f87171",
+                  }}
+                >
+                  🚪 Toplu Çıkış ({activeNow.length})
+                </button>
               </div>
             )}
 
@@ -4981,7 +5354,16 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               <button
                 type="button"
                 data-ocid="blacklist.add.button"
-                onClick={doAddBl}
+                onClick={() => {
+                  if (!blIdNumber) return;
+                  setDangerConfirmTitle("Kara Listeye Ekle");
+                  setDangerConfirmDesc(
+                    "Bu kişiyi kara listeye eklemek istediğinizden emin misiniz?",
+                  );
+                  setDangerConfirmVariant("danger");
+                  setDangerConfirmAction(() => doAddBl);
+                  setDangerConfirmOpen(true);
+                }}
                 className="px-5 py-2 rounded-xl text-white text-sm font-medium"
                 style={{
                   background: "linear-gradient(135deg,#ef4444,#dc2626)",
@@ -6537,6 +6919,78 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             );
           })()}
+
+        {/* Frequent Visitors Stats - part of statistics */}
+        {tab === "statistics" &&
+          (() => {
+            const fvMap = getFrequentVisitors(session.companyId);
+            const fvEntries = Object.entries(fvMap).sort(
+              (a, b) => b[1].count - a[1].count,
+            );
+            return (
+              <div
+                className="mt-6 p-5 rounded-2xl"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <h3 className="text-white font-bold text-base mb-4">
+                  ⭐ Sık Ziyaretçiler ({fvEntries.length})
+                </h3>
+                {fvEntries.length === 0 ? (
+                  <p className="text-slate-400 text-sm">
+                    Henüz sık ziyaretçi kaydı yok. 5+ ziyaret yapan kişiler
+                    burada görünür.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {fvEntries.slice(0, 10).map(([tc, entry]) => (
+                      <div
+                        key={tc}
+                        className="flex items-center justify-between px-4 py-2.5 rounded-xl"
+                        style={{
+                          background: "rgba(245,158,11,0.08)",
+                          border: "1px solid rgba(245,158,11,0.15)",
+                        }}
+                      >
+                        <div>
+                          <span className="text-white font-medium text-sm">
+                            {entry.name}
+                          </span>
+                          <span className="text-slate-500 text-xs ml-2 font-mono">
+                            {tc}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-slate-400">
+                            İlk ziyaret:{" "}
+                            {new Date(entry.since).toLocaleDateString("tr-TR")}
+                          </span>
+                          <span
+                            className="px-2 py-1 rounded-full text-xs font-bold"
+                            style={{
+                              background: "rgba(245,158,11,0.2)",
+                              color: "#f59e0b",
+                            }}
+                          >
+                            {entry.count} ziyaret
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+        {/* LOYALTY ANALYSIS - inline stats section */}
+        {tab === "statistics" && (
+          <div className="mt-6">
+            <LoyaltyAnalysisTab visitors={visitors} />
+          </div>
+        )}
 
         {/* BLACKLIST REPORT TAB */}
         {tab === "blacklistreport" &&
@@ -9590,6 +10044,99 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           <CompanySelfCheckinQrTab companyId={session.companyId} />
         )}
 
+        {tab === "yuklenici" && (
+          <ContractorHoursTab companyId={session.companyId} />
+        )}
+
+        {tab === "entegrasyonlar" && (
+          <WebhookIntegrationsTab companyId={session.companyId} />
+        )}
+
+        {tab === "kampanyalar" && <CampaignTab companyId={session.companyId} />}
+
+        {tab === "vehiclelog" && (
+          <VehicleLogTab
+            companyId={session.companyId}
+            currentUser={session.staffId}
+          />
+        )}
+
+        {tab === "investigations" && (
+          <InvestigationTab
+            companyId={session.companyId}
+            currentUser={session.staffId}
+          />
+        )}
+
+        {tab === "handover" && (
+          <div className="max-w-2xl space-y-5">
+            <h2 className="text-white font-semibold text-lg">
+              🔄 Vardiya Devir-Teslim Raporları
+            </h2>
+            <HandoverHistoryList companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "healthdeclarations" && (
+          <div className="max-w-2xl">
+            <HealthDeclarationsTab companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "imptasks" && (
+          <div className="max-w-2xl">
+            <CompanyImprovementTasksTab companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "contractorportal" && (
+          <div className="max-w-2xl">
+            <ContractorPortalTab companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "conversionanalysis" && (
+          <div className="max-w-3xl">
+            <ConversionAnalysisTab companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "demografik" && (
+          <div className="max-w-4xl">
+            <DemographicTab visitors={visitors} />
+          </div>
+        )}
+
+        {tab === "belgetakvim" && (
+          <div className="max-w-3xl">
+            <DocumentCalendarTab companyId={session.companyId} />
+          </div>
+        )}
+
+        {tab === "vardiyaanaliz" && (
+          <div className="max-w-4xl">
+            <ShiftAnalysisTab
+              companyId={session.companyId}
+              visitors={visitors}
+            />
+          </div>
+        )}
+
+        {tab === "evacuationcoord" && (
+          <div className="max-w-3xl">
+            <EvacCoordTab companyId={session.companyId} staffList={staffList} />
+          </div>
+        )}
+
+        {tab === "buildingmap" && (
+          <BuildingMapTab
+            companyId={session.companyId}
+            activeVisitorMeetingRooms={activeNow
+              .map((v: any) => v.meetingRoom)
+              .filter(Boolean)}
+          />
+        )}
+
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -10178,6 +10725,21 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 </div>
               )}
             </div>
+
+            {/* Health Screening Questions */}
+            <HealthQuestionsManager
+              questions={(profileForm as any).healthQuestions ?? []}
+              enabled={(profileForm as any).healthScreeningEnabled ?? false}
+              onToggle={() =>
+                setProfileForm((f: any) => ({
+                  ...f,
+                  healthScreeningEnabled: !f.healthScreeningEnabled,
+                }))
+              }
+              onChange={(qs) =>
+                setProfileForm((f: any) => ({ ...f, healthQuestions: qs }))
+              }
+            />
 
             {/* Category-Based NDA */}
             <div
@@ -11981,6 +12543,116 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           onComplete={() => setShowTour(false)}
         />
       )}
+      {/* Mass Checkout Modal */}
+      {showMassCheckoutModal && (
+        <div
+          data-ocid="visitors.mass_checkout.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{
+            background: "rgba(0,0,0,0.85)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl space-y-5"
+            style={{
+              background: "#0f1729",
+              border: "1.5px solid rgba(239,68,68,0.3)",
+            }}
+          >
+            <div>
+              <h3 className="text-white font-bold text-lg">🚪 Toplu Çıkış</h3>
+              <p className="text-slate-400 text-sm mt-1">
+                {activeNow.length} aktif ziyaretçi çıkış yapacak.
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-300 text-sm mb-2">Çıkış Nedeni</p>
+              <div className="flex gap-3">
+                {(
+                  [
+                    ["mesai", "Mesai Sonu"],
+                    ["acil", "Acil Tahliye"],
+                  ] as const
+                ).map(([v, l]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    data-ocid={`visitors.mass_checkout.${v}.toggle`}
+                    onClick={() => setMassCheckoutReason(v)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                    style={
+                      massCheckoutReason === v
+                        ? {
+                            background:
+                              v === "mesai"
+                                ? "rgba(14,165,233,0.25)"
+                                : "rgba(239,68,68,0.25)",
+                            border: `1px solid ${v === "mesai" ? "rgba(14,165,233,0.5)" : "rgba(239,68,68,0.5)"}`,
+                            color: "#fff",
+                          }
+                        : {
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            color: "#94a3b8",
+                          }
+                    }
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-slate-300 text-sm mb-1">Not (İsteğe Bağlı)</p>
+              <input
+                data-ocid="visitors.mass_checkout.notes.input"
+                value={massCheckoutNotes}
+                onChange={(e) => setMassCheckoutNotes(e.target.value)}
+                placeholder="Ek not ekleyin..."
+                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#0ea5e9]"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="visitors.mass_checkout.confirm_button"
+                onClick={() => {
+                  setDangerConfirmTitle("Toplu Çıkış");
+                  setDangerConfirmDesc(
+                    `Tüm aktif ziyaretçileri (${activeNow.length} kişi) çıkış yaptırmak istediğinizden emin misiniz?`,
+                  );
+                  setDangerConfirmVariant("danger");
+                  setDangerConfirmAction(() => () => {
+                    handleMassCheckout();
+                    setShowMassCheckoutModal(false);
+                  });
+                  setDangerConfirmOpen(true);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+                style={{
+                  background: "linear-gradient(135deg,#ef4444,#dc2626)",
+                }}
+              >
+                Toplu Çıkış Yap
+              </button>
+              <button
+                type="button"
+                data-ocid="visitors.mass_checkout.cancel_button"
+                onClick={() => setShowMassCheckoutModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Floating Tour Button */}
       <button
         type="button"

@@ -11,6 +11,28 @@ interface Props {
 export default function Welcome({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const [showPlatformModal, setShowPlatformModal] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showPwaPrompt, setShowPwaPrompt] = useState(false);
+
+  // PWA install prompt
+  if (typeof window !== "undefined") {
+    window.addEventListener(
+      "beforeinstallprompt",
+      (e: any) => {
+        e.preventDefault();
+        setDeferredPrompt(e);
+        setShowPwaPrompt(true);
+      },
+      { once: true },
+    );
+  }
+
+  const installPwa = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      setShowPwaPrompt(false);
+    }
+  };
   const [platformCode, setPlatformCode] = useState("");
   const [platformError, setPlatformError] = useState(false);
 
@@ -194,6 +216,45 @@ export default function Welcome({ onNavigate, onRefresh }: Props) {
               }}
             >
               Giriş
+            </button>
+          </div>
+        </div>
+      )}
+      {/* PWA Install Prompt */}
+      {showPwaPrompt && (
+        <div
+          className="fixed bottom-4 left-4 right-4 max-w-sm mx-auto z-50 p-4 rounded-2xl flex items-center justify-between gap-3 shadow-2xl"
+          style={{
+            background: "rgba(15,23,42,0.98)",
+            border: "1px solid rgba(20,184,166,0.4)",
+            backdropFilter: "blur(20px)",
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">📱</span>
+            <div>
+              <p className="text-white text-sm font-semibold">
+                Safentry'yi ana ekrana ekleyin
+              </p>
+              <p className="text-slate-400 text-xs">Uygulama gibi kullanın</p>
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={installPwa}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white"
+              style={{ background: "linear-gradient(135deg,#14b8a6,#0d9488)" }}
+            >
+              Ekle
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPwaPrompt(false)}
+              className="px-2 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white"
+              style={{ background: "rgba(255,255,255,0.07)" }}
+            >
+              ✕
             </button>
           </div>
         </div>

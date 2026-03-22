@@ -19,15 +19,21 @@ import CsvImportModal from "../components/CsvImportModal";
 import DailyBriefing from "../components/DailyBriefing";
 import EmptyState from "../components/EmptyState";
 import GlobalSearch from "../components/GlobalSearch";
+import { HealthScreeningStep } from "../components/HealthScreeningTab";
 import HelpCenter from "../components/HelpCenter";
+import { StaffImprovementTasksTab } from "../components/ImprovementTasksTab";
 import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
 import LangSwitcher from "../components/LangSwitcher";
 import LeaveManagementTab from "../components/LeaveManagementTab";
 import NotificationCenter from "../components/NotificationCenter";
+import OcrScanModal from "../components/OcrScanModal";
 import PatrolTab from "../components/PatrolTab";
 import QRCode from "../components/QRCode";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistModal } from "../components/SecurityChecklist";
+import ShiftHandoverModal, {
+  HandoverHistoryList,
+} from "../components/ShiftHandoverModal";
 import SignatureCanvas from "../components/SignatureCanvas";
 import VisitorCountdown from "../components/VisitorCountdown";
 import { getZones } from "../components/ZoneControlTab";
@@ -98,6 +104,7 @@ import {
   saveBelonging,
   saveCompany,
   saveHostReview,
+  saveImprovementTask,
   saveIncident,
   saveInvitation,
   saveMaintenanceRequest,
@@ -209,7 +216,9 @@ type Tab =
   | "messages"
   | "incidents"
   | "patrol"
-  | "maintenance";
+  | "maintenance"
+  | "handover"
+  | "imptasks";
 
 const EMPTY_FORM = {
   name: "",
@@ -620,6 +629,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     useState<ApprovedVisitor | null>(null);
 
   // Trust score
+  const [showOcrModal, setShowOcrModal] = useState(false);
   const [visitorTrustScore, setVisitorTrustScore] = useState<number | null>(
     null,
   );
@@ -836,6 +846,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Shift report
   const [shiftReportOpen, setShiftReportOpen] = useState(false);
+  const [handoverModalOpen, setHandoverModalOpen] = useState(false);
+  const [healthPassed, setHealthPassed] = useState<boolean | null>(null);
 
   // Re-invite modal
   const [reinviteModalVisitor, setReinviteModalVisitor] =
@@ -2107,6 +2119,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ],
     ["patrol" as Tab, "🗺️ Devriye Logu"] as [Tab, string],
     ["maintenance" as Tab, "🔧 Bakım Talepleri"] as [Tab, string],
+    ["handover" as Tab, "🔄 Devir-Teslim"] as [Tab, string],
+    ["imptasks" as Tab, "📋 İyileştirme Görevlerim"] as [Tab, string],
     ["profile", "Hesabım"],
     (() => {
       const myPending = tasks.filter(
@@ -2376,6 +2390,14 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
         {/* Exit Rating Modal */}
         {/* Shift Report Modal */}
+        {handoverModalOpen && (
+          <ShiftHandoverModal
+            companyId={session.companyId}
+            staffName={staff?.name ?? ""}
+            staffCode={staff?.staffId ?? session.staffId ?? ""}
+            onClose={() => setHandoverModalOpen(false)}
+          />
+        )}
         {shiftReportOpen &&
           (() => {
             const currentShift = getShiftType(new Date().toISOString());
@@ -2877,6 +2899,30 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                         exitComment:
                           postExitFeedbackComment.trim() || undefined,
                       });
+                      // Auto-create improvement task for low scores
+                      if (postExitFeedbackRating <= 3) {
+                        const hostStaff =
+                          staffList.find(
+                            (s) =>
+                              s.staffId === postExitFeedbackVisitor.hostStaffId,
+                          ) ?? staff;
+                        if (hostStaff) {
+                          saveImprovementTask({
+                            id: generateId(),
+                            companyId: session.companyId,
+                            assignedToCode: hostStaff.staffId,
+                            assignedToName: hostStaff.name,
+                            visitorName: postExitFeedbackVisitor.name,
+                            visitorId: postExitFeedbackVisitor.visitorId,
+                            satisfactionScore: postExitFeedbackRating,
+                            visitorFeedback:
+                              postExitFeedbackComment.trim() || undefined,
+                            createdAt: Date.now(),
+                            dueDate: Date.now() + 3 * 24 * 60 * 60 * 1000,
+                            status: "open",
+                          });
+                        }
+                      }
                       toast.success("Değerlendirme kaydedildi");
                     }
                     setPostExitFeedbackVisitor(null);
@@ -4059,6 +4105,20 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </button>
             <button
               type="button"
+              data-ocid="staff_dashboard.handover.open_modal_button"
+              onClick={() => setHandoverModalOpen(true)}
+              title="Vardiya Devir-Teslim Raporu"
+              className="px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors"
+              style={{
+                color: "#0ea5e9",
+                borderColor: "rgba(14,165,233,0.4)",
+                background: "rgba(14,165,233,0.08)",
+              }}
+            >
+              🔄 Devir
+            </button>
+            <button
+              type="button"
               data-ocid="staff_dashboard.shift_note.button"
               onClick={() => setShiftNoteModalOpen(true)}
               title="Vardiya Notu Bırak"
@@ -4645,6 +4705,22 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   }}
                 >
                   📋 CSV ile Toplu Ekle
+                </button>
+              </div>
+
+              {/* OCR scan button */}
+              <div className="mb-3">
+                <button
+                  type="button"
+                  data-ocid="register.ocr_scan.button"
+                  onClick={() => setShowOcrModal(true)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-2 transition-all"
+                  style={{
+                    background: "rgba(14,165,233,0.12)",
+                    border: "1px solid rgba(14,165,233,0.3)",
+                  }}
+                >
+                  📷 Kimlik Tara
                 </button>
               </div>
 
@@ -5924,11 +6000,53 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   />
                 </div>
               </div>
+              {/* Health Screening Step */}
+              {(company?.healthScreeningEnabled as boolean) &&
+                ((company?.healthQuestions as any[]) ?? []).length > 0 &&
+                healthPassed === null && (
+                  <div className="mt-4">
+                    <HealthScreeningStep
+                      questions={(company?.healthQuestions as any[]) ?? []}
+                      companyId={session.companyId}
+                      visitorId={form.idNumber || "pending"}
+                      visitorName={form.name}
+                      onPassed={() => setHealthPassed(true)}
+                      onBlocked={() => setHealthPassed(false)}
+                    />
+                  </div>
+                )}
+              {(company?.healthScreeningEnabled as boolean) &&
+                ((company?.healthQuestions as any[]) ?? []).length > 0 &&
+                healthPassed === false && (
+                  <div
+                    className="mt-4 p-4 rounded-2xl text-center"
+                    style={{
+                      background: "rgba(239,68,68,0.08)",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                    }}
+                  >
+                    <p className="text-red-400 font-semibold text-sm">
+                      🚫 Sağlık taraması geçilemedi — kayıt engellenmiştir.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setHealthPassed(null)}
+                      className="mt-2 text-xs text-slate-400 hover:text-white"
+                    >
+                      Tekrar dene
+                    </button>
+                  </div>
+                )}
               <button
                 type="button"
                 data-ocid="register.submit_button"
                 onClick={submitVisitor}
-                className="mt-6 w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity hover:opacity-90"
+                disabled={
+                  (company?.healthScreeningEnabled as boolean) &&
+                  ((company?.healthQuestions as any[]) ?? []).length > 0 &&
+                  healthPassed !== true
+                }
+                className="mt-6 w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity hover:opacity-90 disabled:opacity-40"
                 style={{
                   background: "linear-gradient(135deg,#f59e0b,#d97706)",
                 }}
@@ -6519,6 +6637,29 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               }}
                             >
                               🎫
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url = `${window.location.origin}/welcome-pkg/${v.visitorId}`;
+                                navigator.clipboard
+                                  .writeText(url)
+                                  .then(() =>
+                                    toast.success(
+                                      "Karşılama paketi linki kopyalandı",
+                                    ),
+                                  )
+                                  .catch(() => toast.error("Kopyalanamadı"));
+                              }}
+                              title="Dijital Karşılama Paketi Linkini Kopyala"
+                              className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                              style={{
+                                background: "rgba(167,139,250,0.15)",
+                                border: "1px solid rgba(167,139,250,0.3)",
+                                color: "#a78bfa",
+                              }}
+                            >
+                              🎁
                             </button>
                           </div>
                           {/* Badge validity warning */}
@@ -7562,6 +7703,22 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                       {apptError}
                     </div>
                   )}
+                  {/* OCR scan button */}
+                  <div className="mb-3">
+                    <button
+                      type="button"
+                      data-ocid="register.ocr_scan.button"
+                      onClick={() => setShowOcrModal(true)}
+                      className="px-4 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-2 transition-all"
+                      style={{
+                        background: "rgba(14,165,233,0.12)",
+                        border: "1px solid rgba(14,165,233,0.3)",
+                      }}
+                    >
+                      📷 Kimlik Tara
+                    </button>
+                  </div>
+
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <p className="text-slate-300 text-sm mb-1">
@@ -9251,6 +9408,27 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             />
           )}
 
+          {tab === "handover" && (
+            <div className="max-w-2xl space-y-5">
+              <h2 className="text-white font-semibold text-lg">
+                🔄 Devir-Teslim Raporlarım
+              </h2>
+              <HandoverHistoryList
+                companyId={session.companyId}
+                staffName={staff?.name}
+              />
+            </div>
+          )}
+
+          {tab === "imptasks" && (
+            <div className="max-w-2xl">
+              <StaffImprovementTasksTab
+                companyId={session.companyId}
+                staffCode={staff?.staffId ?? session.staffId ?? ""}
+              />
+            </div>
+          )}
+
           {tab === "profile" && (
             <div className="max-w-xl space-y-6">
               <div className="flex items-center gap-4">
@@ -9648,6 +9826,16 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           onComplete={() => setShowTour(false)}
         />
       )}
+      {/* OCR Modal */}
+      {showOcrModal && (
+        <OcrScanModal
+          onFill={(name, idNumber) =>
+            setForm((f) => ({ ...f, name, idNumber }))
+          }
+          onClose={() => setShowOcrModal(false)}
+        />
+      )}
+
       {/* Floating Tour Button */}
       <button
         type="button"

@@ -16,6 +16,7 @@ import {
   getCustomCategories,
   getDepartments,
   getDeptTodayVisitorCount,
+  getFrequentVisitors,
   getKioskApprovalStatus,
   getKioskContent,
   getLockdown,
@@ -24,6 +25,7 @@ import {
   getVisitorPins,
   getVisitors,
   isBlacklisted,
+  isFrequentVisitor,
   savePreReg,
   saveVisitor,
 } from "../store";
@@ -931,6 +933,27 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               <p className="text-slate-500 text-sm mb-4">
                 Lütfen bekleyiniz...
               </p>
+              {(() => {
+                const currentVisitor = getVisitors(companyId).find(
+                  (v) => v.visitorId === currentVisitorId,
+                );
+                return currentVisitor?.parkingSpace ? (
+                  <div
+                    className="mt-4 p-3 rounded-xl text-center"
+                    style={{
+                      background: "rgba(34,197,94,0.1)",
+                      border: "1px solid rgba(34,197,94,0.25)",
+                    }}
+                  >
+                    <p className="text-green-400 font-semibold text-sm">
+                      🅿️ Park Yeriniz:{" "}
+                      <span className="font-bold text-white">
+                        {currentVisitor.parkingSpace}
+                      </span>
+                    </p>
+                  </div>
+                ) : null;
+              })()}
               {company?.wifiSSID && (
                 <div
                   data-ocid="kiosk.wifi_info.card"
@@ -1429,12 +1452,14 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               <span className="text-2xl">👋</span>
               <div>
                 <p className="text-white font-semibold text-base">
-                  Hoş geldiniz, {returningVisitor.name}!
+                  {isFrequentVisitor(companyId, form.idNumber)
+                    ? `⭐ Hoş geldiniz ${returningVisitor.name}, sizi tanımak güzel!`
+                    : `Hoş geldiniz, ${returningVisitor.name}!`}
                 </p>
                 <p className="text-slate-300 text-sm">
                   Bu {returningVisitor.visitCount + 1}. ziyaretiniz
                   {returningVisitor.lastHost
-                    ? ` u2022 Son ev sahibi: ${returningVisitor.lastHost.slice(0, 8)}...`
+                    ? ` • Son ev sahibi: ${returningVisitor.lastHost.slice(0, 8)}...`
                     : ""}
                   . Bilgileriniz otomatik dolduruldu.
                 </p>
@@ -1477,9 +1502,11 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                     .sort((a, b) => b.arrivalTime - a.arrivalTime);
                   if (prevVisits.length > 0) {
                     const last = prevVisits[0];
+                    const fvMap = getFrequentVisitors(companyId);
+                    const fvEntry = fvMap[val];
                     setReturningVisitor({
                       name: last.name,
-                      visitCount: prevVisits.length,
+                      visitCount: fvEntry?.count ?? prevVisits.length,
                       lastVisit: last.arrivalTime,
                       lastHost: last.hostStaffId,
                     });

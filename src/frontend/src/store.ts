@@ -169,14 +169,29 @@ export function getVisitors(companyId: string): Visitor[] {
   }
 }
 export function saveVisitor(v: Visitor) {
+  const existing = getVisitors(v.companyId).find(
+    (x) => x.visitorId === v.visitorId,
+  );
+  // Auto-assign parking spot for new active arrivals when enabled
+  let visitorToSave = v;
+  if (!existing && v.status === "active" && !v.parkingSpace) {
+    if (getAutoParkingEnabled(v.companyId)) {
+      const spot = autoAssignParkingSpot(v.companyId);
+      if (spot) visitorToSave = { ...v, parkingSpace: spot };
+    }
+  }
   const list = getVisitors(v.companyId).filter(
     (x) => x.visitorId !== v.visitorId,
   );
   localStorage.setItem(
     `safentry_visitors_${v.companyId}`,
-    JSON.stringify([...list, v]),
+    JSON.stringify([...list, visitorToSave]),
   );
-  syncSaveVisitor(v);
+  // Track frequent visitors on new arrivals (not updates)
+  if (!existing && v.status !== "preregistered" && v.idNumber) {
+    updateFrequentVisitor(v.companyId, v.idNumber, v.name);
+  }
+  syncSaveVisitor(visitorToSave);
 }
 export function findVisitorByCode(
   code: string,
@@ -1682,4 +1697,163 @@ export function saveMaintenanceRequest(
     `safentry_maintenance_${r.companyId}`,
     JSON.stringify([...list, r]),
   );
+}
+
+// ─── Frequent Visitors ─────────────────────────────────────────────────────────
+export interface FrequentVisitorEntry {
+  count: number;
+  since: number;
+  name: string;
+}
+
+export function getFrequentVisitors(
+  companyId: string,
+): Record<string, FrequentVisitorEntry> {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_frequent_visitors_${companyId}`) || "{}",
+    );
+  } catch {
+    return {};
+  }
+}
+
+export function updateFrequentVisitor(
+  companyId: string,
+  tc: string,
+  name: string,
+): void {
+  const map = getFrequentVisitors(companyId);
+  const existing = map[tc];
+  map[tc] = {
+    count: (existing?.count ?? 0) + 1,
+    since: existing?.since ?? Date.now(),
+    name,
+  };
+  localStorage.setItem(
+    `safentry_frequent_visitors_${companyId}`,
+    JSON.stringify(map),
+  );
+}
+
+export function isFrequentVisitor(companyId: string, tc: string): boolean {
+  const map = getFrequentVisitors(companyId);
+  const entry = map[tc];
+  if (!entry) return false;
+  // Default threshold = 5
+  const company = findCompanyById(companyId);
+  const threshold = (company as any)?.frequentVisitorThreshold ?? 5;
+  return entry.count >= threshold;
+}
+
+// ─── Auto Parking Assignment ───────────────────────────────────────────────────
+export function getAutoParkingEnabled(companyId: string): boolean {
+  return localStorage.getItem(`safentry_auto_parking_${companyId}`) === "true";
+}
+
+export function setAutoParkingEnabled(companyId: string, val: boolean): void {
+  localStorage.setItem(`safentry_auto_parking_${companyId}`, String(val));
+}
+
+export function autoAssignParkingSpot(companyId: string): string | null {
+  try {
+    const zones: { id: string; name: string; spots: { label: string }[] }[] =
+      JSON.parse(localStorage.getItem(`parkingZones_${companyId}`) || "[]");
+    const occ: Record<string, { plate: string; visitorName: string }> =
+      JSON.parse(localStorage.getItem(`parkingOccupancy_${companyId}`) || "{}");
+    for (const zone of zones) {
+      for (const spot of zone.spots) {
+        const key = `${zone.id}:${spot.label}`;
+        if (!occ[key]) return `${zone.name} - ${spot.label}`;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Shift Handovers ──────────────────────────────────────────────────────────
+export function getShiftHandovers(
+  companyId: string,
+): import("./types").ShiftHandover[] {
+  const key = `safentry_handovers_${companyId}`;
+  try {
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } catch {
+    return [];
+  }
+}
+export function saveShiftHandover(h: import("./types").ShiftHandover): void {
+  const all = getShiftHandovers(h.companyId);
+  const idx = all.findIndex((x) => x.id === h.id);
+  if (idx >= 0) all[idx] = h;
+  else all.unshift(h);
+  localStorage.setItem(
+    `safentry_handovers_${h.companyId}`,
+    JSON.stringify(all),
+  );
+}
+
+// ─── Health Declarations ──────────────────────────────────────────────────────
+export function getHealthDeclarations(
+  companyId: string,
+): import("./types").HealthDeclaration[] {
+  const key = `safentry_health_${companyId}`;
+  try {
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } catch {
+    return [];
+  }
+}
+export function saveHealthDeclaration(
+  d: import("./types").HealthDeclaration,
+): void {
+  const all = getHealthDeclarations(d.companyId);
+  const idx = all.findIndex((x) => x.id === d.id);
+  if (idx >= 0) all[idx] = d;
+  else all.unshift(d);
+  localStorage.setItem(`safentry_health_${d.companyId}`, JSON.stringify(all));
+}
+
+// ─── Improvement Tasks ────────────────────────────────────────────────────────
+export function getImprovementTasks(
+  companyId: string,
+): import("./types").ImprovementTask[] {
+  const key = `safentry_tasks_${companyId}`;
+  try {
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } catch {
+    return [];
+  }
+}
+export function saveImprovementTask(
+  t: import("./types").ImprovementTask,
+): void {
+  const all = getImprovementTasks(t.companyId);
+  const idx = all.findIndex((x) => x.id === t.id);
+  if (idx >= 0) all[idx] = t;
+  else all.unshift(t);
+  localStorage.setItem(`safentry_tasks_${t.companyId}`, JSON.stringify(all));
+}
+
+// ─── Contractor Documents ─────────────────────────────────────────────────────
+export function getContractorDocuments(
+  companyId: string,
+): import("./types").ContractorDocument[] {
+  const key = `safentry_cdocs_${companyId}`;
+  try {
+    return JSON.parse(localStorage.getItem(key) || "[]");
+  } catch {
+    return [];
+  }
+}
+export function saveContractorDocument(
+  doc: import("./types").ContractorDocument,
+): void {
+  const all = getContractorDocuments(doc.companyId);
+  const idx = all.findIndex((x) => x.id === doc.id);
+  if (idx >= 0) all[idx] = doc;
+  else all.unshift(doc);
+  localStorage.setItem(`safentry_cdocs_${doc.companyId}`, JSON.stringify(all));
 }

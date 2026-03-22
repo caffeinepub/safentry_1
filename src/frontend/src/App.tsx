@@ -19,6 +19,7 @@ import BlacklistAppealPage from "./pages/BlacklistAppealPage";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import CompanyLogin from "./pages/CompanyLogin";
 import CompanyRegister from "./pages/CompanyRegister";
+import ContractorPortalPage from "./pages/ContractorPortalPage";
 import KioskMode from "./pages/KioskMode";
 import LanguageSelect from "./pages/LanguageSelect";
 import PreRegPage from "./pages/PreRegPage";
@@ -33,6 +34,7 @@ import Verify from "./pages/Verify";
 import VisitorFeedbackPage from "./pages/VisitorFeedbackPage";
 import VisitorTicketPage from "./pages/VisitorTicketPage";
 import Welcome from "./pages/Welcome";
+import WelcomePackagePage from "./pages/WelcomePackagePage";
 
 // Check if current URL is a confirm link
 function getConfirmToken(): string | null {
@@ -84,6 +86,18 @@ function getSelfCheckinCompanyId(): string | null {
   return match ? match[1] : null;
 }
 
+function getContractorPortalId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/contractor-portal\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
+function getWelcomePkgVisitorId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/welcome-pkg\/([a-zA-Z0-9_]+)$/);
+  return match ? match[1] : null;
+}
+
 function getAppealParams(): { tc: string } | null {
   const path = window.location.pathname;
   const match = path.match(/^\/appeal(?:\/([a-zA-Z0-9]+))?$/);
@@ -108,6 +122,9 @@ export default function App() {
   const feedbackCode = getFeedbackCode();
   const selfPreRegCode = getSelfPreRegCode();
   const selfCheckinCompanyId = getSelfCheckinCompanyId();
+  const contractorPortalId = getContractorPortalId();
+  const welcomePkgVisitorId = getWelcomePkgVisitorId();
+  const visitorTicketId = getVisitorTicketId();
 
   const getInitialScreen = (): AppScreen => {
     if (confirmToken) return "appointment-confirm";
@@ -116,6 +133,8 @@ export default function App() {
     if (appealParams) return "blacklist-appeal";
     if (selfPreRegCode) return "self-prereg";
     if (selfCheckinCompanyId) return "self-checkin";
+    if (contractorPortalId) return "contractor-portal";
+    if (welcomePkgVisitorId) return "welcome-pkg";
     if (visitorTicketId) return "visitor-ticket";
     if (feedbackCode) return "visitor-feedback";
     if (!hasLang) return "language";
@@ -124,7 +143,6 @@ export default function App() {
   };
 
   const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
-  const visitorTicketId = getVisitorTicketId();
   const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
   const [currentInviteToken, setCurrentInviteToken] = useState<string | null>(
     inviteToken,
@@ -373,6 +391,20 @@ export default function App() {
           visitorId={visitorTicketId ?? ""}
           onNavigate={navigate}
         />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "contractor-portal")
+    return (
+      <>
+        <ContractorPortalPage companyId={contractorPortalId ?? ""} />
+        <Toaster richColors position="top-right" />
+      </>
+    );
+  if (screen === "welcome-pkg")
+    return (
+      <>
+        <WelcomePackagePage visitorId={welcomePkgVisitorId ?? ""} />
         <Toaster richColors position="top-right" />
       </>
     );
