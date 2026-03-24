@@ -22,6 +22,7 @@ import CompanyRegister from "./pages/CompanyRegister";
 import ContractorPortalPage from "./pages/ContractorPortalPage";
 import KioskMode from "./pages/KioskMode";
 import LanguageSelect from "./pages/LanguageSelect";
+import LobbyDisplayPage from "./pages/LobbyDisplayPage";
 import PreRegPage from "./pages/PreRegPage";
 import ReceptionDeskMode from "./pages/ReceptionDeskMode";
 import SelfCheckinPage from "./pages/SelfCheckinPage";
@@ -98,6 +99,12 @@ function getWelcomePkgVisitorId(): string | null {
   return match ? match[1] : null;
 }
 
+function getLobbyDisplayCompanyId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/lobby-display\/([a-zA-Z0-9]+)$/);
+  return match ? match[1] : null;
+}
+
 function getAppealParams(): { tc: string } | null {
   const path = window.location.pathname;
   const match = path.match(/^\/appeal(?:\/([a-zA-Z0-9]+))?$/);
@@ -125,8 +132,10 @@ export default function App() {
   const contractorPortalId = getContractorPortalId();
   const welcomePkgVisitorId = getWelcomePkgVisitorId();
   const visitorTicketId = getVisitorTicketId();
+  const lobbyDisplayCompanyId = getLobbyDisplayCompanyId();
 
   const getInitialScreen = (): AppScreen => {
+    if (lobbyDisplayCompanyId) return "lobby-display";
     if (confirmToken) return "appointment-confirm";
     if (inviteToken) return "invite";
     if (preRegToken) return "prereg";
@@ -401,6 +410,8 @@ export default function App() {
         <Toaster richColors position="top-right" />
       </>
     );
+  if (screen === "lobby-display")
+    return <LobbyDisplayPage companyId={lobbyDisplayCompanyId ?? ""} />;
   if (screen === "welcome-pkg")
     return (
       <>

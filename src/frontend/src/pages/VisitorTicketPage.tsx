@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { getVisitorBroadcasts } from "../components/VisitorBroadcastModal";
 import { findCompanyById, getStaffByCompany, getVisitors } from "../store";
+import type { VisitorBroadcast } from "../types";
 import type { AppScreen, Visitor } from "../types";
 
 interface Props {
@@ -49,6 +51,7 @@ function QRCodeDisplay({ data, size = 140 }: { data: string; size?: number }) {
 export default function VisitorTicketPage({ visitorId, onNavigate }: Props) {
   const [visitor, setVisitor] = useState<Visitor | null>(null);
   const [copied, setCopied] = useState(false);
+  const [broadcasts, setBroadcasts] = useState<VisitorBroadcast[]>([]);
 
   useEffect(() => {
     // Find visitor across all companies
@@ -65,6 +68,9 @@ export default function VisitorTicketPage({ visitorId, onNavigate }: Props) {
     } catch {}
     const found = allVisitors.find((v) => v.visitorId === visitorId);
     setVisitor(found ?? null);
+    if (found) {
+      setBroadcasts(getVisitorBroadcasts(found.companyId));
+    }
   }, [visitorId]);
 
   if (!visitor) {
@@ -182,6 +188,33 @@ export default function VisitorTicketPage({ visitorId, onNavigate }: Props) {
           }}
           data-ocid="visitor_ticket.card"
         >
+          {/* Emergency Broadcast Banner */}
+          {broadcasts.length > 0 && (
+            <div
+              className="px-6 py-3 space-y-2"
+              style={{
+                background:
+                  "linear-gradient(135deg,rgba(239,68,68,0.2),rgba(220,38,38,0.15))",
+                borderBottom: "1px solid rgba(239,68,68,0.3)",
+              }}
+              data-ocid="visitor_ticket.broadcast.panel"
+            >
+              {broadcasts.map((b) => (
+                <div key={b.broadcastId} className="flex items-start gap-2">
+                  <span className="text-red-400 text-lg shrink-0">🚨</span>
+                  <div>
+                    <p className="text-red-300 text-xs font-bold uppercase tracking-wide mb-0.5">
+                      ACİL DUYURU
+                    </p>
+                    <p className="text-white text-sm font-medium">
+                      {b.message}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Header */}
           <div
             className="px-8 py-5"

@@ -203,6 +203,9 @@ export interface Visitor {
   emergencyContactName?: string;
   emergencyContactPhone?: string;
   zonePermissions?: string[];
+  companions?: VisitorCompanion[];
+  hostSignatureData?: string;
+  visitorTags?: string[];
 }
 
 export interface MeetingTemplate {
@@ -328,7 +331,8 @@ export type AppScreen =
   | "visitor-ticket"
   | "self-checkin"
   | "contractor-portal"
-  | "welcome-pkg";
+  | "welcome-pkg"
+  | "lobby-display";
 
 export interface ParkingSpace {
   id: string;
@@ -712,4 +716,51 @@ export interface ContractorDocument {
   uploadedAt: number;
   status: "pending" | "approved" | "rejected";
   reviewedAt?: number;
+}
+
+// ─── Visitor Group ────────────────────────────────────────────────────────────
+export interface VisitorGroup {
+  groupId: string;
+  companyId: string;
+  groupName: string;
+  leaderName: string;
+  memberIds: string[]; // visitor IDs
+  createdAt: number;
+  status: "active" | "departed";
+}
+
+// ─── Shift Swap Request ───────────────────────────────────────────────────────
+export interface ShiftSwapRequest {
+  swapId: string;
+  companyId: string;
+  requesterId: string;
+  requesterName: string;
+  targetId: string;
+  targetName: string;
+  shiftDate: string;
+  shiftTime: string;
+  note: string;
+  status:
+    | "pending"
+    | "accepted_by_peer"
+    | "rejected_by_peer"
+    | "approved"
+    | "rejected";
+  createdAt: number;
+}
+
+// ─── Visitor Companion ────────────────────────────────────────────────────────
+export interface VisitorCompanion {
+  name: string;
+  relationship: string;
+  idNumber?: string;
+}
+
+// ─── Visitor Broadcast ────────────────────────────────────────────────────────
+export interface VisitorBroadcast {
+  broadcastId: string;
+  companyId: string;
+  message: string;
+  createdAt: number;
+  expiresAt: number;
 }

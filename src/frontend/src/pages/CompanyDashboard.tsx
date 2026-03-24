@@ -53,6 +53,7 @@ import HelpCenter from "../components/HelpCenter";
 import { CompanyImprovementTasksTab } from "../components/ImprovementTasksTab";
 import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
 import InvestigationTab from "../components/InvestigationTab";
+import KioskThemeSection from "../components/KioskThemeSection";
 import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
 import LostFoundTab from "../components/LostFoundTab";
@@ -69,16 +70,20 @@ import SegmentationAnalysis from "../components/SegmentationAnalysis";
 import ShiftAnalysisTab from "../components/ShiftAnalysisTab";
 import ShiftCalendar from "../components/ShiftCalendar";
 import { HandoverHistoryList } from "../components/ShiftHandoverModal";
+import ShiftSwapTab from "../components/ShiftSwapTab";
 import StaffPerformanceTab from "../components/StaffPerformanceTab";
 import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
 import VehicleLogTab from "../components/VehicleLogTab";
 import VisitTimeline from "../components/VisitTimeline";
+import VisitorBroadcastModal from "../components/VisitorBroadcastModal";
 import VisitorComments from "../components/VisitorComments";
 import VisitorCountdown from "../components/VisitorCountdown";
+import VisitorGroupTab from "../components/VisitorGroupTab";
 import VisitorHeatmap from "../components/VisitorHeatmap";
 import VisitorPassTab from "../components/VisitorPassTab";
 import VisitorProfileModal from "../components/VisitorProfileModal";
+import VisitorTagsTab, { getVisitorTags } from "../components/VisitorTagsTab";
 import WebhookIntegrationsTab from "../components/WebhookIntegrationsTab";
 import WorkingCalendar from "../components/WorkingCalendar";
 import ZoneControlTab from "../components/ZoneControlTab";
@@ -335,7 +340,10 @@ type Tab =
   | "demografik"
   | "belgetakvim"
   | "vardiyaanaliz"
-  | "evacuationcoord";
+  | "evacuationcoord"
+  | "groups"
+  | "shiftswaps"
+  | "visitortags";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -2854,6 +2862,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   );
   const [showHelpCenter, setShowHelpCenter] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
+  const [showVisitorBroadcast, setShowVisitorBroadcast] = useState(false);
   const [lobbyTime, setLobbyTime] = useState(new Date());
 
   // Custom report builder
@@ -3612,6 +3621,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "belgetakvim", label: "📅 Belge Takvimi" },
     { key: "vardiyaanaliz", label: "🕐 Vardiya Analizi" },
     { key: "evacuationcoord", label: "🏢 Tahliye Koordinasyonu" },
+    { key: "groups", label: "👥 Grup Ziyaretleri" },
+    { key: "shiftswaps", label: "🔀 Vardiya Değişim" },
+    { key: "visitortags", label: "🏷️ Etiketler" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -4218,6 +4230,15 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </button>
           <button
             type="button"
+            data-ocid="company_dashboard.visitor_broadcast.open_modal_button"
+            onClick={() => setShowVisitorBroadcast(true)}
+            title="Aktif Ziyaretçilere Acil Duyuru"
+            className="px-3 py-1.5 rounded-xl text-xs font-medium text-red-300 border border-red-500/30 hover:bg-red-900/20 transition-colors"
+          >
+            🚨 Acil Yayın
+          </button>
+          <button
+            type="button"
             data-ocid="company_dashboard.onboarding.button"
             onClick={() => setShowOnboarding(true)}
             title="Kurulum Sihirbazu0131"
@@ -4279,6 +4300,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           companyId={session.companyId}
           staffName={company?.name ?? "Admin"}
           onClose={() => setShowBroadcast(false)}
+        />
+      )}
+      {showVisitorBroadcast && (
+        <VisitorBroadcastModal
+          companyId={session.companyId}
+          onClose={() => setShowVisitorBroadcast(false)}
         />
       )}
       {profileVisitor && (
@@ -4942,6 +4969,28 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                                 style={{ background: "rgba(14,165,233,0.3)" }}
                               >
                                 {v.category}
+                              </span>
+                            )}
+                            {v.groupId && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs"
+                                style={{
+                                  background: "rgba(0,212,170,0.15)",
+                                  color: "#00d4aa",
+                                }}
+                              >
+                                👥 Grup
+                              </span>
+                            )}
+                            {v.companions && v.companions.length > 0 && (
+                              <span
+                                className="px-2 py-0.5 rounded text-xs"
+                                style={{
+                                  background: "rgba(245,158,11,0.15)",
+                                  color: "#f59e0b",
+                                }}
+                              >
+                                👥 +{v.companions.length} refakatçi
                               </span>
                             )}
                           </div>
@@ -10128,6 +10177,45 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           </div>
         )}
 
+        {tab === "groups" && (
+          <div className="max-w-3xl">
+            <VisitorGroupTab
+              companyId={session.companyId}
+              visitors={visitors}
+              staffList={staffList}
+              onGroupExit={(groupId) => {
+                const grouped = visitors.filter(
+                  (v) => v.groupId === groupId && v.status === "active",
+                );
+                for (const v of grouped) {
+                  const updated = {
+                    ...v,
+                    status: "departed" as const,
+                    departureTime: Date.now(),
+                  };
+                  saveVisitor(updated);
+                }
+                setVisitors(getVisitors(session.companyId));
+              }}
+            />
+          </div>
+        )}
+
+        {tab === "shiftswaps" && (
+          <div className="max-w-3xl">
+            <ShiftSwapTab
+              companyId={session.companyId}
+              staffId={session.staffId ?? ""}
+              staffName={
+                staffList.find((s) => s.staffId === session.staffId)?.name ??
+                "Yönetici"
+              }
+              staffList={staffList}
+              isAdmin={true}
+            />
+          </div>
+        )}
+
         {tab === "buildingmap" && (
           <BuildingMapTab
             companyId={session.companyId}
@@ -10135,6 +10223,10 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               .map((v: any) => v.meetingRoom)
               .filter(Boolean)}
           />
+        )}
+
+        {tab === "visitortags" && (
+          <VisitorTagsTab companyId={session.companyId} />
         )}
 
         {tab === "profile" && company && (
@@ -11153,6 +11245,70 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             >
               {t(lang, "updateProfile")}
             </button>
+
+            {/* Kiosk Tema Özelleştirme */}
+            {(() => {
+              const themeKey = `safentry_kiosk_theme_${session.companyId}`;
+              const rawTheme = localStorage.getItem(themeKey);
+              const initTheme = rawTheme
+                ? JSON.parse(rawTheme)
+                : {
+                    bgColor: "#020817",
+                    accentColor: "#14b8a6",
+                    welcomeTitle: company.name,
+                    buttonStyle: "rounded",
+                    logoPosition: "center",
+                  };
+              return (
+                <KioskThemeSection
+                  companyId={session.companyId}
+                  initialTheme={initTheme}
+                />
+              );
+            })()}
+
+            {/* Lobi Ekranı URL */}
+            {(() => {
+              const lobbyUrl = `${window.location.origin}/lobby-display/${session.companyId}`;
+              return (
+                <div
+                  data-ocid="profile.lobby_display.panel"
+                  className="rounded-2xl p-4"
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }}
+                >
+                  <p className="text-slate-300 text-sm font-semibold mb-2">
+                    🖥️ Lobi Ekranı URL
+                  </p>
+                  <p className="text-slate-500 text-xs mb-3">
+                    Bu URL&apos;yi TV veya büyük monitöre bağlı tarayıcıda açın.
+                    30 saniyede bir otomatik yenilenir.
+                  </p>
+                  <div className="flex gap-2 items-center">
+                    <div className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-teal-400 text-xs font-mono truncate">
+                      {lobbyUrl}
+                    </div>
+                    <button
+                      type="button"
+                      data-ocid="profile.lobby_display.button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(lobbyUrl).catch(() => {});
+                        toast.success("Lobi ekranı URL kopyalandı");
+                      }}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold text-white"
+                      style={{
+                        background: "rgba(20,184,166,0.2)",
+                        border: "1px solid rgba(20,184,166,0.4)",
+                      }}
+                    >
+                      Kopyala
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Badge Fields */}
             {(() => {

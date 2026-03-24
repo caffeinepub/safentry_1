@@ -34,8 +34,13 @@ import { ChecklistModal } from "../components/SecurityChecklist";
 import ShiftHandoverModal, {
   HandoverHistoryList,
 } from "../components/ShiftHandoverModal";
+import ShiftSwapTab from "../components/ShiftSwapTab";
 import SignatureCanvas from "../components/SignatureCanvas";
+import TrainingTab, {
+  getTrainingCompletionStatus,
+} from "../components/TrainingTab";
 import VisitorCountdown from "../components/VisitorCountdown";
+import { getVisitorTags } from "../components/VisitorTagsTab";
 import { getZones } from "../components/ZoneControlTab";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { useLiveAlerts } from "../hooks/useLiveAlerts";
@@ -135,6 +140,7 @@ import type {
   Staff,
   UploadedDocument,
   Visitor,
+  VisitorCompanion as _VisitorCompanion,
 } from "../types";
 import {
   copyToClipboard,
@@ -218,7 +224,9 @@ type Tab =
   | "patrol"
   | "maintenance"
   | "handover"
-  | "imptasks";
+  | "shiftswap"
+  | "imptasks"
+  | "training";
 
 const EMPTY_FORM = {
   name: "",
@@ -636,6 +644,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Uploaded documents for new visitor form
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDocument[]>([]);
+  const [showCompanions, setShowCompanions] = useState(false);
+  const [companions, setCompanions] = useState<
+    { name: string; relationship: string; idNumber: string }[]
+  >([]);
 
   // Checklist modal
   const [_checklistOpen, setChecklistOpen] = useState(false);
@@ -731,6 +743,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const meetingRooms = getMeetingRooms(session.companyId);
   const [apptError, setApptError] = useState("");
   const [apptTab, setApptTab] = useState<"today" | "create">("today");
+  const [hostSuggestion, setHostSuggestion] = useState<{
+    hostName: string;
+    hostId: string;
+  } | null>(null);
 
   // Notes dialog
   const [notesVisitor, setNotesVisitor] = useState<Visitor | null>(null);
@@ -1432,6 +1448,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       emergencyContactPhone: form.emergencyContactPhone?.trim() || undefined,
       zonePermissions:
         form.zonePermissions.length > 0 ? form.zonePermissions : undefined,
+      companions:
+        companions.filter((c) => c.name.trim()).length > 0
+          ? companions.filter((c) => c.name.trim())
+          : undefined,
     };
     // Show ID verification dialog before saving
     setPendingVisitorData(visitor);
@@ -1472,6 +1492,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setFormError("");
     setReturningSuggestion(null);
     setUploadedDocs([]);
+    setCompanions([]);
+    setShowCompanions(false);
     setVisitorTrustScore(null);
     setPendingVisitorData(null);
     setShowIdVerify(false);
@@ -2120,6 +2142,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["patrol" as Tab, "🗺️ Devriye Logu"] as [Tab, string],
     ["maintenance" as Tab, "🔧 Bakım Talepleri"] as [Tab, string],
     ["handover" as Tab, "🔄 Devir-Teslim"] as [Tab, string],
+    ["shiftswap" as Tab, "🔀 Vardiya Değişim"] as [Tab, string],
     ["imptasks" as Tab, "📋 İyileştirme Görevlerim"] as [Tab, string],
     ["profile", "Hesabım"],
     (() => {
@@ -2133,6 +2156,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     })(),
     ["mycalendar" as Tab, "📅 Takvimim"] as [Tab, string],
     ["messages" as Tab, "💬 Mesajlar"] as [Tab, string],
+    ["training" as Tab, "🎓 Eğitim"] as [Tab, string],
   ];
 
   return (
@@ -2287,6 +2311,31 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         className="min-h-screen"
         style={{ background: "#0a0f1e" }}
       >
+        {/* Training Warning Banner */}
+        {session.staffId &&
+          !getTrainingCompletionStatus(session.staffId).allDone && (
+            <button
+              type="button"
+              data-ocid="staff_dashboard.training_warning"
+              className="w-full flex items-center justify-between gap-3 px-6 py-2.5 text-sm cursor-pointer"
+              style={{
+                background: "rgba(20,184,166,0.1)",
+                borderBottom: "1px solid rgba(20,184,166,0.3)",
+              }}
+              onClick={() => setTab("training")}
+            >
+              <span className="text-teal-300">
+                🎓 Tamamlanmamış eğitim modülünüz var (
+                {getTrainingCompletionStatus(session.staffId).completed}/
+                {getTrainingCompletionStatus(session.staffId).total}{" "}
+                tamamlandı). Eğitim sekmesini açmak için tıklayın.
+              </span>
+              <span className="text-teal-400 text-xs font-semibold">
+                Eğitime Git →
+              </span>
+            </button>
+          )}
+
         {/* Lockdown Banner */}
         {lockdownActive && (
           <div
@@ -3468,7 +3517,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   const _hostStaff = staffList.find(
                     (s) => s.staffId === groupForm.hostStaffId,
                   );
-                  validVisitors
+                  const savedMembers = validVisitors
                     .filter(
                       (vis) => !isBlacklisted(session.companyId, vis.idNumber),
                     )
@@ -3499,6 +3548,20 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                       saveVisitor(newV);
                       return newV;
                     });
+                  // Save VisitorGroup record
+                  import("../components/VisitorGroupTab").then(
+                    ({ saveVisitorGroup }) => {
+                      saveVisitorGroup({
+                        groupId,
+                        companyId: session.companyId,
+                        groupName: groupForm.groupName,
+                        leaderName: savedMembers[0]?.name ?? "",
+                        memberIds: savedMembers.map((v) => v.visitorId),
+                        createdAt: Date.now(),
+                        status: "active",
+                      });
+                    },
+                  );
                   setVisitors(getVisitors(session.companyId));
                   toast.success(
                     `✅ ${validVisitors.length} ziyaretçi kaydedildi! Grup: ${groupForm.groupName}`,
@@ -5328,6 +5391,138 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   </select>
                 </div>
 
+                {/* Companion Registration */}
+                <div className="sm:col-span-2">
+                  <button
+                    type="button"
+                    data-ocid="register.companions_toggle.button"
+                    onClick={() => {
+                      setShowCompanions((v) => !v);
+                      if (companions.length === 0) {
+                        setCompanions([
+                          { name: "", relationship: "Asistan", idNumber: "" },
+                        ]);
+                      }
+                    }}
+                    className="flex items-center gap-2 text-sm transition-colors"
+                    style={{ color: showCompanions ? "#00d4aa" : "#94a3b8" }}
+                  >
+                    <span>{showCompanions ? "▼" : "▶"}</span>
+                    <span>
+                      👥 Refakatçi Ekle{" "}
+                      {companions.filter((c) => c.name.trim()).length > 0
+                        ? `(${companions.filter((c) => c.name.trim()).length} kişi)`
+                        : ""}
+                    </span>
+                  </button>
+                  {showCompanions && (
+                    <div
+                      className="mt-3 space-y-2"
+                      data-ocid="register.companions.panel"
+                    >
+                      {companions.map((comp, ci) => (
+                        <div
+                          key={`companion-${comp.name || ci}`}
+                          data-ocid={`register.companion.${ci + 1}`}
+                          className="grid grid-cols-3 gap-2 p-3 rounded-xl"
+                          style={{
+                            background: "rgba(0,212,170,0.05)",
+                            border: "1px solid rgba(0,212,170,0.15)",
+                          }}
+                        >
+                          <input
+                            placeholder="Ad Soyad *"
+                            value={comp.name}
+                            onChange={(e) =>
+                              setCompanions((cs) =>
+                                cs.map((c, i) =>
+                                  i === ci ? { ...c, name: e.target.value } : c,
+                                ),
+                              )
+                            }
+                            className="px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-white text-xs focus:outline-none"
+                          />
+                          <select
+                            value={comp.relationship}
+                            onChange={(e) =>
+                              setCompanions((cs) =>
+                                cs.map((c, i) =>
+                                  i === ci
+                                    ? { ...c, relationship: e.target.value }
+                                    : c,
+                                ),
+                              )
+                            }
+                            className="px-3 py-2 rounded-lg bg-[#1e293b] border border-white/15 text-white text-xs focus:outline-none"
+                          >
+                            {["Asistan", "Tercüman", "Aile", "Diğer"].map(
+                              (r) => (
+                                <option
+                                  key={r}
+                                  value={r}
+                                  className="bg-[#0f1729]"
+                                >
+                                  {r}
+                                </option>
+                              ),
+                            )}
+                          </select>
+                          <div className="flex gap-1">
+                            <input
+                              placeholder="TC (isteğe bağlı)"
+                              value={comp.idNumber}
+                              onChange={(e) =>
+                                setCompanions((cs) =>
+                                  cs.map((c, i) =>
+                                    i === ci
+                                      ? { ...c, idNumber: e.target.value }
+                                      : c,
+                                  ),
+                                )
+                              }
+                              className="flex-1 px-2 py-2 rounded-lg bg-white/10 border border-white/15 text-white text-xs focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCompanions((cs) =>
+                                  cs.filter((_, i) => i !== ci),
+                                )
+                              }
+                              className="w-8 flex items-center justify-center rounded-lg text-red-400 hover:bg-red-400/10 text-sm"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {companions.length < 3 && (
+                        <button
+                          type="button"
+                          data-ocid="register.companion_add.button"
+                          onClick={() =>
+                            setCompanions((cs) => [
+                              ...cs,
+                              {
+                                name: "",
+                                relationship: "Asistan",
+                                idNumber: "",
+                              },
+                            ])
+                          }
+                          className="px-3 py-1.5 rounded-lg text-xs text-teal-400 hover:text-white transition-colors"
+                          style={{
+                            background: "rgba(0,212,170,0.08)",
+                            border: "1px solid rgba(0,212,170,0.2)",
+                          }}
+                        >
+                          + Kişi Ekle ({companions.length}/3)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Visitor Photo Capture */}
                 <div className="sm:col-span-2">
                   <p className="text-slate-300 text-sm mb-1 block">
@@ -6438,6 +6633,67 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               })}
                             </div>
                           )}
+                          {/* Dual Signature Status */}
+                          {(v.ndaAccepted || v.signatureData) && (
+                            <div
+                              className="mb-2 p-2 rounded-lg text-xs"
+                              style={{
+                                background: "rgba(255,255,255,0.04)",
+                                border: "1px solid rgba(255,255,255,0.08)",
+                              }}
+                            >
+                              <p className="text-slate-400 font-semibold mb-1">
+                                📄 Belge İmza Durumu
+                              </p>
+                              <div className="flex gap-3 items-center flex-wrap">
+                                <span className="text-green-400">
+                                  {v.signatureData
+                                    ? "✅ Ziyaretçi İmzaladı"
+                                    : "⏳ Ziyaretçi İmzalamadı"}
+                                </span>
+                                <span
+                                  className={
+                                    v.hostSignatureData
+                                      ? "text-green-400"
+                                      : "text-amber-400"
+                                  }
+                                >
+                                  {v.hostSignatureData
+                                    ? "✅ Host İmzaladı"
+                                    : "⏳ Host Bekleniyor"}
+                                </span>
+                              </div>
+                              {v.signatureData && v.hostSignatureData && (
+                                <p className="text-teal-400 text-xs mt-1 font-semibold">
+                                  ✅ Geçerli / İki Taraflı İmzalandı
+                                </p>
+                              )}
+                              {!v.hostSignatureData && (
+                                <button
+                                  type="button"
+                                  data-ocid={`active_visitors.host_sign.button.${i + 1}`}
+                                  onClick={() => {
+                                    saveVisitor({
+                                      ...v,
+                                      hostSignatureData: `HOST_SIGNED_BY_${session.staffId}_AT_${Date.now()}`,
+                                    });
+                                    reload();
+                                    toast.success(
+                                      "Host imzası eklendi — belge geçerli.",
+                                    );
+                                  }}
+                                  className="mt-2 px-3 py-1 rounded-lg text-xs font-semibold text-white"
+                                  style={{
+                                    background:
+                                      "linear-gradient(135deg,#14b8a6,#0d9488)",
+                                  }}
+                                >
+                                  ✍️ İmzala (Host)
+                                </button>
+                              )}
+                            </div>
+                          )}
+
                           <div className="flex gap-2">
                             <button
                               type="button"
@@ -7743,15 +7999,77 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                       <input
                         data-ocid="appointments.visitor_id.input"
                         value={apptForm.visitorId}
-                        onChange={(e) =>
-                          setApptForm((f) => ({
-                            ...f,
-                            visitorId: e.target.value,
-                          }))
-                        }
+                        onChange={(e) => {
+                          const idVal = e.target.value;
+                          setApptForm((f) => ({ ...f, visitorId: idVal }));
+                          // Host suggestion logic
+                          if (idVal.length >= 5) {
+                            const pastVisits = getVisitors(session.companyId)
+                              .filter(
+                                (v) => v.idNumber === idVal && v.hostStaffId,
+                              )
+                              .sort((a, b) => b.arrivalTime - a.arrivalTime);
+                            if (pastVisits.length > 0) {
+                              const lastVisit = pastVisits[0];
+                              const hostStaff = staffList.find(
+                                (s) => s.staffId === lastVisit.hostStaffId,
+                              );
+                              if (hostStaff) {
+                                setHostSuggestion({
+                                  hostName: hostStaff.name,
+                                  hostId: hostStaff.staffId,
+                                });
+                              } else {
+                                setHostSuggestion(null);
+                              }
+                            } else {
+                              setHostSuggestion(null);
+                            }
+                          } else {
+                            setHostSuggestion(null);
+                          }
+                        }}
                         className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none font-mono"
                       />
                     </div>
+                    {/* Host Suggestion */}
+                    {hostSuggestion && !apptForm.hostName && (
+                      <div
+                        data-ocid="appointments.host_suggestion.panel"
+                        className="col-span-2 p-3 rounded-xl text-sm"
+                        style={{
+                          background: "rgba(20,184,166,0.1)",
+                          border: "1px solid rgba(20,184,166,0.3)",
+                        }}
+                      >
+                        <p className="text-teal-300 mb-2">
+                          💡 Bu ziyaretçi daha önce{" "}
+                          <strong>{hostSuggestion.hostName}</strong> ile
+                          görüşmüştü. Aynı host&apos;u seç mi?
+                        </p>
+                        <button
+                          type="button"
+                          data-ocid="appointments.host_suggestion.button"
+                          onClick={() => {
+                            setApptForm((f) => ({
+                              ...f,
+                              hostName: hostSuggestion.hostName,
+                            }));
+                            setHostSuggestion(null);
+                            toast.success(
+                              `Host seçildi: ${hostSuggestion.hostName}`,
+                            );
+                          }}
+                          className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white"
+                          style={{
+                            background:
+                              "linear-gradient(135deg,#14b8a6,#0d9488)",
+                          }}
+                        >
+                          ✓ Evet, Seç
+                        </button>
+                      </div>
+                    )}
                     <div>
                       <p className="text-slate-300 text-sm mb-1">Ev Sahibi *</p>
                       <input
@@ -9420,12 +9738,31 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
           )}
 
+          {tab === "shiftswap" && (
+            <ShiftSwapTab
+              companyId={session.companyId}
+              staffId={session.staffId ?? ""}
+              staffName={
+                staffList.find((s) => s.staffId === session.staffId)?.name ??
+                "Personel"
+              }
+              staffList={staffList}
+              isAdmin={staff?.role === "admin"}
+            />
+          )}
+
           {tab === "imptasks" && (
             <div className="max-w-2xl">
               <StaffImprovementTasksTab
                 companyId={session.companyId}
                 staffCode={staff?.staffId ?? session.staffId ?? ""}
               />
+            </div>
+          )}
+
+          {tab === "training" && (
+            <div className="max-w-2xl">
+              <TrainingTab staffId={session.staffId ?? ""} />
             </div>
           )}
 
