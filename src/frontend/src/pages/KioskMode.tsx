@@ -85,6 +85,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     | "checkout-feedback"
     | "checkout-success"
     | "pass"
+    | "directory"
   >("lang-select");
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [pinTc, setPinTc] = useState("");
@@ -101,6 +102,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     Record<string, string>
   >({});
   const [formError, setFormError] = useState("");
+  const [directorySearch, setDirectorySearch] = useState("");
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [countdown, setCountdown] = useState(60);
@@ -379,6 +381,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
         : undefined,
       specialNeeds: form.specialNeeds !== "Yok" ? form.specialNeeds : undefined,
       visitorPhoto: form.visitorPhoto || undefined,
+      visitorLanguage: kioskLang !== "tr" ? kioskLang.toUpperCase() : undefined,
     };
     // Check department quota
     if (visitor.department) {
@@ -751,6 +754,22 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                 }}
               >
                 🚪 Çıkış Yap
+              </button>
+              <button
+                type="button"
+                data-ocid="kiosk.directory.button"
+                onClick={() => {
+                  setDirectorySearch("");
+                  setScreen("directory");
+                }}
+                className="w-full py-3 rounded-2xl font-semibold text-sm transition-opacity hover:opacity-90"
+                style={{
+                  background: "rgba(245,158,11,0.12)",
+                  border: "1.5px solid rgba(245,158,11,0.35)",
+                  color: "#fbbf24",
+                }}
+              >
+                🔍 Kimi Arıyorsunuz?
               </button>
             </div>
           )}
@@ -1297,64 +1316,69 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
           <p className="text-slate-400 text-sm mb-6">
             Lütfen ziyaretinizi değerlendirin.
           </p>
-          <div className="flex justify-center gap-2 mb-4">
-            {[1, 2, 3, 4, 5].map((star) => (
+          {/* Emoji quick rating */}
+          <div className="flex justify-center gap-3 mb-4">
+            {(
+              [
+                { v: 1, e: "😞", label: "Kötü" },
+                { v: 2, e: "😐", label: "Orta" },
+                { v: 3, e: "🙂", label: "İyi" },
+                { v: 4, e: "😊", label: "Çok İyi" },
+                { v: 5, e: "🤩", label: "Mükemmel" },
+              ] as { v: number; e: string; label: string }[]
+            ).map(({ v, e, label }) => (
               <button
-                key={star}
+                key={v}
                 type="button"
-                data-ocid={`kiosk.feedback_star.${star}`}
-                onClick={() => setCheckoutFeedbackRating(star)}
-                className="text-4xl transition-transform hover:scale-110"
+                data-ocid={`kiosk.feedback_emoji.${v}`}
+                onClick={() => {
+                  setCheckoutFeedbackRating(v);
+                  setTimeout(() => {
+                    setScreen("checkout-success");
+                    setTimeout(() => setScreen("welcome"), 3000);
+                  }, 1500);
+                }}
+                className="flex flex-col items-center gap-1 transition-transform hover:scale-110"
                 style={{
-                  color:
-                    star <= checkoutFeedbackRating
-                      ? "#f59e0b"
-                      : "rgba(255,255,255,0.2)",
+                  outline:
+                    checkoutFeedbackRating === v ? "3px solid #0ea5e9" : "none",
+                  outlineOffset: "4px",
+                  borderRadius: "12px",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
-                ★
+                <span className="text-5xl">{e}</span>
+                <span className="text-xs text-slate-400">{label}</span>
               </button>
             ))}
           </div>
-          <textarea
-            data-ocid="kiosk.feedback_comment.textarea"
-            value={checkoutFeedbackComment}
-            onChange={(e) => setCheckoutFeedbackComment(e.target.value)}
-            rows={2}
-            placeholder="Ek yorum (isteğe bağlı)..."
-            className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none mb-4"
-          />
-          <div className="flex gap-3">
-            <button
-              type="button"
-              data-ocid="kiosk.feedback_skip.button"
-              onClick={() => {
-                setScreen("checkout-success");
-                setTimeout(() => setScreen("welcome"), 4000);
-              }}
-              className="flex-1 py-3 rounded-xl text-slate-300 font-medium"
-              style={{
-                background: "rgba(255,255,255,0.07)",
-                border: "1px solid rgba(255,255,255,0.15)",
-              }}
-            >
-              Geç
-            </button>
-            <button
-              type="button"
-              data-ocid="kiosk.feedback_send.button"
-              disabled={checkoutFeedbackRating === 0}
-              onClick={() => {
-                // Feedback already saved via checkout; here we just proceed
-                setScreen("checkout-success");
-                setTimeout(() => setScreen("welcome"), 3000);
-              }}
-              className="flex-1 py-3 rounded-xl text-white font-semibold disabled:opacity-40"
-              style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
-            >
-              Gönder
-            </button>
-          </div>
+          {checkoutFeedbackRating > 0 && (
+            <textarea
+              data-ocid="kiosk.feedback_comment.textarea"
+              value={checkoutFeedbackComment}
+              onChange={(e) => setCheckoutFeedbackComment(e.target.value)}
+              rows={2}
+              placeholder="Ek yorum (isteğe bağlı)..."
+              className="w-full px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm resize-none focus:outline-none mb-4"
+            />
+          )}
+          <button
+            type="button"
+            data-ocid="kiosk.feedback_skip.button"
+            onClick={() => {
+              setScreen("checkout-success");
+              setTimeout(() => setScreen("welcome"), 4000);
+            }}
+            className="w-full py-3 rounded-xl text-slate-300 font-medium mt-2"
+            style={{
+              background: "rgba(255,255,255,0.07)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          >
+            Geç
+          </button>
         </div>
       </div>
     );
@@ -1382,6 +1406,98 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
           <p className="text-slate-500 text-sm mt-3">
             Ekran otomatik kapanacak...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Directory screen
+  if (screen === "directory") {
+    const filteredStaff = staffList.filter((s) => {
+      const q = directorySearch.toLowerCase();
+      return (
+        s.name.toLowerCase().includes(q) ||
+        (s.role ?? "").toLowerCase().includes(q)
+      );
+    });
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center p-8"
+        style={{ background: "#0a0f1e" }}
+        data-ocid="kiosk.directory_screen"
+      >
+        <div
+          className="w-full max-w-md p-8 rounded-3xl"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1.5px solid rgba(245,158,11,0.25)",
+          }}
+        >
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-white">
+              🔍 Personel Rehberi
+            </h2>
+            <button
+              type="button"
+              data-ocid="kiosk.directory.back_button"
+              onClick={() => setScreen("welcome")}
+              className="px-3 py-1 rounded-lg text-sm text-slate-400 hover:text-white transition-colors"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              ← Geri
+            </button>
+          </div>
+          <p className="text-slate-400 text-sm mb-4">Kimi arıyorsunuz?</p>
+          <input
+            data-ocid="kiosk.directory.search_input"
+            type="text"
+            value={directorySearch}
+            onChange={(e) => setDirectorySearch(e.target.value)}
+            placeholder="İsim veya departman ara..."
+            className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-amber-400 mb-4"
+          />
+          <div className="space-y-2 max-h-80 overflow-y-auto">
+            {filteredStaff.length === 0 && (
+              <p
+                className="text-slate-500 text-sm text-center py-8"
+                data-ocid="kiosk.directory.empty_state"
+              >
+                Personel bulunamadı
+              </p>
+            )}
+            {filteredStaff.map((s, idx) => (
+              <div
+                key={s.staffId}
+                data-ocid={`kiosk.directory.item.${idx + 1}`}
+                className="flex items-center justify-between p-3 rounded-xl"
+                style={{
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div>
+                  <p className="text-white font-medium text-sm">{s.name}</p>
+                  <p className="text-slate-400 text-xs capitalize">{s.role}</p>
+                </div>
+                <button
+                  type="button"
+                  data-ocid={`kiosk.directory.appt_button.${idx + 1}`}
+                  onClick={() => {
+                    setScreen("form");
+                  }}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold text-white"
+                  style={{
+                    background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                  }}
+                >
+                  Randevu Al
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     );

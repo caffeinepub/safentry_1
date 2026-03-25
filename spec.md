@@ -1,38 +1,35 @@
-# Safentry v67
+# Safentry v72
 
 ## Current State
-Safentry is a feature-rich multi-tenant VMS with 66 versions of incremental improvements. The app has CompanyDashboard.tsx (~14k lines), StaffDashboard.tsx (~10k lines), and extensive store/types. All core data is backend-persistent. Last version (v66) added customizable form fields, internal messaging, photo recognition view, contractor company profiles, visitor queue management, and advanced stats filter.
+StaffDashboard (10,658 lines) has tabs: register, active, inside, appointments, preregistered, history, profile, invitations, gorevler, mycalendar, messages, incidents, patrol, maintenance, handover, shiftswap, imptasks, training, queue.
+
+The `invitations` tab is declared in the Tab type and shown in the tab bar, but has NO render section (`{tab === "invitations" && ...}` is missing).
+
+Returning visitor suggestion already exists via `handleIdNumberChange` + `returningSuggestion` state — shows a banner when idNumber >= 6 chars matches a past visitor. Name-based dropdown autocomplete does NOT exist.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Ziyaret Sonrası Toplantı Tutanağı** -- After visit departure, host can add meeting notes, decisions, and follow-up items linked to the visit record. Visible in visitor full profile and exportable. New tab/section in CompanyDashboard and accessible from visitor card actions.
-2. **Çok Şubeli Konsolide Raporlama** -- Companies with multiple branches/locations can view a consolidated report comparing visitor counts, SLA compliance, satisfaction scores, and incident counts across all branches. New tab in CompanyDashboard.
-3. **Ziyaretçi Geçici Erişim Yükseltme Talebi** -- During an active visit, host can request temporary access level upgrade for visitor (e.g., add production floor access). Security manager approves/rejects. Full request + approval log. Accessible from active visitor card.
-4. **Etkinlik ve Konferans Yönetim Modülü** -- Full event lifecycle: create event with date/capacity/location, send bulk invite link, track pre-registrations per session, check in attendees on event day, generate post-event attendance report. New tab in CompanyDashboard.
-5. **Ziyaretçi Puan ve Rozet Sistemi (Gamification)** -- Visitors auto-earn titles based on visit count (e.g., "Platin Misafir" at 10+ visits, "Güvenilir Tedarikçi" for contractors). Shown in kiosk welcome and visitor profile. Configurable thresholds.
-6. **Özelleştirilebilir Onay Akışı Şablonları** -- Admin can define approval flow templates per visitor category (contractor: 3-step, VIP: auto-approve, standard: single host). When creating a visitor, the appropriate template is applied. New section in CompanyDashboard settings.
+1. **Personel punch-in/punch-out tab** (`punchin`) in StaffDashboard: Personnel can clock in/out of their shift. Stores punch records in localStorage (key: `safentry_punchlog_<companyId>`). Shows current status (on duty / off duty), today's hours worked, and a history table of recent punches. Monthly summary with total hours.
+2. **Invitation funnel tab** (fill the missing `invitations` tab render): Show invitation list with status stages: Gönderildi / Açıldı / Ön Kayıt Tamamlandı / Randevuya Dönüştü. Each invitation card shows stage badge, creation date, invited name. Funnel summary at top showing counts per stage.
+3. **Name autocomplete dropdown** in register form: When typing visitor name (>=2 chars), show a dropdown of up to 5 matching past visitors (from visitors state, departed ones). Clicking a suggestion fills name, phone, category, visitType fields. This is SEPARATE from the existing idNumber-based returningSuggestion.
 
 ### Modify
-- store.ts: Add types/storage for meeting notes, event management, access upgrade requests, visitor badges/titles, and approval flow templates.
-- types.ts: Add new type definitions for all 6 features.
-- CompanyDashboard.tsx: Add new tabs for meeting notes management, consolidated branch reports, event management, visitor gamification settings, and approval flow templates. Add access upgrade request approval UI.
-- StaffDashboard.tsx: Add meeting notes entry after visitor departure. Add access upgrade request form for active visitors.
-- KioskMode.tsx: Show visitor badge/title in personalized welcome message.
+- Add `punchin` to Tab type in StaffDashboard
+- Add punch-in tab button to the tab bar
+- Add render section for `invitations` tab
+- Add render section for `punchin` tab
+- Add name autocomplete state and dropdown to register form name field
 
 ### Remove
-- Nothing removed.
+Nothing.
 
 ## Implementation Plan
-1. Extend types.ts with MeetingNote, Event, EventAttendee, AccessUpgradeRequest, VisitorBadge, ApprovalFlowTemplate types
-2. Extend store.ts with CRUD functions for all new data types (localStorage-backed)
-3. Add MeetingNotes tab in CompanyDashboard - list all visit notes, searchable by visitor/date
-4. Add meeting note entry button on departed visitor cards in StaffDashboard
-5. Add ConsolidatedReport tab in CompanyDashboard - aggregates data across branches
-6. Add AccessUpgrade request button on active visitor cards in StaffDashboard
-7. Add AccessUpgrade approval section in CompanyDashboard
-8. Add Events tab in CompanyDashboard - full CRUD + bulk invite link + attendee check-in
-9. Add gamification settings in CompanyDashboard (configure title thresholds)
-10. Show earned badge/title on visitor profile and kiosk welcome
-11. Add ApprovalTemplates section in CompanyDashboard settings
-12. Apply template logic when creating new visitor records
+1. Add `punchin` to Tab type
+2. Add punch localStorage helpers (inline, no separate file needed)
+3. Add punch state (isPunchedIn, punchLog) to StaffDashboard
+4. Add punchin tab button in tab bar
+5. Add `{tab === "punchin" && ...}` render section with clock-in/out button, today summary, history table
+6. Add `{tab === "invitations" && ...}` render section with funnel header + invitation cards
+7. Add nameQuery state + filtered suggestions for name autocomplete
+8. Add dropdown overlay below name input field in register form

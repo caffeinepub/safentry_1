@@ -212,6 +212,7 @@ export interface Visitor {
   companions?: VisitorCompanion[];
   hostSignatureData?: string;
   visitorTags?: string[];
+  visitorLanguage?: string;
 }
 
 export interface MeetingTemplate {

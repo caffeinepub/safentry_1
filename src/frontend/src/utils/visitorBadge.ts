@@ -27,11 +27,108 @@ function drawQrPattern(
   }
 }
 
+type LangLabels = {
+  id: string;
+  phone: string;
+  reason: string;
+  host: string;
+  entry: string;
+  signature: string;
+  plate?: string;
+};
+
+const LANG_LABELS: Record<string, LangLabels> = {
+  EN: {
+    id: "TC / ID",
+    phone: "Telefon / Phone",
+    reason: "Ziyaret Nedeni / Reason",
+    host: "Ev Sahibi / Host",
+    entry: "Giriş Saati / Entry",
+    signature: "İmza / Signature",
+    plate: "Araç Plakası / Plate",
+  },
+  DE: {
+    id: "TC / Kimlik",
+    phone: "Telefon / Telefon",
+    reason: "Ziyaret Nedeni / Besuchsgrund",
+    host: "Ev Sahibi / Gastgeber",
+    entry: "Giriş Saati / Ankunftszeit",
+    signature: "İmza / Unterschrift",
+    plate: "Araç Plakası / Kennzeichen",
+  },
+  FR: {
+    id: "TC / Identité",
+    phone: "Téléphone / Téléphone",
+    reason: "Ziyaret Nedeni / Motif",
+    host: "Ev Sahibi / Hôte",
+    entry: "Giriş Saati / Heure d'arrivée",
+    signature: "İmza / Signature",
+    plate: "Araç Plakası / Plaque",
+  },
+  ES: {
+    id: "TC / Identidad",
+    phone: "Teléfono / Teléfono",
+    reason: "Ziyaret Nedeni / Motivo",
+    host: "Ev Sahibi / Anfitrión",
+    entry: "Giriş Saati / Hora llegada",
+    signature: "İmza / Firma",
+  },
+  AR: {
+    id: "TC / ID",
+    phone: "Telefon / Phone",
+    reason: "Ziyaret Nedeni / Reason",
+    host: "Ev Sahibi / Host",
+    entry: "Giriş Saati / Entry",
+    signature: "İmza / Signature",
+    plate: "Araç Plakası / Plate",
+  },
+  RU: {
+    id: "TC / Уд. личности",
+    phone: "Телефон / Телефон",
+    reason: "Причина / Причина",
+    host: "Принимает / Принимающий",
+    entry: "Время входа / Время",
+    signature: "Подпись / Подпись",
+  },
+  ZH: {
+    id: "TC / 证件",
+    phone: "电话 / 电话",
+    reason: "原因 / 原因",
+    host: "接待 / 接待",
+    entry: "入场 / 入场时间",
+    signature: "签名 / 签名",
+  },
+  PT: {
+    id: "TC / Identidade",
+    phone: "Telefone / Telefone",
+    reason: "Motivo / Motivo",
+    host: "Anfitrião / Anfitrião",
+    entry: "Entrada / Hora",
+    signature: "Assinatura / Assinatura",
+  },
+};
+
+const DEFAULT_LABELS: LangLabels = {
+  id: "TC / ID",
+  phone: "Telefon / Phone",
+  reason: "Ziyaret Nedeni / Reason",
+  host: "Ev Sahibi / Host",
+  entry: "Giriş Saati / Entry",
+  signature: "İmza / Signature",
+  plate: "Araç Plakası / Plate",
+};
+
+function getLabels(lang?: string): LangLabels {
+  if (!lang || lang === "TR") return DEFAULT_LABELS;
+  return LANG_LABELS[lang] ?? DEFAULT_LABELS;
+}
+
 export async function generateVisitorBadgePDF(
   visitor: Visitor,
   companyName: string,
   hostName?: string,
   printMode = false,
+  visitorLanguage?: string,
 ): Promise<void> {
   const W = 559;
   const H = 794;
@@ -40,6 +137,9 @@ export async function generateVisitorBadgePDF(
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext("2d")!;
+
+  const langCode = visitorLanguage ?? visitor.visitorLanguage;
+  const labels = getLabels(langCode);
 
   ctx.fillStyle = "#0a0f1e";
   ctx.fillRect(0, 0, W, H);
@@ -52,9 +152,14 @@ export async function generateVisitorBadgePDF(
   ctx.textAlign = "center";
   ctx.fillText(companyName.toUpperCase(), W / 2, 38);
 
+  const badgeSubtitle =
+    langCode && langCode !== "TR"
+      ? `ZIYARETCI GIRIS BELGESI  ·  TR / ${langCode}`
+      : "ZIYARETCI GIRIS BELGESI / VISITOR BADGE";
+
   ctx.fillStyle = "#94a3b8";
   ctx.font = "13px sans-serif";
-  ctx.fillText("ZIYARETCI GIRIS BELGESI / VISITOR BADGE", W / 2, 80);
+  ctx.fillText(badgeSubtitle, W / 2, 80);
 
   ctx.fillStyle = "#f1f5f9";
   ctx.font = "bold 30px sans-serif";
@@ -83,21 +188,18 @@ export async function generateVisitorBadgePDF(
 
   const maskedId = `${visitor.idNumber.slice(0, 3)}***${visitor.idNumber.slice(-2)}`;
   const fields: [string, string][] = [
-    ["TC / ID", maskedId],
-    ["Telefon / Phone", visitor.phone],
-    ["Ziyaret Nedeni / Reason", visitor.visitReason || "-"],
-    ["Ev Sahibi / Host", hostName ?? visitor.hostStaffId],
-    [
-      "Giris Saati / Entry",
-      new Date(visitor.arrivalTime).toLocaleString("tr-TR"),
-    ],
+    [labels.id, maskedId],
+    [labels.phone, visitor.phone],
+    [labels.reason, visitor.visitReason || "-"],
+    [labels.host, hostName ?? visitor.hostStaffId],
+    [labels.entry, new Date(visitor.arrivalTime).toLocaleString("tr-TR")],
     [
       "NDA",
       visitor.ndaAccepted ? "Imzalandi / Signed" : "Imzalanmadi / Not Signed",
     ],
   ];
   if (visitor.vehiclePlate) {
-    fields.push(["Arac Plakasi / Plate", visitor.vehiclePlate]);
+    fields.push([labels.plate ?? "Araç Plakası / Plate", visitor.vehiclePlate]);
   }
 
   let y = 200;
@@ -134,7 +236,7 @@ export async function generateVisitorBadgePDF(
       ctx.fillStyle = "#94a3b8";
       ctx.font = "12px sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("Imza / Signature:", 30, y + 20);
+      ctx.fillText(`${labels.signature}:`, 30, y + 20);
       const img = new Image();
       await new Promise<void>((resolve) => {
         img.onload = () => resolve();

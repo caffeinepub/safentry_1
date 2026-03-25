@@ -231,7 +231,29 @@ type Tab =
   | "shiftswap"
   | "imptasks"
   | "training"
-  | "queue";
+  | "queue"
+  | "punchin";
+
+const PUNCH_KEY = (companyId: string) => `safentry_punchlog_${companyId}`;
+
+type PunchRecord = {
+  id: string;
+  staffId: string;
+  staffName: string;
+  type: "in" | "out";
+  time: number;
+};
+
+function getPunchLog(companyId: string): PunchRecord[] {
+  try {
+    return JSON.parse(localStorage.getItem(PUNCH_KEY(companyId)) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+function savePunchLog(companyId: string, logs: PunchRecord[]) {
+  localStorage.setItem(PUNCH_KEY(companyId), JSON.stringify(logs));
+}
 
 const EMPTY_FORM = {
   name: "",
@@ -888,6 +910,15 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   const [staffProfilePhoto, setStaffProfilePhoto] = useState(() =>
     getStaffPhoto(session.staffId ?? ""),
   );
+
+  // Punch in/out
+  const [punchLog, setPunchLog] = useState<PunchRecord[]>(() =>
+    getPunchLog(session.companyId),
+  );
+
+  // Visitor name autocomplete
+  const [nameQuery, setNameQuery] = useState("");
+  const [showNameSuggestions, setShowNameSuggestions] = useState(false);
 
   // Guest invitation
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -1669,7 +1700,13 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setPdfLoading(v.visitorId);
     try {
       const hostName = staffList.find((s) => s.staffId === v.hostStaffId)?.name;
-      await generateVisitorBadgePDF(v, company?.name ?? "Safentry", hostName);
+      await generateVisitorBadgePDF(
+        v,
+        company?.name ?? "Safentry",
+        hostName,
+        false,
+        v.visitorLanguage,
+      );
     } catch (err) {
       console.error("PDF generation failed", err);
     } finally {
@@ -1686,6 +1723,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         company?.name ?? "Safentry",
         hostName,
         true,
+        v.visitorLanguage,
       );
       toast.success("Rozet yazdırıldı");
     } catch (err) {
@@ -2199,6 +2237,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["messages" as Tab, "💬 Mesajlar"] as [Tab, string],
     ["training" as Tab, "🎓 Eğitim"] as [Tab, string],
     ["queue" as Tab, "🔢 Bekleme Sırası"] as [Tab, string],
+    ["punchin" as Tab, "⏱️ Mesai Takibi"] as [Tab, string],
   ];
 
   return (
@@ -4834,14 +4873,71 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   <p className="text-slate-300 text-sm mb-1 block">
                     {t(lang, "visitorName")} *
                   </p>
-                  <input
-                    data-ocid="register.name.input"
-                    value={form.name}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, name: e.target.value }))
-                    }
-                    className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
-                  />
+                  <div className="relative">
+                    <input
+                      data-ocid="register.name.input"
+                      value={form.name}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setForm((f) => ({ ...f, name: val }));
+                        setNameQuery(val);
+                        setShowNameSuggestions(true);
+                      }}
+                      onBlur={() =>
+                        setTimeout(() => setShowNameSuggestions(false), 150)
+                      }
+                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
+                    />
+                    {showNameSuggestions &&
+                      nameQuery.length >= 2 &&
+                      (() => {
+                        const nameSuggestions = visitors
+                          .filter(
+                            (v) =>
+                              v.status === "departed" &&
+                              v.name
+                                .toLowerCase()
+                                .includes(nameQuery.toLowerCase()),
+                          )
+                          .slice(0, 5);
+                        return nameSuggestions.length > 0 ? (
+                          <div
+                            className="absolute z-50 top-full left-0 right-0 mt-1 rounded-xl overflow-hidden"
+                            style={{
+                              background: "#1e2a3a",
+                              border: "1px solid rgba(14,165,233,0.3)",
+                            }}
+                          >
+                            {nameSuggestions.map((v) => (
+                              <button
+                                type="button"
+                                key={v.visitorId}
+                                className="w-full px-4 py-2.5 text-left hover:bg-[rgba(14,165,233,0.1)] text-sm"
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  setForm((f) => ({
+                                    ...f,
+                                    name: v.name,
+                                    phone: v.phone,
+                                    visitType: v.visitType,
+                                    category: v.category ?? f.category,
+                                  }));
+                                  setShowNameSuggestions(false);
+                                  setNameQuery("");
+                                }}
+                              >
+                                <span className="text-white font-medium">
+                                  {v.name}
+                                </span>
+                                <span className="text-slate-400 text-xs ml-2">
+                                  {v.phone}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null;
+                      })()}
+                  </div>
                 </div>
                 <div>
                   <p className="text-slate-300 text-sm mb-1 block">
@@ -10095,6 +10191,326 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                                 ✅ Karşılandı
                               </button>
                             </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+          {tab === "punchin" &&
+            (() => {
+              const staffName = (() => {
+                const s = staffList.find((s) => s.staffId === session.staffId);
+                return s?.name ?? session.staffId ?? "Personel";
+              })();
+              const todayStart = new Date();
+              todayStart.setHours(0, 0, 0, 0);
+              const todayPunches = punchLog.filter(
+                (p) =>
+                  p.staffId === session.staffId &&
+                  p.time >= todayStart.getTime(),
+              );
+              const lastPunch = [...punchLog]
+                .filter((p) => p.staffId === session.staffId)
+                .sort((a, b) => b.time - a.time)[0];
+              const isPunchedIn = lastPunch?.type === "in";
+              let todayMs = 0;
+              const sorted = [...todayPunches].sort((a, b) => a.time - b.time);
+              let inTime: number | null = null;
+              for (const p of sorted) {
+                if (p.type === "in") {
+                  inTime = p.time;
+                } else if (p.type === "out" && inTime !== null) {
+                  todayMs += p.time - inTime;
+                  inTime = null;
+                }
+              }
+              if (isPunchedIn && inTime !== null)
+                todayMs += Date.now() - inTime;
+              const todayHours = (todayMs / 3600000).toFixed(2);
+              return (
+                <div className="max-w-lg mx-auto space-y-6">
+                  <div className="text-center">
+                    <h2 className="text-xl font-bold text-white mb-1">
+                      ⏱️ Mesai Takibi
+                    </h2>
+                    <p className="text-slate-400 text-sm">
+                      Vardiya başlatma ve bitiş kaydı
+                    </p>
+                  </div>
+                  <div
+                    className="flex flex-col items-center gap-4 p-8 rounded-2xl"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    <div
+                      className={`px-4 py-1.5 rounded-full text-sm font-semibold ${isPunchedIn ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40" : "bg-slate-700/50 text-slate-400 border border-slate-600/40"}`}
+                    >
+                      {isPunchedIn ? "🟢 Görevde" : "⚪ Görev Dışı"}
+                    </div>
+                    <button
+                      data-ocid="punchin.primary_button"
+                      type="button"
+                      onClick={() => {
+                        const record: PunchRecord = {
+                          id: Date.now().toString(),
+                          staffId: session.staffId ?? "",
+                          staffName,
+                          type: isPunchedIn ? "out" : "in",
+                          time: Date.now(),
+                        };
+                        const updated = [...punchLog, record];
+                        savePunchLog(session.companyId, updated);
+                        setPunchLog(updated);
+                      }}
+                      className="w-48 h-48 rounded-full text-white font-bold text-xl transition-all hover:scale-105 active:scale-95 shadow-lg"
+                      style={{
+                        background: isPunchedIn
+                          ? "linear-gradient(135deg,#ef4444,#dc2626)"
+                          : "linear-gradient(135deg,#22c55e,#16a34a)",
+                      }}
+                    >
+                      {isPunchedIn ? "Görevi Bitir" : "Göreve Başla"}
+                    </button>
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-[#0ea5e9]">
+                        {todayHours} sa
+                      </div>
+                      <div className="text-slate-400 text-sm">
+                        Bugünkü çalışma süresi
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    className="rounded-2xl overflow-hidden"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                    }}
+                  >
+                    <div className="px-4 py-3 border-b border-white/10">
+                      <h3 className="text-white font-semibold text-sm">
+                        Son Kayıtlar
+                      </h3>
+                    </div>
+                    {[...punchLog]
+                      .filter((p) => p.staffId === session.staffId)
+                      .sort((a, b) => b.time - a.time)
+                      .slice(0, 20).length === 0 ? (
+                      <div
+                        data-ocid="punchin.empty_state"
+                        className="text-center py-10 text-slate-500"
+                      >
+                        <div className="text-4xl mb-2">⏱️</div>
+                        <p className="text-sm">Henüz kayıt yok</p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-white/5">
+                        {[...punchLog]
+                          .filter((p) => p.staffId === session.staffId)
+                          .sort((a, b) => b.time - a.time)
+                          .slice(0, 20)
+                          .map((p, idx) => (
+                            <div
+                              key={p.id}
+                              data-ocid={`punchin.item.${idx + 1}`}
+                              className="px-4 py-3 flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${p.type === "in" ? "bg-emerald-400" : "bg-red-400"}`}
+                                />
+                                <span
+                                  className={`text-sm font-medium ${p.type === "in" ? "text-emerald-400" : "text-red-400"}`}
+                                >
+                                  {p.type === "in" ? "Giriş" : "Çıkış"}
+                                </span>
+                              </div>
+                              <span className="text-slate-400 text-xs">
+                                {new Date(p.time).toLocaleString("tr-TR")}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+          {tab === "invitations" &&
+            (() => {
+              const stage1 = invitations.length;
+              const stage2 = invitations.filter(
+                (inv) => (inv as any).openedAt,
+              ).length;
+              const stage3 = invitations.filter(
+                (inv) =>
+                  (inv as any).preRegCompleted ||
+                  (inv as any).status === "preregistered",
+              ).length;
+              const stage4 = invitations.filter(
+                (inv) => (inv as any).converted,
+              ).length;
+              const getStage = (inv: Invitation) => {
+                if ((inv as any).converted) return 4;
+                if (
+                  (inv as any).preRegCompleted ||
+                  (inv as any).status === "preregistered"
+                )
+                  return 3;
+                if ((inv as any).openedAt) return 2;
+                return 1;
+              };
+              const stageLabel = (s: number) =>
+                s === 4
+                  ? "Randevuya Dönüştü"
+                  : s === 3
+                    ? "Ön Kayıt Tamamlandı"
+                    : s === 2
+                      ? "Açıldı"
+                      : "Gönderildi";
+              const stageColor = (s: number) =>
+                s === 4
+                  ? {
+                      bg: "rgba(16,185,129,0.15)",
+                      border: "rgba(16,185,129,0.4)",
+                      text: "#34d399",
+                    }
+                  : s === 3
+                    ? {
+                        bg: "rgba(245,158,11,0.15)",
+                        border: "rgba(245,158,11,0.4)",
+                        text: "#fbbf24",
+                      }
+                    : s === 2
+                      ? {
+                          bg: "rgba(14,165,233,0.15)",
+                          border: "rgba(14,165,233,0.4)",
+                          text: "#38bdf8",
+                        }
+                      : {
+                          bg: "rgba(100,116,139,0.15)",
+                          border: "rgba(100,116,139,0.4)",
+                          text: "#94a3b8",
+                        };
+              return (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xl font-bold text-white">
+                      ✉️ Davet Takip Hunisi
+                    </h2>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {(
+                      [
+                        ["Gönderildi", stage1, 1],
+                        ["Açıldı", stage2, 2],
+                        ["Ön Kayıt", stage3, 3],
+                        ["Dönüştü", stage4, 4],
+                      ] as [string, number, number][]
+                    ).map(([label, count, s], i, arr) => {
+                      const c = stageColor(s);
+                      return (
+                        <div key={label} className="flex items-center gap-1">
+                          <div
+                            className="flex-1 rounded-xl p-4 text-center"
+                            style={{
+                              background: c.bg,
+                              border: `1px solid ${c.border}`,
+                            }}
+                          >
+                            <div
+                              className="text-2xl font-bold"
+                              style={{ color: c.text }}
+                            >
+                              {count}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-1">
+                              {label}
+                            </div>
+                          </div>
+                          {i < arr.length - 1 && (
+                            <span className="text-slate-600 text-lg">→</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {invitations.length === 0 ? (
+                    <div
+                      data-ocid="invitations.empty_state"
+                      className="text-center py-16 text-slate-500"
+                    >
+                      <div className="text-5xl mb-3">✉️</div>
+                      <p className="text-lg font-medium">Henüz davet yok</p>
+                      <p className="text-sm mt-1">
+                        Ziyaretçilere davet linki göndermek için yeni davet
+                        oluşturun
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {invitations.map((inv, idx) => {
+                        const s = getStage(inv);
+                        const c = stageColor(s);
+                        const link = `${window.location.origin}/?invite=${inv.token}`;
+                        return (
+                          <div
+                            key={inv.token}
+                            data-ocid={`invitations.item.${idx + 1}`}
+                            className="p-4 rounded-xl flex items-center justify-between gap-4"
+                            style={{
+                              background: "rgba(255,255,255,0.04)",
+                              border: "1px solid rgba(255,255,255,0.08)",
+                            }}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-white font-medium text-sm">
+                                  {inv.visitorName || "—"}
+                                </span>
+                                <span
+                                  className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                                  style={{
+                                    background: c.bg,
+                                    border: `1px solid ${c.border}`,
+                                    color: c.text,
+                                  }}
+                                >
+                                  {stageLabel(s)}
+                                </span>
+                              </div>
+                              <div className="text-slate-500 text-xs mt-0.5 font-mono">
+                                {inv.token}
+                              </div>
+                              <div className="text-slate-500 text-xs">
+                                {new Date(inv.createdAt).toLocaleDateString(
+                                  "tr-TR",
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              data-ocid={`invitations.item.${idx + 1}.button`}
+                              type="button"
+                              onClick={() =>
+                                navigator.clipboard
+                                  .writeText(link)
+                                  .catch(() => {})
+                              }
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-white shrink-0 hover:opacity-80 transition-opacity"
+                              style={{
+                                background: "rgba(14,165,233,0.2)",
+                                border: "1px solid rgba(14,165,233,0.4)",
+                              }}
+                            >
+                              🔗 Kopyala
+                            </button>
                           </div>
                         );
                       })}
