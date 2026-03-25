@@ -44,6 +44,7 @@ import ConversionAnalysisTab from "../components/ConversionAnalysisTab";
 import CorporateCrmTab from "../components/CorporateCrmTab";
 import CsvImportModal from "../components/CsvImportModal";
 import DataExportTab from "../components/DataExportTab";
+import DemandForecastTab from "../components/DemandForecastTab";
 import DemographicTab from "../components/DemographicTab";
 import DocumentCalendarTab from "../components/DocumentCalendarTab";
 import DocumentTemplateTab from "../components/DocumentTemplateTab";
@@ -59,15 +60,18 @@ import {
   HealthQuestionsManager,
 } from "../components/HealthScreeningTab";
 import HelpCenter from "../components/HelpCenter";
+import HotDeskTab from "../components/HotDeskTab";
 import { CompanyImprovementTasksTab } from "../components/ImprovementTasksTab";
 import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
 import InvestigationTab from "../components/InvestigationTab";
 import KioskThemeSection from "../components/KioskThemeSection";
 import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
+import LiveScoreTab from "../components/LiveScoreTab";
 import LostFoundTab from "../components/LostFoundTab";
 import LoyaltyAnalysisTab from "../components/LoyaltyAnalysisTab";
 import MeetingNotesTab from "../components/MeetingNotesTab";
+import MsgTemplatesTab from "../components/MsgTemplatesTab";
 import NotificationCenter from "../components/NotificationCenter";
 import NotificationRulesTab from "../components/NotificationRulesTab";
 import OnboardingWizard, {
@@ -75,6 +79,7 @@ import OnboardingWizard, {
 } from "../components/OnboardingWizard";
 import ParkingManager from "../components/ParkingManager";
 import ParkingValidationTab from "../components/ParkingValidationTab";
+import PolicyVersionTab from "../components/PolicyVersionTab";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistHistoryPanel } from "../components/SecurityChecklist";
 import SegmentationAnalysis from "../components/SegmentationAnalysis";
@@ -86,6 +91,7 @@ import StaffPerformanceTab from "../components/StaffPerformanceTab";
 import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
 import VehicleLogTab from "../components/VehicleLogTab";
+import VehicleWaitingTab from "../components/VehicleWaitingTab";
 import VisitTimeline from "../components/VisitTimeline";
 import VisitorBadgeSystemTab from "../components/VisitorBadgeSystemTab";
 import VisitorBroadcastModal from "../components/VisitorBroadcastModal";
@@ -396,7 +402,13 @@ type Tab =
   | "contractordailybriefing"
   | "kioskmaintenance"
   | "yetkimatrisi"
-  | "gdprexport";
+  | "gdprexport"
+  | "hotdesk"
+  | "msgtemplates"
+  | "livescore"
+  | "vehiclewaiting"
+  | "policyversion"
+  | "demandforecast";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -6311,6 +6323,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "kioskmaintenance", label: "🔧 Kiosk Bakım" },
     { key: "yetkimatrisi", label: "🔑 Yetki Matrisi" },
     { key: "gdprexport", label: "📦 Veri Yedeği" },
+    { key: "hotdesk", label: "🖥️ Hot Desk" },
+    { key: "msgtemplates", label: "💬 İletişim Şablonları" },
+    { key: "livescore", label: "🏆 Canlı Skor" },
+    { key: "vehiclewaiting", label: "🚗 Araçta Bekleme" },
+    { key: "policyversion", label: "📜 Politika Versiyonları" },
+    { key: "demandforecast", label: "📊 Yoğunluk Tahmini" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -13406,6 +13424,23 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           <GDPRDataExportPanel
             companyId={session.companyId}
             companyName={company.name}
+          />
+        )}
+        {tab === "hotdesk" && <HotDeskTab companyId={session.companyId} />}
+        {tab === "msgtemplates" && (
+          <MsgTemplatesTab companyId={session.companyId} />
+        )}
+        {tab === "livescore" && <LiveScoreTab companyId={session.companyId} />}
+        {tab === "vehiclewaiting" && (
+          <VehicleWaitingTab companyId={session.companyId} />
+        )}
+        {tab === "policyversion" && (
+          <PolicyVersionTab companyId={session.companyId} />
+        )}
+        {tab === "demandforecast" && (
+          <DemandForecastTab
+            companyId={session.companyId}
+            visitors={visitors}
           />
         )}
         {tab === "profile" && company && (
