@@ -2108,3 +2108,58 @@ export function getTemplateForCategory(
     ) ?? null
   );
 }
+
+export interface KioskMaintenanceSettings {
+  enabled: boolean;
+  message: string;
+  estimatedEnd?: string;
+}
+export function getKioskMaintenance(
+  companyId: string,
+): KioskMaintenanceSettings {
+  try {
+    return (
+      JSON.parse(
+        localStorage.getItem(`safentry_kiosk_maint_${companyId}`) || "null",
+      ) ?? {
+        enabled: false,
+        message:
+          "Kiosk geçici olarak hizmet dışıdır. Lütfen resepsiyona başvurun.",
+      }
+    );
+  } catch {
+    return { enabled: false, message: "Kiosk geçici olarak hizmet dışıdır." };
+  }
+}
+export function saveKioskMaintenance(
+  companyId: string,
+  s: KioskMaintenanceSettings,
+): void {
+  localStorage.setItem(`safentry_kiosk_maint_${companyId}`, JSON.stringify(s));
+}
+
+export type StaffModulePermission = {
+  staffId: string;
+  companyId: string;
+  allowedModules: string[];
+};
+export function getStaffPermissions(
+  companyId: string,
+): StaffModulePermission[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_staffperms_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveStaffPermissions(
+  companyId: string,
+  perms: StaffModulePermission[],
+): void {
+  localStorage.setItem(
+    `safentry_staffperms_${companyId}`,
+    JSON.stringify(perms),
+  );
+}

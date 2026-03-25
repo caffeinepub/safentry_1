@@ -393,7 +393,10 @@ type Tab =
   | "categorywelcome"
   | "parkingvalidation"
   | "blackoutperiods"
-  | "contractordailybriefing";
+  | "contractordailybriefing"
+  | "kioskmaintenance"
+  | "yetkimatrisi"
+  | "gdprexport";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -4849,6 +4852,392 @@ function CategoryWelcomePanel({
   );
 }
 
+function KioskMaintenancePanel({ companyId }: { companyId: string }) {
+  const init = (() => {
+    try {
+      return (
+        JSON.parse(
+          localStorage.getItem(`safentry_kiosk_maint_${companyId}`) || "null",
+        ) ?? {
+          enabled: false,
+          message:
+            "Kiosk geçici olarak hizmet dışıdır. Lütfen resepsiyona başvurun.",
+        }
+      );
+    } catch {
+      return { enabled: false, message: "Kiosk geçici olarak hizmet dışıdır." };
+    }
+  })();
+  const [enabled, setEnabled] = React.useState<boolean>(init.enabled);
+  const [message, setMessage] = React.useState<string>(init.message);
+  const [estimatedEnd, setEstimatedEnd] = React.useState<string>(
+    init.estimatedEnd || "",
+  );
+  const save = () => {
+    localStorage.setItem(
+      `safentry_kiosk_maint_${companyId}`,
+      JSON.stringify({ enabled, message, estimatedEnd }),
+    );
+    toast.success(
+      enabled ? "Kiosk bakım moduna alındı" : "Kiosk bakım modu kapatıldı",
+    );
+  };
+  return (
+    <div className="max-w-lg space-y-4">
+      <h2 className="text-white font-bold text-lg">🔧 Kiosk Bakım Modu</h2>
+      <p className="text-slate-400 text-sm">
+        Kiosk'u geçici olarak devre dışı bırakın ve ziyaretçilere özel mesaj
+        gösterin.
+      </p>
+      <div
+        className="rounded-2xl p-5 space-y-4"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div className="flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setEnabled(!enabled)}
+            onKeyDown={(e) => e.key === "Enter" && setEnabled(!enabled)}
+            className={`relative w-12 h-6 rounded-full transition-colors ${enabled ? "bg-amber-500" : "bg-slate-600"}`}
+          >
+            <div
+              className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enabled ? "left-6" : "left-0.5"}`}
+            />
+          </button>
+          <span className="text-slate-200 font-medium">
+            {enabled ? "Bakım modu AKTİF" : "Bakım modu kapalı"}
+          </span>
+        </div>
+        <div>
+          <label
+            htmlFor="kiosk-maint-msg"
+            className="text-slate-400 text-xs block mb-1"
+          >
+            Ziyaretçiye gösterilecek mesaj
+          </label>
+          <textarea
+            id="kiosk-maint-msg"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            rows={3}
+            className="w-full px-3 py-2 rounded-xl text-white text-sm resize-none"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          />
+        </div>
+        <div>
+          <label
+            htmlFor="kiosk-est-end"
+            className="text-slate-400 text-xs block mb-1"
+          >
+            Tahmini bitiş zamanı (isteğe bağlı)
+          </label>
+          <input
+            id="kiosk-est-end"
+            type="text"
+            value={estimatedEnd}
+            onChange={(e) => setEstimatedEnd(e.target.value)}
+            placeholder="örn: Bugün saat 15:00"
+            className="w-full px-3 py-2 rounded-xl text-white text-sm"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.15)",
+            }}
+          />
+        </div>
+        <button
+          type="button"
+          data-ocid="kiosk_maint.save_button"
+          onClick={save}
+          className="w-full py-2 rounded-xl text-white font-semibold text-sm"
+          style={{
+            background: enabled
+              ? "linear-gradient(135deg,#f59e0b,#d97706)"
+              : "rgba(20,184,166,0.3)",
+            border: "1px solid rgba(255,255,255,0.2)",
+          }}
+        >
+          {enabled ? "🔧 Bakım Modunu Uygula" : "✅ Ayarı Kaydet"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const ALL_MODULES = [
+  { key: "visitors", label: "Ziyaretçiler" },
+  { key: "appointments", label: "Randevular" },
+  { key: "blacklist", label: "Kara Liste" },
+  { key: "staff", label: "Personel" },
+  { key: "statistics", label: "İstatistikler" },
+  { key: "evacuation", label: "Tahliye" },
+  { key: "maintenance", label: "Bakım Talepleri" },
+  { key: "parking", label: "Otopark" },
+  { key: "incidents", label: "Güvenlik Olayları" },
+  { key: "equipment", label: "Ekipman" },
+  { key: "groups", label: "Grup Kayıt" },
+  { key: "lostfound", label: "Kayıp & Bulunan" },
+];
+
+function StaffPermissionMatrix({ companyId }: { companyId: string }) {
+  const staffList = getStaffByCompany(companyId);
+  const [perms, setPerms] = React.useState<Record<string, string[]>>(() => {
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`safentry_staffperms_${companyId}`) || "[]",
+      ) as { staffId: string; allowedModules: string[] }[];
+      const map: Record<string, string[]> = {};
+      for (const s of saved) map[s.staffId] = s.allowedModules;
+      return map;
+    } catch {
+      return {};
+    }
+  });
+  const toggle = (staffId: string, mod: string) => {
+    setPerms((prev) => {
+      const current = prev[staffId] ?? ALL_MODULES.map((m) => m.key);
+      const next = current.includes(mod)
+        ? current.filter((m) => m !== mod)
+        : [...current, mod];
+      return { ...prev, [staffId]: next };
+    });
+  };
+  const getModules = (staffId: string) =>
+    perms[staffId] ?? ALL_MODULES.map((m) => m.key);
+  const save = () => {
+    const arr = staffList.map((s) => ({
+      staffId: s.staffId,
+      companyId,
+      allowedModules: getModules(s.staffId),
+    }));
+    localStorage.setItem(
+      `safentry_staffperms_${companyId}`,
+      JSON.stringify(arr),
+    );
+    toast.success("Yetki matrisi kaydedildi");
+  };
+  if (!staffList.length)
+    return (
+      <div className="text-slate-400 text-sm p-8 text-center">
+        Henüz personel eklenmemiş.
+      </div>
+    );
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-white font-bold text-lg">
+          🔑 Granüler Yetki Matrisi
+        </h2>
+        <button
+          type="button"
+          data-ocid="perm_matrix.save_button"
+          onClick={save}
+          className="px-4 py-2 rounded-xl text-white text-sm font-semibold"
+          style={{
+            background: "rgba(20,184,166,0.3)",
+            border: "1px solid rgba(20,184,166,0.4)",
+          }}
+        >
+          Kaydet
+        </button>
+      </div>
+      <p className="text-slate-400 text-sm">
+        Her personelin hangi modüllere erişebileceğini belirleyin. Yöneticiler
+        için tüm modüller her zaman açıktır.
+      </p>
+      <div
+        className="overflow-x-auto rounded-2xl"
+        style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+      >
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.04)" }}>
+              <th className="text-left px-4 py-3 text-slate-300 font-semibold min-w-32">
+                Personel
+              </th>
+              {ALL_MODULES.map((m) => (
+                <th
+                  key={m.key}
+                  className="px-2 py-3 text-slate-400 font-medium text-xs text-center min-w-20"
+                >
+                  {m.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {staffList.map((s) => (
+              <tr
+                key={s.staffId}
+                style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+              >
+                <td className="px-4 py-3">
+                  <div className="text-white font-medium">{s.name}</div>
+                  <div className="text-slate-500 text-xs">
+                    {s.role === "admin"
+                      ? "Yönetici"
+                      : s.role === "receptionist"
+                        ? "Resepsiyon"
+                        : "Güvenlik"}
+                  </div>
+                </td>
+                {ALL_MODULES.map((m) => {
+                  const isAdmin = s.role === "admin";
+                  const checked =
+                    isAdmin || getModules(s.staffId).includes(m.key);
+                  return (
+                    <td key={m.key} className="px-2 py-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => !isAdmin && toggle(s.staffId, m.key)}
+                        disabled={isAdmin}
+                        className={`w-6 h-6 rounded-md flex items-center justify-center mx-auto transition-colors ${checked ? "bg-teal-500" : "bg-slate-700"} ${isAdmin ? "opacity-60 cursor-default" : "cursor-pointer hover:opacity-80"}`}
+                      >
+                        {checked && (
+                          <span className="text-white text-xs">✓</span>
+                        )}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function GDPRDataExportPanel({
+  companyId,
+  companyName,
+}: { companyId: string; companyName: string }) {
+  const [exporting, setExporting] = React.useState(false);
+  const handleExport = () => {
+    setExporting(true);
+    try {
+      const visitors = getVisitors(companyId);
+      const staff = getStaffByCompany(companyId);
+      const blacklist = getBlacklist(companyId);
+      const appointments = getAppointments(companyId);
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        companyId,
+        companyName,
+        gdprNote:
+          "Bu veri paketi GDPR Madde 20 kapsamında veri taşınabilirliği hakkı çerçevesinde oluşturulmuştur.",
+        counts: {
+          visitors: visitors.length,
+          staff: staff.length,
+          blacklist: blacklist.length,
+          appointments: appointments.length,
+        },
+        visitors,
+        staff,
+        blacklist,
+        appointments,
+      };
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `safentry-veri-yedegi-${companyId}-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Veri paketi indirildi");
+    } catch {
+      toast.error("Dışa aktarım sırasında hata oluştu");
+    } finally {
+      setExporting(false);
+    }
+  };
+  const SECTIONS = [
+    {
+      icon: "👥",
+      label: "Ziyaretçi Kayıtları",
+      desc: "Tüm geçmiş ve aktif ziyaretçi kayıtları",
+    },
+    {
+      icon: "👤",
+      label: "Personel Listesi",
+      desc: "Şirket personeli bilgileri (şifreler dahil değil)",
+    },
+    { icon: "🚫", label: "Kara Liste", desc: "Yasaklı kişi kayıtları" },
+    {
+      icon: "📅",
+      label: "Randevular",
+      desc: "Tüm randevu ve toplantı kayıtları",
+    },
+  ];
+  return (
+    <div className="max-w-lg space-y-5">
+      <h2 className="text-white font-bold text-lg">
+        📦 GDPR Veri Yedek Paketi
+      </h2>
+      <p className="text-slate-400 text-sm">
+        GDPR Madde 20 kapsamında veri taşınabilirliği hakkı. Şirketinize ait tüm
+        verileri JSON formatında indirin.
+      </p>
+      <div
+        className="rounded-2xl p-4 space-y-3"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <p className="text-slate-300 text-sm font-semibold">
+          Pakete dahil edilecekler:
+        </p>
+        {SECTIONS.map((s) => (
+          <div
+            key={s.label}
+            className="flex items-start gap-3 py-2"
+            style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+          >
+            <span className="text-xl">{s.icon}</span>
+            <div>
+              <p className="text-white text-sm font-medium">{s.label}</p>
+              <p className="text-slate-500 text-xs">{s.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div
+        className="rounded-2xl p-4"
+        style={{
+          background: "rgba(245,158,11,0.08)",
+          border: "1px solid rgba(245,158,11,0.2)",
+        }}
+      >
+        <p className="text-amber-400 text-xs">
+          ⚠️ Bu paketi güvenli bir ortamda saklayın. Kişisel veri içermektedir.
+        </p>
+      </div>
+      <button
+        type="button"
+        data-ocid="gdpr_export.download_button"
+        onClick={handleExport}
+        disabled={exporting}
+        className="w-full py-3 rounded-xl text-white font-semibold text-sm"
+        style={{
+          background:
+            "linear-gradient(135deg,rgba(20,184,166,0.4),rgba(6,182,212,0.4))",
+          border: "1px solid rgba(20,184,166,0.4)",
+        }}
+      >
+        {exporting ? "⏳ Hazırlanıyor..." : "📥 Veri Paketini İndir (JSON)"}
+      </button>
+    </div>
+  );
+}
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
@@ -5919,6 +6308,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "parkingvalidation", label: "🎟️ Otopark Doğrulama" },
     { key: "blackoutperiods", label: "🚫 Ziyaret Yasak Dönemleri" },
     { key: "contractordailybriefing", label: "⛑️ Müteahhit Günlük Brifing" },
+    { key: "kioskmaintenance", label: "🔧 Kiosk Bakım" },
+    { key: "yetkimatrisi", label: "🔑 Yetki Matrisi" },
+    { key: "gdprexport", label: "📦 Veri Yedeği" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -13002,6 +13394,20 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
           <ContractorDailyBriefingTab companyId={session.companyId} />
         )}
 
+        {tab === "kioskmaintenance" && (
+          <KioskMaintenancePanel companyId={session.companyId} />
+        )}
+
+        {tab === "yetkimatrisi" && (
+          <StaffPermissionMatrix companyId={session.companyId} />
+        )}
+
+        {tab === "gdprexport" && company && (
+          <GDPRDataExportPanel
+            companyId={session.companyId}
+            companyName={company.name}
+          />
+        )}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}

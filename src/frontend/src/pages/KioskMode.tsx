@@ -75,6 +75,18 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
   const categories = getCustomCategories(companyId);
   const customFields = company?.customFields ?? [];
 
+  const [kioskMaint] = useState(() => {
+    try {
+      return (
+        JSON.parse(
+          localStorage.getItem(`safentry_kiosk_maint_${companyId}`) || "null",
+        ) ?? null
+      );
+    } catch {
+      return null;
+    }
+  });
+
   const [screen, setScreen] = useState<
     | "lang-select"
     | "welcome"
@@ -444,6 +456,49 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
     setScreen("waiting");
   };
 
+  if (kioskMaint?.enabled) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "#0a1628",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 24,
+          padding: 32,
+        }}
+      >
+        <div style={{ fontSize: 64 }}>🔧</div>
+        <h1
+          style={{
+            color: "#f59e0b",
+            fontSize: 28,
+            fontWeight: 700,
+            textAlign: "center",
+          }}
+        >
+          Kiosk Bakımda
+        </h1>
+        <p
+          style={{
+            color: "#94a3b8",
+            fontSize: 16,
+            textAlign: "center",
+            maxWidth: 400,
+          }}
+        >
+          {kioskMaint.message}
+        </p>
+        {kioskMaint.estimatedEnd && (
+          <p style={{ color: "#64748b", fontSize: 14 }}>
+            Tahmini bitiş: {kioskMaint.estimatedEnd}
+          </p>
+        )}
+      </div>
+    );
+  }
   // Lockdown check
   const isLockedDown = getLockdown(companyId);
   if (isLockedDown) {
