@@ -16,6 +16,17 @@ interface Props {
   staffName: string;
 }
 
+interface MediaItem {
+  id: string;
+  title: string;
+  type: "PDF" | "Sunum" | "Fotoğraf" | "Video" | "Diğer";
+  description: string;
+  url: string;
+  addedAt: number;
+}
+
+type EventMediaStore = Record<string, MediaItem[]>;
+
 const CATEGORY_LABELS: Record<string, string> = {
   seminar: "Seminer",
   audit: "Denetim",
@@ -35,6 +46,26 @@ const STATUS_LABELS: Record<string, string> = {
   completed: "Tamamlandı",
 };
 
+const MEDIA_TYPE_ICONS: Record<string, string> = {
+  PDF: "📄",
+  Sunum: "📊",
+  Fotoğraf: "🖼️",
+  Video: "🎬",
+  Diğer: "📎",
+};
+
+function getEventMedia(companyId: string): EventMediaStore {
+  try {
+    return JSON.parse(localStorage.getItem(`eventMedia_${companyId}`) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function saveEventMedia(companyId: string, store: EventMediaStore) {
+  localStorage.setItem(`eventMedia_${companyId}`, JSON.stringify(store));
+}
+
 export default function CompanyEventsTab({
   companyId,
   staffId: _staffId,
@@ -46,9 +77,13 @@ export default function CompanyEventsTab({
   const [attendees, setAttendees] = useState<EventAttendee[]>(() =>
     getEventAttendees(companyId),
   );
+  const [mediaStore, setMediaStore] = useState<EventMediaStore>(() =>
+    getEventMedia(companyId),
+  );
   const [selectedEvent, setSelectedEvent] = useState<CompanyEvent | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showAttendeeModal, setShowAttendeeModal] = useState(false);
+  const [showMediaModal, setShowMediaModal] = useState(false);
   const [form, setForm] = useState({
     name: "",
     date: "",
@@ -63,10 +98,17 @@ export default function CompanyEventsTab({
     phone: "",
     company: "",
   });
+  const [mediaForm, setMediaForm] = useState({
+    title: "",
+    type: "PDF" as MediaItem["type"],
+    description: "",
+    url: "",
+  });
 
   const reload = () => {
     setEvents(getCompanyEvents(companyId));
     setAttendees(getEventAttendees(companyId));
+    setMediaStore(getEventMedia(companyId));
   };
 
   const autoStatus = (ev: CompanyEvent): CompanyEvent["status"] => {
@@ -125,6 +167,35 @@ export default function CompanyEventsTab({
     setShowAttendeeModal(false);
   };
 
+  const handleAddMedia = () => {
+    if (!mediaForm.title.trim() || !selectedEvent) return;
+    const newItem: MediaItem = {
+      id: `${Date.now()}_${Math.random()}`,
+      title: mediaForm.title.trim(),
+      type: mediaForm.type,
+      description: mediaForm.description.trim(),
+      url: mediaForm.url.trim(),
+      addedAt: Date.now(),
+    };
+    const updated: EventMediaStore = {
+      ...mediaStore,
+      [selectedEvent.id]: [...(mediaStore[selectedEvent.id] || []), newItem],
+    };
+    saveEventMedia(companyId, updated);
+    setMediaStore(updated);
+    setMediaForm({ title: "", type: "PDF", description: "", url: "" });
+    setShowMediaModal(false);
+  };
+
+  const handleRemoveMedia = (eventId: string, itemId: string) => {
+    const updated: EventMediaStore = {
+      ...mediaStore,
+      [eventId]: (mediaStore[eventId] || []).filter((m) => m.id !== itemId),
+    };
+    saveEventMedia(companyId, updated);
+    setMediaStore(updated);
+  };
+
   const handleCheckIn = (aId: string) => {
     const a = attendees.find((x) => x.id === aId);
     if (!a) return;
@@ -147,6 +218,9 @@ export default function CompanyEventsTab({
     ? attendees.filter((a) => a.eventId === selectedEvent.id)
     : [];
   const checkedInCount = eventAttendees.filter((a) => a.checkedIn).length;
+  const selectedEventMedia = selectedEvent
+    ? mediaStore[selectedEvent.id] || []
+    : [];
 
   return (
     <div className="space-y-4">
@@ -317,6 +391,102 @@ export default function CompanyEventsTab({
               ))}
             </div>
           )}
+
+          {/* ── Media & Documents Gallery ───────────────────────────── */}
+          <div className="mt-6 space-y-3">
+            <div className="flex justify-between items-center">
+              <h3 className="text-white font-semibold">
+                📎 Medya &amp; Belgeler ({selectedEventMedia.length})
+              </h3>
+              <button
+                type="button"
+                data-ocid="etkinlikler.upload_button"
+                onClick={() => setShowMediaModal(true)}
+                className="text-sm px-3 py-1.5 rounded-lg text-white"
+                style={{
+                  background: "rgba(139,92,246,0.3)",
+                  border: "1px solid rgba(139,92,246,0.4)",
+                }}
+              >
+                + Belge / Medya Ekle
+              </button>
+            </div>
+
+            {selectedEventMedia.length === 0 ? (
+              <div
+                data-ocid="etkinlikler.media.empty_state"
+                className="text-center py-8 rounded-xl"
+                style={cardStyle}
+              >
+                <div className="text-3xl mb-2">📂</div>
+                <p className="text-slate-500 text-sm">
+                  Henüz belge veya medya eklenmemiş
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {selectedEventMedia.map((item, mi) => (
+                  <div
+                    key={item.id}
+                    data-ocid={`etkinlikler.media.item.${mi + 1}`}
+                    className="p-3 rounded-xl flex items-start gap-3"
+                    style={{
+                      background: "rgba(139,92,246,0.06)",
+                      border: "1px solid rgba(139,92,246,0.2)",
+                    }}
+                  >
+                    <span className="text-2xl flex-shrink-0">
+                      {MEDIA_TYPE_ICONS[item.type]}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-1">
+                        <span className="text-white text-sm font-medium truncate">
+                          {item.title}
+                        </span>
+                        <button
+                          type="button"
+                          data-ocid={`etkinlikler.media.delete_button.${mi + 1}`}
+                          onClick={() =>
+                            handleRemoveMedia(selectedEvent.id, item.id)
+                          }
+                          className="text-red-400 hover:text-red-300 text-xs flex-shrink-0"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{
+                          background: "rgba(139,92,246,0.2)",
+                          color: "#c4b5fd",
+                        }}
+                      >
+                        {item.type}
+                      </span>
+                      {item.description && (
+                        <p className="text-slate-400 text-xs mt-1 truncate">
+                          {item.description}
+                        </p>
+                      )}
+                      {item.url && (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-teal-400 hover:text-teal-300 mt-1 block truncate"
+                        >
+                          🔗 Bağlantıyı aç
+                        </a>
+                      )}
+                      <p className="text-slate-600 text-xs mt-1">
+                        {new Date(item.addedAt).toLocaleDateString("tr-TR")}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       ) : (
         <>
@@ -335,6 +505,7 @@ export default function CompanyEventsTab({
                 const evAttendees = attendees.filter(
                   (a) => a.eventId === ev.id,
                 );
+                const evMediaCount = (mediaStore[ev.id] || []).length;
                 return (
                   <button
                     type="button"
@@ -381,9 +552,23 @@ export default function CompanyEventsTab({
                       {new Date(ev.date).toLocaleDateString("tr-TR")}
                     </p>
                     <div className="flex items-center justify-between mt-3">
-                      <span className="text-xs text-slate-400">
-                        {evAttendees.length} / {ev.capacity} kayıtlı
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">
+                          {evAttendees.length} / {ev.capacity} kayıtlı
+                        </span>
+                        {evMediaCount > 0 && (
+                          <span
+                            className="text-xs px-1.5 py-0.5 rounded-full"
+                            style={{
+                              background: "rgba(139,92,246,0.2)",
+                              color: "#c4b5fd",
+                              border: "1px solid rgba(139,92,246,0.3)",
+                            }}
+                          >
+                            📎 {evMediaCount}
+                          </span>
+                        )}
+                      </div>
                       <div className="h-1.5 w-24 rounded-full bg-white/10 overflow-hidden">
                         <div
                           className="h-full rounded-full"
@@ -567,6 +752,103 @@ export default function CompanyEventsTab({
                 type="button"
                 data-ocid="etkinlikler.close_button"
                 onClick={() => setShowAttendeeModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Media Modal */}
+      {showMediaModal && (
+        <div
+          data-ocid="etkinlikler.media.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+            style={{
+              background: "#0f1729",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg">
+              📎 Belge / Medya Ekle
+            </h3>
+            <input
+              data-ocid="etkinlikler.media.input"
+              value={mediaForm.title}
+              onChange={(e) =>
+                setMediaForm((p) => ({ ...p, title: e.target.value }))
+              }
+              className={inputCls}
+              placeholder="Başlık *"
+            />
+            <select
+              value={mediaForm.type}
+              onChange={(e) =>
+                setMediaForm((p) => ({
+                  ...p,
+                  type: e.target.value as MediaItem["type"],
+                }))
+              }
+              className={`${inputCls} bg-[#0f1729]`}
+            >
+              {(
+                [
+                  "PDF",
+                  "Sunum",
+                  "Fotoğraf",
+                  "Video",
+                  "Diğer",
+                ] as MediaItem["type"][]
+              ).map((t) => (
+                <option key={t} value={t}>
+                  {MEDIA_TYPE_ICONS[t]} {t}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={mediaForm.description}
+              onChange={(e) =>
+                setMediaForm((p) => ({ ...p, description: e.target.value }))
+              }
+              rows={2}
+              className={`${inputCls} resize-none`}
+              placeholder="Açıklama (opsiyonel)"
+            />
+            <input
+              value={mediaForm.url}
+              onChange={(e) =>
+                setMediaForm((p) => ({ ...p, url: e.target.value }))
+              }
+              className={inputCls}
+              placeholder="Bağlantı URL (opsiyonel)"
+            />
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="etkinlikler.media.submit_button"
+                onClick={handleAddMedia}
+                disabled={!mediaForm.title.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg,#8b5cf6,#7c3aed)",
+                }}
+              >
+                Ekle
+              </button>
+              <button
+                type="button"
+                data-ocid="etkinlikler.media.cancel_button"
+                onClick={() => setShowMediaModal(false)}
                 className="flex-1 py-2.5 rounded-xl text-sm text-slate-300"
                 style={{
                   background: "rgba(255,255,255,0.06)",

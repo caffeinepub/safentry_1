@@ -26,6 +26,7 @@ import AccessUpgradeRequestsTab from "../components/AccessUpgradeRequestsTab";
 import AppointmentCalendarTab from "../components/AppointmentCalendarTab";
 import ApprovalFlowTemplatesTab from "../components/ApprovalFlowTemplatesTab";
 import AuditReportTab from "../components/AuditReportTab";
+import BlackoutPeriodsTab from "../components/BlackoutPeriodsTab";
 import BranchManager from "../components/BranchManager";
 import BroadcastModal from "../components/BroadcastModal";
 import BuildingMapTab from "../components/BuildingMapTab";
@@ -35,6 +36,7 @@ import CompetencyTab from "../components/CompetencyTab";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ConfirmModal from "../components/ConfirmModal";
 import ConsolidatedReportTab from "../components/ConsolidatedReportTab";
+import ContractorDailyBriefingTab from "../components/ContractorDailyBriefingTab";
 import ContractorFirmsTab from "../components/ContractorFirmsTab";
 import ContractorHoursTab from "../components/ContractorHoursTab";
 import ContractorPortalTab from "../components/ContractorPortalTab";
@@ -72,6 +74,7 @@ import OnboardingWizard, {
   shouldShowOnboarding,
 } from "../components/OnboardingWizard";
 import ParkingManager from "../components/ParkingManager";
+import ParkingValidationTab from "../components/ParkingValidationTab";
 import ReinviteModal from "../components/ReinviteModal";
 import { ChecklistHistoryPanel } from "../components/SecurityChecklist";
 import SegmentationAnalysis from "../components/SegmentationAnalysis";
@@ -382,7 +385,15 @@ type Tab =
   | "erisimstalepleri"
   | "etkinlikler"
   | "rozetsistemi"
-  | "onayakilslablonlari";
+  | "onayakilslablonlari"
+  | "prearrivchecklist"
+  | "roomresources"
+  | "contractmgr"
+  | "personnelrotation"
+  | "categorywelcome"
+  | "parkingvalidation"
+  | "blackoutperiods"
+  | "contractordailybriefing";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -3501,6 +3512,1343 @@ function JourneyReplayTab({
   );
 }
 
+// ── Pre-Arrival Checklist Panel ──
+function PreArrivalChecklistPanel({
+  companyCode,
+  categories,
+}: { companyCode: string; categories: string[] }) {
+  const storageKey = `safentry_prearrival_${companyCode}`;
+  const [checklists, setChecklists] = React.useState<
+    {
+      id: string;
+      name: string;
+      category: string;
+      items: {
+        id: string;
+        label: string;
+        required: boolean;
+        needsDoc: boolean;
+      }[];
+    }[]
+  >(() => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [selected, setSelected] = React.useState<string | null>(null);
+  const [newName, setNewName] = React.useState("");
+  const [newCat, setNewCat] = React.useState(categories[0] || "Misafir");
+  const [newItem, setNewItem] = React.useState("");
+  const [showForm, setShowForm] = React.useState(false);
+
+  const save = (updated: typeof checklists) => {
+    setChecklists(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+  };
+
+  const addChecklist = () => {
+    if (!newName.trim()) return;
+    const cl = {
+      id: Date.now().toString(),
+      name: newName.trim(),
+      category: newCat,
+      items: [],
+    };
+    save([...checklists, cl]);
+    setSelected(cl.id);
+    setNewName("");
+    setShowForm(false);
+  };
+
+  const removeChecklist = (id: string) => {
+    save(checklists.filter((c) => c.id !== id));
+    if (selected === id) setSelected(null);
+  };
+
+  const addItem = (clId: string) => {
+    if (!newItem.trim()) return;
+    save(
+      checklists.map((c) =>
+        c.id === clId
+          ? {
+              ...c,
+              items: [
+                ...c.items,
+                {
+                  id: Date.now().toString(),
+                  label: newItem.trim(),
+                  required: true,
+                  needsDoc: false,
+                },
+              ],
+            }
+          : c,
+      ),
+    );
+    setNewItem("");
+  };
+
+  const toggleItem = (
+    clId: string,
+    itemId: string,
+    field: "required" | "needsDoc",
+  ) => {
+    save(
+      checklists.map((c) =>
+        c.id === clId
+          ? {
+              ...c,
+              items: c.items.map((i) =>
+                i.id === itemId ? { ...i, [field]: !i[field] } : i,
+              ),
+            }
+          : c,
+      ),
+    );
+  };
+
+  const removeItem = (clId: string, itemId: string) => {
+    save(
+      checklists.map((c) =>
+        c.id === clId
+          ? { ...c, items: c.items.filter((i) => i.id !== itemId) }
+          : c,
+      ),
+    );
+  };
+
+  const selectedCl = checklists.find((c) => c.id === selected);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white">
+          ✅ Ziyaret Öncesi Hazırlık Kontrol Listeleri
+        </h2>
+        <button
+          data-ocid="prearrivchecklist.primary_button"
+          type="button"
+          onClick={() => setShowForm(true)}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+          style={{ background: "#14b8a6" }}
+        >
+          + Yeni Liste
+        </button>
+      </div>
+      <p className="text-slate-400 text-sm">
+        Ziyaretçi kategorilerine göre özelleştirilmiş hazırlık kontrol listeleri
+        oluşturun.
+      </p>
+
+      {showForm && (
+        <div className="p-4 rounded-xl border border-teal-500/30 bg-slate-800/60 space-y-3">
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="Liste adı..."
+            className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+          />
+          <select
+            value={newCat}
+            onChange={(e) => setNewCat(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+          >
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={addChecklist}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#14b8a6" }}
+            >
+              Oluştur
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-300 bg-slate-700"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-2">
+          {checklists.length === 0 && (
+            <p
+              data-ocid="prearrivchecklist.empty_state"
+              className="text-slate-500 text-sm p-4 text-center border border-slate-700 rounded-xl"
+            >
+              Henüz liste yok
+            </p>
+          )}
+          {checklists.map((cl) => (
+            <button
+              key={cl.id}
+              type="button"
+              data-ocid={`prearrivchecklist.item.${checklists.indexOf(cl) + 1}`}
+              onClick={() => setSelected(cl.id)}
+              className={`w-full text-left p-3 rounded-xl border cursor-pointer transition-all ${selected === cl.id ? "border-teal-500/60 bg-teal-900/20" : "border-slate-700 bg-slate-800/50 hover:border-slate-600"}`}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white text-sm font-semibold">{cl.name}</p>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    {cl.category} · {cl.items.length} madde
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeChecklist(cl.id);
+                  }}
+                  className="text-red-400 hover:text-red-300 text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="md:col-span-2">
+          {!selectedCl ? (
+            <div className="p-8 text-center border border-slate-700 rounded-xl text-slate-500 text-sm">
+              Soldan bir kontrol listesi seçin
+            </div>
+          ) : (
+            <div className="p-4 rounded-xl border border-slate-700 bg-slate-800/50 space-y-3">
+              <h3 className="text-white font-semibold">
+                {selectedCl.name}{" "}
+                <span className="text-teal-400 text-xs ml-2">
+                  {selectedCl.category}
+                </span>
+              </h3>
+              <div className="flex gap-2">
+                <input
+                  value={newItem}
+                  onChange={(e) => setNewItem(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addItem(selectedCl.id)}
+                  placeholder="Yeni madde ekle..."
+                  className="flex-1 px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => addItem(selectedCl.id)}
+                  className="px-3 py-2 rounded-lg text-sm text-white"
+                  style={{ background: "#14b8a6" }}
+                >
+                  Ekle
+                </button>
+              </div>
+              {selectedCl.items.length === 0 && (
+                <p className="text-slate-500 text-sm text-center py-4">
+                  Madde yok. Yukarıdan ekleyin.
+                </p>
+              )}
+              {selectedCl.items.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 p-2 rounded-lg bg-slate-700/50 border border-slate-600/50"
+                >
+                  <span className="text-slate-400 text-xs w-5 text-center">
+                    {idx + 1}
+                  </span>
+                  <span className="flex-1 text-white text-sm">
+                    {item.label}
+                  </span>
+                  <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={item.required}
+                      onChange={() =>
+                        toggleItem(selectedCl.id, item.id, "required")
+                      }
+                      className="accent-teal-500"
+                    />
+                    Zorunlu
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={item.needsDoc}
+                      onChange={() =>
+                        toggleItem(selectedCl.id, item.id, "needsDoc")
+                      }
+                      className="accent-amber-500"
+                    />
+                    Belge
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removeItem(selectedCl.id, item.id)}
+                    className="text-red-400 hover:text-red-300 text-xs"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Room Resources Panel ──
+function RoomResourcesPanel({ companyCode }: { companyCode: string }) {
+  const storageKey = `safentry_roomresources_${companyCode}`;
+  const [resources, setResources] = React.useState<
+    {
+      id: string;
+      name: string;
+      quantity: number;
+      description: string;
+      bookings: {
+        id: string;
+        date: string;
+        roomName: string;
+        requester: string;
+        timeSlot: string;
+      }[];
+    }[]
+  >(() => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [showAddRes, setShowAddRes] = React.useState(false);
+  const [showAddBook, setShowAddBook] = React.useState(false);
+  const [resForm, setResForm] = React.useState({
+    name: "",
+    quantity: "1",
+    description: "",
+  });
+  const [bookForm, setBookForm] = React.useState({
+    resourceId: "",
+    date: "",
+    roomName: "",
+    requester: "",
+    timeSlot: "09:00-10:00",
+  });
+
+  const timeSlots = [
+    "09:00-10:00",
+    "10:00-11:00",
+    "11:00-12:00",
+    "13:00-14:00",
+    "14:00-15:00",
+    "15:00-16:00",
+    "16:00-17:00",
+  ];
+
+  const save = (updated: typeof resources) => {
+    setResources(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+  };
+
+  const addResource = () => {
+    if (!resForm.name.trim()) return;
+    save([
+      ...resources,
+      {
+        id: Date.now().toString(),
+        name: resForm.name.trim(),
+        quantity: Math.max(1, Number.parseInt(resForm.quantity) || 1),
+        description: resForm.description.trim(),
+        bookings: [],
+      },
+    ]);
+    setResForm({ name: "", quantity: "1", description: "" });
+    setShowAddRes(false);
+  };
+
+  const addBooking = () => {
+    if (!bookForm.resourceId || !bookForm.date || !bookForm.roomName.trim())
+      return;
+    const res = resources.find((r) => r.id === bookForm.resourceId);
+    if (!res) return;
+    const sameSlot = res.bookings.filter(
+      (b) => b.date === bookForm.date && b.timeSlot === bookForm.timeSlot,
+    ).length;
+    if (sameSlot >= res.quantity) {
+      alert(`Bu zaman diliminde tüm ${res.name} adetleri dolu!`);
+      return;
+    }
+    save(
+      resources.map((r) =>
+        r.id === bookForm.resourceId
+          ? {
+              ...r,
+              bookings: [
+                ...r.bookings,
+                { id: Date.now().toString(), ...bookForm },
+              ],
+            }
+          : r,
+      ),
+    );
+    setBookForm({
+      resourceId: "",
+      date: "",
+      roomName: "",
+      requester: "",
+      timeSlot: "09:00-10:00",
+    });
+    setShowAddBook(false);
+  };
+
+  const removeResource = (id: string) =>
+    save(resources.filter((r) => r.id !== id));
+  const removeBooking = (resId: string, bookId: string) =>
+    save(
+      resources.map((r) =>
+        r.id === resId
+          ? { ...r, bookings: r.bookings.filter((b) => b.id !== bookId) }
+          : r,
+      ),
+    );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-white">
+            🖥️ Oda Kaynakları Yönetimi
+          </h2>
+          <p className="text-slate-400 text-sm mt-0.5">
+            Ekipman ve kaynakları tanımlayın, rezervasyon takibi yapın.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            data-ocid="roomresources.primary_button"
+            type="button"
+            onClick={() => setShowAddRes(true)}
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: "#14b8a6" }}
+          >
+            + Kaynak Ekle
+          </button>
+          {resources.length > 0 && (
+            <button
+              data-ocid="roomresources.secondary_button"
+              type="button"
+              onClick={() => setShowAddBook(true)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-300 bg-slate-700 border border-slate-600"
+            >
+              + Rezervasyon
+            </button>
+          )}
+        </div>
+      </div>
+
+      {showAddRes && (
+        <div className="p-4 rounded-xl border border-teal-500/30 bg-slate-800/60 space-y-3">
+          <h3 className="text-white font-semibold text-sm">Yeni Kaynak</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <input
+              value={resForm.name}
+              onChange={(e) =>
+                setResForm((p) => ({ ...p, name: e.target.value }))
+              }
+              placeholder="Kaynak adı (ör. Projektör)"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <input
+              type="number"
+              min="1"
+              value={resForm.quantity}
+              onChange={(e) =>
+                setResForm((p) => ({ ...p, quantity: e.target.value }))
+              }
+              placeholder="Adet"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+          </div>
+          <input
+            value={resForm.description}
+            onChange={(e) =>
+              setResForm((p) => ({ ...p, description: e.target.value }))
+            }
+            placeholder="Açıklama (isteğe bağlı)"
+            className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={addResource}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#14b8a6" }}
+            >
+              Kaydet
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddRes(false)}
+              className="px-4 py-2 rounded-lg text-sm text-slate-300 bg-slate-700"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showAddBook && (
+        <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-800/60 space-y-3">
+          <h3 className="text-white font-semibold text-sm">Rezervasyon Ekle</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <select
+              value={bookForm.resourceId}
+              onChange={(e) =>
+                setBookForm((p) => ({ ...p, resourceId: e.target.value }))
+              }
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            >
+              <option value="">Kaynak seçin</option>
+              {resources.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name} (x{r.quantity})
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={bookForm.date}
+              onChange={(e) =>
+                setBookForm((p) => ({ ...p, date: e.target.value }))
+              }
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <input
+              value={bookForm.roomName}
+              onChange={(e) =>
+                setBookForm((p) => ({ ...p, roomName: e.target.value }))
+              }
+              placeholder="Oda adı"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <input
+              value={bookForm.requester}
+              onChange={(e) =>
+                setBookForm((p) => ({ ...p, requester: e.target.value }))
+              }
+              placeholder="Talep eden"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <select
+              value={bookForm.timeSlot}
+              onChange={(e) =>
+                setBookForm((p) => ({ ...p, timeSlot: e.target.value }))
+              }
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm col-span-2"
+            >
+              {timeSlots.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={addBooking}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#14b8a6" }}
+            >
+              Rezervasyon Ekle
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddBook(false)}
+              className="px-4 py-2 rounded-lg text-sm text-slate-300 bg-slate-700"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      {resources.length === 0 ? (
+        <div
+          data-ocid="roomresources.empty_state"
+          className="text-center py-12 border border-slate-700 rounded-xl"
+        >
+          <p className="text-4xl mb-3">🖥️</p>
+          <p className="text-slate-400">Henüz kaynak eklenmedi.</p>
+          <p className="text-slate-500 text-sm mt-1">
+            Projektör, beyaz tahta, catering gibi ekipmanları ekleyin.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {resources.map((res, ri) => (
+            <div
+              key={res.id}
+              data-ocid={`roomresources.item.${ri + 1}`}
+              className="p-4 rounded-xl border border-slate-700 bg-slate-800/50"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-white font-semibold">{res.name}</h3>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    {res.description || "Açıklama yok"} ·{" "}
+                    <span className="text-teal-400">{res.quantity} adet</span>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeResource(res.id)}
+                  className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded bg-red-900/20"
+                >
+                  Sil
+                </button>
+              </div>
+              {res.bookings.length > 0 ? (
+                <div className="space-y-1">
+                  <p className="text-slate-500 text-xs mb-1">
+                    Rezervasyonlar ({res.bookings.length})
+                  </p>
+                  {res.bookings.map((b) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center gap-2 text-xs p-2 rounded-lg bg-slate-700/50"
+                    >
+                      <span className="text-teal-400">{b.date}</span>
+                      <span className="text-white">{b.timeSlot}</span>
+                      <span className="text-slate-300">{b.roomName}</span>
+                      {b.requester && (
+                        <span className="text-slate-400">· {b.requester}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeBooking(res.id, b.id)}
+                        className="ml-auto text-red-400 hover:text-red-300"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-slate-600 text-xs">Rezervasyon yok</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Contract Manager Panel ──
+function ContractManagerPanel({ companyCode }: { companyCode: string }) {
+  const storageKey = `safentry_contracts_${companyCode}`;
+  const [contracts, setContracts] = React.useState<
+    {
+      id: string;
+      name: string;
+      counterparty: string;
+      startDate: string;
+      endDate: string;
+      value: string;
+      notes: string;
+    }[]
+  >(() => {
+    try {
+      return JSON.parse(localStorage.getItem(storageKey) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [filter, setFilter] = React.useState<
+    "all" | "active" | "expired" | "pending"
+  >("all");
+  const [showForm, setShowForm] = React.useState(false);
+  const [form, setForm] = React.useState({
+    name: "",
+    counterparty: "",
+    startDate: "",
+    endDate: "",
+    value: "",
+    notes: "",
+  });
+
+  const save = (updated: typeof contracts) => {
+    setContracts(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+  };
+
+  const getStatus = (c: (typeof contracts)[0]) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = new Date(c.startDate);
+    const end = new Date(c.endDate);
+    if (end < today) return "expired";
+    if (start > today) return "pending";
+    return "active";
+  };
+
+  const daysUntilExpiry = (endDate: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const end = new Date(endDate);
+    return Math.ceil((end.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const addContract = () => {
+    if (
+      !form.name.trim() ||
+      !form.counterparty.trim() ||
+      !form.startDate ||
+      !form.endDate
+    )
+      return;
+    save([...contracts, { id: Date.now().toString(), ...form }]);
+    setForm({
+      name: "",
+      counterparty: "",
+      startDate: "",
+      endDate: "",
+      value: "",
+      notes: "",
+    });
+    setShowForm(false);
+  };
+
+  const removeContract = (id: string) =>
+    save(contracts.filter((c) => c.id !== id));
+
+  const statusStyle: Record<string, string> = {
+    active: "bg-teal-900/40 text-teal-300 border-teal-500/30",
+    expired: "bg-red-900/40 text-red-300 border-red-500/30",
+    pending: "bg-amber-900/40 text-amber-300 border-amber-500/30",
+  };
+  const statusLabel: Record<string, string> = {
+    active: "Aktif",
+    expired: "Süresi Doldu",
+    pending: "Beklemede",
+  };
+
+  const filtered = contracts.filter((c) =>
+    filter === "all" ? true : getStatus(c) === filter,
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-xl font-bold text-white">
+            📑 Sözleşme Yöneticisi
+          </h2>
+          <p className="text-slate-400 text-sm mt-0.5">
+            Tedarikçi ve müteahhit sözleşmelerini takip edin.
+          </p>
+        </div>
+        <button
+          data-ocid="contractmgr.primary_button"
+          type="button"
+          onClick={() => setShowForm(true)}
+          className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+          style={{ background: "#14b8a6" }}
+        >
+          + Sözleşme Ekle
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="p-4 rounded-xl border border-teal-500/30 bg-slate-800/60 space-y-3">
+          <h3 className="text-white font-semibold text-sm">Yeni Sözleşme</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="Sözleşme adı *"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <input
+              value={form.counterparty}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, counterparty: e.target.value }))
+              }
+              placeholder="Karşı taraf / Firma *"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <div className="space-y-1">
+              <label
+                htmlFor="contract-startdate"
+                className="text-slate-400 text-xs"
+              >
+                Başlangıç Tarihi *
+              </label>
+              <input
+                id="contract-startdate"
+                type="date"
+                value={form.startDate}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, startDate: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+              />
+            </div>
+            <div className="space-y-1">
+              <label
+                htmlFor="contract-enddate"
+                className="text-slate-400 text-xs"
+              >
+                Bitiş Tarihi *
+              </label>
+              <input
+                id="contract-enddate"
+                type="date"
+                value={form.endDate}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, endDate: e.target.value }))
+                }
+                className="w-full px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+              />
+            </div>
+            <input
+              value={form.value}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, value: e.target.value }))
+              }
+              placeholder="Sözleşme değeri (isteğe bağlı)"
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm"
+            />
+            <textarea
+              value={form.notes}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, notes: e.target.value }))
+              }
+              placeholder="Notlar (isteğe bağlı)"
+              rows={2}
+              className="px-3 py-2 rounded-lg bg-slate-700 border border-slate-600 text-white text-sm resize-none"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={addContract}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: "#14b8a6" }}
+            >
+              Kaydet
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="px-4 py-2 rounded-lg text-sm text-slate-300 bg-slate-700"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2 flex-wrap">
+        {(["all", "active", "expired", "pending"] as const).map((f) => (
+          <button
+            key={f}
+            data-ocid={"contractmgr.tab"}
+            type="button"
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${filter === f ? "text-white border-teal-500/60 bg-teal-900/30" : "text-slate-400 border-slate-700 bg-slate-800 hover:border-slate-600"}`}
+          >
+            {f === "all" ? "Tümü" : statusLabel[f]} (
+            {
+              contracts.filter((c) => (f === "all" ? true : getStatus(c) === f))
+                .length
+            }
+            )
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div
+          data-ocid="contractmgr.empty_state"
+          className="text-center py-12 border border-slate-700 rounded-xl"
+        >
+          <p className="text-4xl mb-3">📑</p>
+          <p className="text-slate-400">Sözleşme bulunamadı.</p>
+          <p className="text-slate-500 text-sm mt-1">
+            Tedarikçi ve müteahhit sözleşmelerinizi buraya ekleyin.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((c, ci) => {
+            const status = getStatus(c);
+            const days = daysUntilExpiry(c.endDate);
+            const expiringSoon = status === "active" && days <= 30 && days > 0;
+            return (
+              <div
+                key={c.id}
+                data-ocid={`contractmgr.item.${ci + 1}`}
+                className={`p-4 rounded-xl border bg-slate-800/50 ${expiringSoon ? "border-amber-500/40" : "border-slate-700"}`}
+              >
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-white font-semibold truncate">
+                        {c.name}
+                      </h3>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs border ${statusStyle[status]}`}
+                      >
+                        {statusLabel[status]}
+                      </span>
+                      {expiringSoon && (
+                        <span className="px-2 py-0.5 rounded-full text-xs bg-amber-900/40 text-amber-300 border border-amber-500/30">
+                          ⚠️ {days} gün kaldı
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-400 text-sm mt-1">
+                      {c.counterparty}
+                    </p>
+                    <p className="text-slate-500 text-xs mt-1">
+                      {c.startDate} → {c.endDate}
+                      {c.value ? ` · ${c.value}` : ""}
+                    </p>
+                    {c.notes && (
+                      <p className="text-slate-500 text-xs mt-1 italic">
+                        {c.notes}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    data-ocid={`contractmgr.delete_button.${ci + 1}`}
+                    type="button"
+                    onClick={() => removeContract(c.id)}
+                    className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded bg-red-900/20 whitespace-nowrap"
+                  >
+                    Sil
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Personnel Rotation Panel ───────────────────────────────────────────────
+interface RotationAssignment {
+  id: string;
+  staffName: string;
+  location: string;
+  shiftTime: string;
+}
+type RotationPlan = Record<string, RotationAssignment[]>;
+
+function PersonnelRotationPanel({
+  companyId,
+  staffList,
+}: {
+  companyId: string;
+  staffList: { name: string; staffId: string }[];
+}) {
+  const DAYS = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
+  const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+  const [plan, setPlan] = React.useState<RotationPlan>(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem(`personnelRotations_${companyId}`) || "{}",
+      );
+    } catch {
+      return {};
+    }
+  });
+  const [showAddModal, setShowAddModal] = React.useState(false);
+  const [addDay, setAddDay] = React.useState("mon");
+  const [addForm, setAddForm] = React.useState({
+    staffName: "",
+    location: "",
+    shiftTime: "09:00-18:00",
+  });
+
+  const save = (newPlan: RotationPlan) => {
+    setPlan(newPlan);
+    localStorage.setItem(
+      `personnelRotations_${companyId}`,
+      JSON.stringify(newPlan),
+    );
+  };
+
+  const handleAdd = () => {
+    if (!addForm.staffName.trim()) return;
+    const dayArr = plan[addDay] || [];
+    const newAssign: RotationAssignment = {
+      id: `${Date.now()}_${Math.random()}`,
+      staffName: addForm.staffName,
+      location: addForm.location.trim() || "Ana Giriş",
+      shiftTime: addForm.shiftTime,
+    };
+    save({ ...plan, [addDay]: [...dayArr, newAssign] });
+    setAddForm({ staffName: "", location: "", shiftTime: "09:00-18:00" });
+    setShowAddModal(false);
+  };
+
+  const handleRemove = (day: string, id: string) => {
+    const dayArr = (plan[day] || []).filter((a) => a.id !== id);
+    save({ ...plan, [day]: dayArr });
+  };
+
+  const cardStyle = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.1)",
+  };
+  const inputCls =
+    "w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-white font-bold text-xl">
+            🗺️ Personel Lokasyon Rotasyon Planı
+          </h2>
+          <p className="text-slate-400 text-sm mt-0.5">
+            Haftalık personel lokasyon ve vardiya atamalarını yönetin
+          </p>
+        </div>
+        <button
+          type="button"
+          data-ocid="rotation.open_modal_button"
+          onClick={() => setShowAddModal(true)}
+          className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+          style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+        >
+          + Atama Ekle
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {DAY_KEYS.map((dayKey, di) => {
+          const assigns = plan[dayKey] || [];
+          return (
+            <div
+              key={dayKey}
+              className="rounded-xl p-3 space-y-2"
+              style={cardStyle}
+            >
+              <div className="text-center">
+                <span className="text-xs font-bold text-teal-400">
+                  {DAYS[di]}
+                </span>
+                <span className="ml-1 text-xs text-slate-500">
+                  ({assigns.length})
+                </span>
+              </div>
+              {assigns.length === 0 ? (
+                <div
+                  data-ocid="rotation.empty_state"
+                  className="text-center py-2 text-slate-600 text-xs"
+                >
+                  Atama yok
+                </div>
+              ) : (
+                assigns.map((a, ai) => (
+                  <div
+                    key={a.id}
+                    data-ocid={`rotation.item.${ai + 1}`}
+                    className="text-xs rounded-lg p-2 space-y-0.5"
+                    style={{
+                      background: "rgba(14,165,233,0.08)",
+                      border: "1px solid rgba(14,165,233,0.2)",
+                    }}
+                  >
+                    <div className="text-white font-medium truncate">
+                      {a.staffName}
+                    </div>
+                    <div className="text-teal-400 truncate">
+                      📍 {a.location}
+                    </div>
+                    <div className="text-slate-400">⏰ {a.shiftTime}</div>
+                    <button
+                      type="button"
+                      data-ocid={`rotation.delete_button.${ai + 1}`}
+                      onClick={() => handleRemove(dayKey, a.id)}
+                      className="text-red-400 hover:text-red-300 text-xs mt-1"
+                    >
+                      ✕ Kaldır
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {showAddModal && (
+        <div
+          data-ocid="rotation.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+            style={{
+              background: "#0f1729",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg">Atama Ekle</h3>
+            <div>
+              <label
+                htmlFor="rot-day"
+                className="text-slate-400 text-xs mb-1 block"
+              >
+                Gün
+              </label>
+              <select
+                id="rot-day"
+                value={addDay}
+                onChange={(e) => setAddDay(e.target.value)}
+                className={`${inputCls} bg-[#0f1729]`}
+              >
+                {DAY_KEYS.map((dk, di) => (
+                  <option key={dk} value={dk}>
+                    {DAYS[di]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="rot-staff"
+                className="text-slate-400 text-xs mb-1 block"
+              >
+                Personel
+              </label>
+              <select
+                id="rot-staff"
+                value={addForm.staffName}
+                onChange={(e) =>
+                  setAddForm((p) => ({ ...p, staffName: e.target.value }))
+                }
+                className={`${inputCls} bg-[#0f1729]`}
+              >
+                <option value="">Personel seçin...</option>
+                {staffList.map((s) => (
+                  <option key={s.staffId} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label
+                htmlFor="rot-loc"
+                className="text-slate-400 text-xs mb-1 block"
+              >
+                Lokasyon / Kapı
+              </label>
+              <input
+                id="rot-loc"
+                data-ocid="rotation.input"
+                value={addForm.location}
+                onChange={(e) =>
+                  setAddForm((p) => ({ ...p, location: e.target.value }))
+                }
+                className={inputCls}
+                placeholder="ör. Ana Giriş, B Kapısı..."
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="rot-shift"
+                className="text-slate-400 text-xs mb-1 block"
+              >
+                Vardiya Saati
+              </label>
+              <input
+                id="rot-shift"
+                value={addForm.shiftTime}
+                onChange={(e) =>
+                  setAddForm((p) => ({ ...p, shiftTime: e.target.value }))
+                }
+                className={inputCls}
+                placeholder="ör. 08:00-16:00"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="rotation.submit_button"
+                onClick={handleAdd}
+                disabled={!addForm.staffName.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                Ekle
+              </button>
+              <button
+                type="button"
+                data-ocid="rotation.cancel_button"
+                onClick={() => setShowAddModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Category Welcome Messages Panel ────────────────────────────────────────
+const BASE_VISITOR_CATEGORIES = [
+  "Misafir",
+  "Müteahhit",
+  "Teslimat",
+  "Mülakat",
+  "Tedarikçi",
+  "Diğer",
+];
+
+function CategoryWelcomePanel({
+  companyId,
+  company,
+}: {
+  companyId: string;
+  company: { customCategories?: string[] } | null;
+}) {
+  const allCategories = [
+    ...BASE_VISITOR_CATEGORIES,
+    ...(company?.customCategories || []),
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  const [messages, setMessages] = React.useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem(`categoryWelcomeMessages_${companyId}`) || "{}",
+      );
+    } catch {
+      return {};
+    }
+  });
+  const [saved, setSaved] = React.useState<Record<string, boolean>>({});
+
+  const handleSave = (cat: string) => {
+    localStorage.setItem(
+      `categoryWelcomeMessages_${companyId}`,
+      JSON.stringify(messages),
+    );
+    setSaved((p) => ({ ...p, [cat]: true }));
+    setTimeout(() => setSaved((p) => ({ ...p, [cat]: false })), 2000);
+  };
+
+  const cardStyle = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.1)",
+  };
+  const inputCls =
+    "w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9] resize-none";
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-white font-bold text-xl">
+          💬 Kategori Özel Karşılama Mesajları
+        </h2>
+        <p className="text-slate-400 text-sm mt-0.5">
+          Belirli ziyaretçi kategorileri için kiosk onay ekranında gösterilecek
+          özel mesajları tanımlayın
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {allCategories.map((cat, i) => (
+          <div
+            key={cat}
+            data-ocid={`categorywelcome.panel.${i + 1}`}
+            className="rounded-xl p-4 space-y-3"
+            style={cardStyle}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-white">{cat}</span>
+              {messages[cat] ? (
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full"
+                  style={{
+                    background: "rgba(34,197,94,0.15)",
+                    color: "#4ade80",
+                    border: "1px solid rgba(34,197,94,0.3)",
+                  }}
+                >
+                  Mesaj tanımlı
+                </span>
+              ) : (
+                <span className="text-xs text-slate-500">Varsayılan mesaj</span>
+              )}
+            </div>
+            <textarea
+              data-ocid="categorywelcome.textarea"
+              rows={3}
+              value={messages[cat] || ""}
+              onChange={(e) =>
+                setMessages((p) => ({ ...p, [cat]: e.target.value }))
+              }
+              className={inputCls}
+              placeholder={`${cat} ziyaretçilere gösterilecek karşılama mesajı...`}
+            />
+            <button
+              type="button"
+              data-ocid={`categorywelcome.save_button.${i + 1}`}
+              onClick={() => handleSave(cat)}
+              className="w-full py-2 rounded-xl text-sm font-medium transition-all"
+              style={
+                saved[cat]
+                  ? {
+                      background: "rgba(34,197,94,0.2)",
+                      color: "#4ade80",
+                      border: "1px solid rgba(34,197,94,0.4)",
+                    }
+                  : {
+                      background: "rgba(14,165,233,0.15)",
+                      color: "#38bdf8",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                    }
+              }
+            >
+              {saved[cat] ? "✓ Kaydedildi" : "Kaydet"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
@@ -4563,6 +5911,14 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "etkinlikler", label: "🎪 Etkinlikler" },
     { key: "rozetsistemi", label: "🏅 Rozet Sistemi" },
     { key: "onayakilslablonlari", label: "⚙️ Onay Şablonları" },
+    { key: "prearrivchecklist", label: "✅ Ön Hazırlık Listesi" },
+    { key: "roomresources", label: "🖥️ Oda Kaynakları" },
+    { key: "contractmgr", label: "📑 Sözleşme Yöneticisi" },
+    { key: "personnelrotation", label: "🗺️ Personel Rotasyon" },
+    { key: "categorywelcome", label: "💬 Kategori Mesajları" },
+    { key: "parkingvalidation", label: "🎟️ Otopark Doğrulama" },
+    { key: "blackoutperiods", label: "🚫 Ziyaret Yasak Dönemleri" },
+    { key: "contractordailybriefing", label: "⛑️ Müteahhit Günlük Brifing" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -11595,6 +12951,55 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               ...(company?.customCategories ?? []),
             ]}
           />
+        )}
+
+        {tab === "prearrivchecklist" && (
+          <PreArrivalChecklistPanel
+            companyCode={session.companyId}
+            categories={[
+              "Misafir",
+              "Müteahhit",
+              "Teslimat",
+              "Mülakat",
+              "Tedarikçi",
+              "Diğer",
+              ...(company?.customCategories ?? []),
+            ]}
+          />
+        )}
+
+        {tab === "roomresources" && (
+          <RoomResourcesPanel companyCode={session.companyId} />
+        )}
+
+        {tab === "contractmgr" && (
+          <ContractManagerPanel companyCode={session.companyId} />
+        )}
+
+        {tab === "personnelrotation" && (
+          <PersonnelRotationPanel
+            companyId={session.companyId}
+            staffList={staffList}
+          />
+        )}
+
+        {tab === "categorywelcome" && (
+          <CategoryWelcomePanel
+            companyId={session.companyId}
+            company={company}
+          />
+        )}
+
+        {tab === "parkingvalidation" && (
+          <ParkingValidationTab companyId={session.companyId} />
+        )}
+
+        {tab === "blackoutperiods" && (
+          <BlackoutPeriodsTab companyId={session.companyId} />
+        )}
+
+        {tab === "contractordailybriefing" && (
+          <ContractorDailyBriefingTab companyId={session.companyId} />
         )}
 
         {tab === "profile" && company && (
