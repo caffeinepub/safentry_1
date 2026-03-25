@@ -1,5 +1,13 @@
 import { Toaster } from "@/components/ui/sonner";
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+import {
+  createBackendSession,
+  deleteBackendSession,
+  refreshBackendSession,
+  setSessionActor,
+  validateBackendSession,
+} from "./backendSession";
 import { setBackendActor } from "./backendSync";
 import { useActor } from "./hooks/useActor";
 import { getLang } from "./i18n";
@@ -10,6 +18,7 @@ import {
   getCompanies,
   getSession,
   getVisitors,
+  registerClearSessionCallback,
   saveVisitor,
 } from "./store";
 import type { AppScreen } from "./types";
@@ -116,9 +125,50 @@ export default function App() {
   const [, forceRender] = useState(0);
   const refresh = () => forceRender((x) => x + 1);
   const { actor } = useActor();
+
+  // Sync actor to backendSync and backendSession modules
   useEffect(() => {
     setBackendActor(actor);
+    setSessionActor(actor);
   }, [actor]);
+
+  // Register deleteBackendSession as the clearSession hook (fire-and-forget)
+  useEffect(() => {
+    registerClearSessionCallback(() => {
+      deleteBackendSession();
+    });
+  }, []);
+
+  // Validate existing session token on mount (once actor is available)
+  useEffect(() => {
+    if (!actor) return;
+    const session = getSession();
+    if (!session) return;
+    validateBackendSession().then((valid) => {
+      if (!valid) {
+        clearSession();
+        forceRender((x) => x + 1);
+      }
+    });
+  }, [actor]);
+
+  // Refresh session every 10 minutes while app is open
+  useEffect(() => {
+    const interval = setInterval(
+      async () => {
+        const session = getSession();
+        if (!session) return;
+        const stillValid = await refreshBackendSession();
+        if (!stillValid) {
+          clearSession();
+          toast.error("Oturumunuzun süresi doldu. Lütfen tekrar giriş yapın.");
+          forceRender((x) => x + 1);
+        }
+      },
+      10 * 60 * 1000,
+    );
+    return () => clearInterval(interval);
+  }, []);
 
   const hasLang = !!localStorage.getItem("safentry_lang");
   const session = getSession();

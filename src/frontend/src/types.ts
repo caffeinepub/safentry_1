@@ -101,7 +101,13 @@ export interface Company {
   dataRetentionDays: number;
   createdAt: number;
   customCategories?: string[];
-  customFields?: { id: string; label: string; required: boolean }[];
+  customFields?: {
+    id: string;
+    label: string;
+    required: boolean;
+    fieldType?: string;
+    options?: string[];
+  }[];
   autoCheckoutHours?: number;
   badgeValidityHours?: number;
   workingHoursStart?: number;
@@ -763,4 +769,116 @@ export interface VisitorBroadcast {
   message: string;
   createdAt: number;
   expiresAt: number;
+}
+
+// ─── Equipment Loan Tracking ──────────────────────────────────────────────────
+export interface EquipmentItem {
+  id: string;
+  companyId: string;
+  name: string;
+  category: "electronics" | "badge" | "safety" | "key" | "other";
+  totalQuantity: number;
+  availableQuantity: number;
+  notes?: string;
+}
+
+export interface EquipmentLoan {
+  id: string;
+  companyId: string;
+  equipmentId: string;
+  equipmentName: string;
+  visitorId: string;
+  visitorName: string;
+  loanedAt: number;
+  expectedReturnAt?: number;
+  returnedAt?: number;
+  status: "active" | "returned" | "overdue";
+  notes?: string;
+}
+
+// ─── Meeting Notes (Post-Visit) ───────────────────────────────────────────────
+export interface MeetingNote {
+  id: string;
+  companyId: string;
+  visitId: string;
+  visitorName: string;
+  hostName: string;
+  summary: string;
+  decisions: string;
+  followUpItems: string[];
+  createdAt: number;
+  createdBy: string;
+}
+
+// ─── Access Upgrade Request ───────────────────────────────────────────────────
+export interface AccessUpgradeRequest {
+  id: string;
+  companyId: string;
+  visitId: string;
+  visitorId: string;
+  visitorName: string;
+  requestedBy: string;
+  zones: string[];
+  reason: string;
+  duration: "1h" | "4h" | "8h" | "custom";
+  customDuration?: number;
+  status: "pending" | "approved" | "rejected";
+  createdAt: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+}
+
+// ─── Event Management ─────────────────────────────────────────────────────────
+export interface CompanyEvent {
+  id: string;
+  companyId: string;
+  name: string;
+  date: string;
+  location: string;
+  capacity: number;
+  description: string;
+  category: "seminar" | "audit" | "conference" | "other";
+  status: "upcoming" | "active" | "completed";
+  createdAt: number;
+  createdBy: string;
+}
+
+export interface EventAttendee {
+  id: string;
+  eventId: string;
+  companyId: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  company?: string;
+  registeredAt: number;
+  checkedIn: boolean;
+  checkedInAt?: number;
+}
+
+// ─── Visitor Badge / Gamification Settings ────────────────────────────────────
+export interface VisitorBadgeSettings {
+  companyId: string;
+  threshold1: number; // first visit title
+  threshold3: number; // regular
+  threshold7: number; // frequent
+  threshold15: number; // platinum
+  contractorThreshold: number;
+}
+
+// ─── Approval Flow Template ───────────────────────────────────────────────────
+export interface ApprovalStep {
+  order: number;
+  role: string;
+  timeoutHours: number;
+  autoApprove: boolean;
+}
+
+export interface ApprovalFlowTemplate {
+  id: string;
+  companyId: string;
+  name: string;
+  visitorCategory: string;
+  steps: ApprovalStep[];
+  createdAt: number;
 }

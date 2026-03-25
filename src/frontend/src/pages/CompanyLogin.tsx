@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createBackendSession } from "../backendSession";
 import { syncFromBackend } from "../backendSync";
 import LangSwitcher from "../components/LangSwitcher";
 import { useActor } from "../hooks/useActor";
@@ -69,6 +70,8 @@ export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
       companyId,
       expiresAt: Date.now() + 30 * 60 * 1000,
     });
+    // Create backend session (fire-and-forget, non-blocking)
+    createBackendSession(companyId, companyId, "company_admin").catch(() => {});
     onNavigate("company-dashboard");
   };
 

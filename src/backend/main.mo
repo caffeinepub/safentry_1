@@ -3,8 +3,7 @@ import List "mo:core/List";
 import Text "mo:core/Text";
 import Time "mo:core/Time";
 import Iter "mo:core/Iter";
-
-
+import Int "mo:core/Int";
 
 actor {
   type Company = {
@@ -93,11 +92,94 @@ actor {
     meetingRoomId : Text;
   };
 
+  type Session = {
+    token : Text;
+    companyId : Text;
+    staffId : Text;
+    role : Text;
+    createdAt : Int;
+    lastActivity : Int;
+  };
+
+  type SessionInfo = {
+    companyId : Text;
+    staffId : Text;
+    role : Text;
+  };
+
+  let SESSION_EXPIRY : Int = 1_800_000_000_000; // 30 minutes in nanoseconds
+
   let companies = Map.empty<Text, Company>();
   let staff = Map.empty<Text, List.List<Staff>>();
   let visitors = Map.empty<Text, List.List<Visitor>>();
   let blacklists = Map.empty<Text, List.List<BlacklistEntry>>();
   let appointments = Map.empty<Text, List.List<Appointment>>();
+  let sessions = Map.empty<Text, Session>();
+
+  // ── Session Management ───────────────────────────────────────────
+
+  func generateToken(companyId : Text, staffId : Text, now : Int) : Text {
+    companyId # "-" # staffId # "-" # now.toText();
+  };
+
+  public shared func createSession(companyId : Text, staffId : Text, role : Text) : async Text {
+    let now = Time.now();
+    let token = generateToken(companyId, staffId, now);
+    let session : Session = {
+      token;
+      companyId;
+      staffId;
+      role;
+      createdAt = now;
+      lastActivity = now;
+    };
+    sessions.add(token, session);
+    token;
+  };
+
+  public query func validateSession(token : Text) : async ?SessionInfo {
+    switch (sessions.get(token)) {
+      case (null) { null };
+      case (?session) {
+        let now = Time.now();
+        if (now - session.lastActivity > SESSION_EXPIRY) {
+          null;
+        } else {
+          ?{ companyId = session.companyId; staffId = session.staffId; role = session.role };
+        };
+      };
+    };
+  };
+
+  public shared func refreshSession(token : Text) : async Bool {
+    switch (sessions.get(token)) {
+      case (null) { false };
+      case (?session) {
+        let now = Time.now();
+        if (now - session.lastActivity > SESSION_EXPIRY) {
+          sessions.remove(token);
+          false;
+        } else {
+          let updated : Session = {
+            token = session.token;
+            companyId = session.companyId;
+            staffId = session.staffId;
+            role = session.role;
+            createdAt = session.createdAt;
+            lastActivity = now;
+          };
+          sessions.add(token, updated);
+          true;
+        };
+      };
+    };
+  };
+
+  public shared func deleteSession(token : Text) : async () {
+    sessions.remove(token);
+  };
+
+  // ── Company Management ───────────────────────────────────────────
 
   public shared ({ caller }) func registerCompany(
     companyId : Text,

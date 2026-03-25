@@ -312,7 +312,12 @@ export function getSession(): Session | null {
 export function saveSession(s: Session) {
   localStorage.setItem("safentry_session", JSON.stringify(s));
 }
+let _onClearSessionCallback: (() => void) | null = null;
+export function registerClearSessionCallback(cb: () => void): void {
+  _onClearSessionCallback = cb;
+}
 export function clearSession() {
+  if (_onClearSessionCallback) _onClearSessionCallback();
   localStorage.removeItem("safentry_session");
 }
 export function refreshSession() {
@@ -1856,4 +1861,250 @@ export function saveContractorDocument(
   if (idx >= 0) all[idx] = doc;
   else all.unshift(doc);
   localStorage.setItem(`safentry_cdocs_${doc.companyId}`, JSON.stringify(all));
+}
+
+// ─── Equipment Items ──────────────────────────────────────────────────────────
+export function getEquipmentItems(
+  companyId: string,
+): import("./types").EquipmentItem[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_equipment_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveEquipmentItem(item: import("./types").EquipmentItem): void {
+  const all = getEquipmentItems(item.companyId);
+  const idx = all.findIndex((x) => x.id === item.id);
+  if (idx >= 0) all[idx] = item;
+  else all.unshift(item);
+  localStorage.setItem(
+    `safentry_equipment_${item.companyId}`,
+    JSON.stringify(all),
+  );
+}
+export function deleteEquipmentItem(companyId: string, id: string): void {
+  const all = getEquipmentItems(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_equipment_${companyId}`, JSON.stringify(all));
+}
+
+// ─── Equipment Loans ──────────────────────────────────────────────────────────
+export function getEquipmentLoans(
+  companyId: string,
+): import("./types").EquipmentLoan[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_loans_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveEquipmentLoan(loan: import("./types").EquipmentLoan): void {
+  const all = getEquipmentLoans(loan.companyId);
+  const idx = all.findIndex((x) => x.id === loan.id);
+  if (idx >= 0) all[idx] = loan;
+  else all.unshift(loan);
+  localStorage.setItem(`safentry_loans_${loan.companyId}`, JSON.stringify(all));
+}
+
+// ─── Meeting Notes ────────────────────────────────────────────────────────────
+export function getMeetingNotes(
+  companyId: string,
+): import("./types").MeetingNote[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_mnotes_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveMeetingNote(n: import("./types").MeetingNote): void {
+  const all = getMeetingNotes(n.companyId);
+  const idx = all.findIndex((x) => x.id === n.id);
+  if (idx >= 0) all[idx] = n;
+  else all.unshift(n);
+  localStorage.setItem(`safentry_mnotes_${n.companyId}`, JSON.stringify(all));
+}
+export function deleteMeetingNote(companyId: string, id: string): void {
+  const all = getMeetingNotes(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_mnotes_${companyId}`, JSON.stringify(all));
+}
+
+// ─── Access Upgrade Requests ──────────────────────────────────────────────────
+export function getAccessUpgradeRequests(
+  companyId: string,
+): import("./types").AccessUpgradeRequest[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_accupg_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveAccessUpgradeRequest(
+  r: import("./types").AccessUpgradeRequest,
+): void {
+  const all = getAccessUpgradeRequests(r.companyId);
+  const idx = all.findIndex((x) => x.id === r.id);
+  if (idx >= 0) all[idx] = r;
+  else all.unshift(r);
+  localStorage.setItem(`safentry_accupg_${r.companyId}`, JSON.stringify(all));
+}
+
+// ─── Company Events ───────────────────────────────────────────────────────────
+export function getCompanyEvents(
+  companyId: string,
+): import("./types").CompanyEvent[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_events_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveCompanyEvent(e: import("./types").CompanyEvent): void {
+  const all = getCompanyEvents(e.companyId);
+  const idx = all.findIndex((x) => x.id === e.id);
+  if (idx >= 0) all[idx] = e;
+  else all.unshift(e);
+  localStorage.setItem(`safentry_events_${e.companyId}`, JSON.stringify(all));
+}
+export function deleteCompanyEvent(companyId: string, id: string): void {
+  const all = getCompanyEvents(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_events_${companyId}`, JSON.stringify(all));
+  // also delete attendees
+  const attendees = getEventAttendees(companyId).filter(
+    (a) => a.eventId !== id,
+  );
+  localStorage.setItem(
+    `safentry_attendees_${companyId}`,
+    JSON.stringify(attendees),
+  );
+}
+
+// ─── Event Attendees ──────────────────────────────────────────────────────────
+export function getEventAttendees(
+  companyId: string,
+): import("./types").EventAttendee[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_attendees_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveEventAttendee(a: import("./types").EventAttendee): void {
+  const all = getEventAttendees(a.companyId);
+  const idx = all.findIndex((x) => x.id === a.id);
+  if (idx >= 0) all[idx] = a;
+  else all.unshift(a);
+  localStorage.setItem(
+    `safentry_attendees_${a.companyId}`,
+    JSON.stringify(all),
+  );
+}
+export function deleteEventAttendee(companyId: string, id: string): void {
+  const all = getEventAttendees(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_attendees_${companyId}`, JSON.stringify(all));
+}
+
+// ─── Visitor Badge Settings ───────────────────────────────────────────────────
+export function getVisitorBadgeSettings(
+  companyId: string,
+): import("./types").VisitorBadgeSettings {
+  try {
+    const stored = localStorage.getItem(`safentry_badgeset_${companyId}`);
+    if (stored) return JSON.parse(stored);
+  } catch {
+    /**/
+  }
+  return {
+    companyId,
+    threshold1: 1,
+    threshold3: 3,
+    threshold7: 7,
+    threshold15: 15,
+    contractorThreshold: 5,
+  };
+}
+export function saveVisitorBadgeSettings(
+  s: import("./types").VisitorBadgeSettings,
+): void {
+  localStorage.setItem(`safentry_badgeset_${s.companyId}`, JSON.stringify(s));
+}
+
+export function getVisitorTitle(
+  companyId: string,
+  idNumber: string,
+  category?: string,
+): { title: string; emoji: string; count: number } {
+  // inline to avoid circular
+  let visits: unknown[] = [];
+  try {
+    visits = JSON.parse(
+      localStorage.getItem(`safentry_visitors_${companyId}`) || "[]",
+    );
+  } catch {
+    visits = [];
+  }
+  const count = (visits as { idNumber?: string }[]).filter(
+    (v) => v.idNumber === idNumber,
+  ).length;
+  const settings = getVisitorBadgeSettings(companyId);
+  if (category === "Müteahhit" && count >= settings.contractorThreshold)
+    return { title: "Güvenilir Tedarikçi", emoji: "🔧", count };
+  if (count >= settings.threshold15)
+    return { title: "Platin Misafir", emoji: "🏆", count };
+  if (count >= settings.threshold7)
+    return { title: "Sık Ziyaretçi", emoji: "⭐", count };
+  if (count >= settings.threshold3)
+    return { title: "Düzenli Ziyaretçi", emoji: "👋", count };
+  return { title: "İlk Ziyaret", emoji: "🌟", count };
+}
+
+// ─── Approval Flow Templates ──────────────────────────────────────────────────
+export function getApprovalFlowTemplates(
+  companyId: string,
+): import("./types").ApprovalFlowTemplate[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_apvtmpl_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveApprovalFlowTemplate(
+  t: import("./types").ApprovalFlowTemplate,
+): void {
+  const all = getApprovalFlowTemplates(t.companyId);
+  const idx = all.findIndex((x) => x.id === t.id);
+  if (idx >= 0) all[idx] = t;
+  else all.unshift(t);
+  localStorage.setItem(`safentry_apvtmpl_${t.companyId}`, JSON.stringify(all));
+}
+export function deleteApprovalFlowTemplate(
+  companyId: string,
+  id: string,
+): void {
+  const all = getApprovalFlowTemplates(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_apvtmpl_${companyId}`, JSON.stringify(all));
+}
+export function getTemplateForCategory(
+  companyId: string,
+  category: string,
+): import("./types").ApprovalFlowTemplate | null {
+  const templates = getApprovalFlowTemplates(companyId);
+  return (
+    templates.find(
+      (t) => t.visitorCategory === category || t.visitorCategory === "Tümü",
+    ) ?? null
+  );
 }

@@ -22,14 +22,20 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { addAuditLog, getAuditLogs } from "../auditLog";
+import AccessUpgradeRequestsTab from "../components/AccessUpgradeRequestsTab";
+import AppointmentCalendarTab from "../components/AppointmentCalendarTab";
+import ApprovalFlowTemplatesTab from "../components/ApprovalFlowTemplatesTab";
 import AuditReportTab from "../components/AuditReportTab";
 import BranchManager from "../components/BranchManager";
 import BroadcastModal from "../components/BroadcastModal";
 import BuildingMapTab from "../components/BuildingMapTab";
 import CampaignTab from "../components/CampaignTab";
+import CompanyEventsTab from "../components/CompanyEventsTab";
 import CompetencyTab from "../components/CompetencyTab";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ConfirmModal from "../components/ConfirmModal";
+import ConsolidatedReportTab from "../components/ConsolidatedReportTab";
+import ContractorFirmsTab from "../components/ContractorFirmsTab";
 import ContractorHoursTab from "../components/ContractorHoursTab";
 import ContractorPortalTab from "../components/ContractorPortalTab";
 import ConversionAnalysisTab from "../components/ConversionAnalysisTab";
@@ -42,6 +48,7 @@ import DocumentTemplateTab from "../components/DocumentTemplateTab";
 import DrillTab from "../components/DrillTab";
 import EmptyState from "../components/EmptyState";
 import EntryPointManager from "../components/EntryPointManager";
+import EquipmentLoanTab from "../components/EquipmentLoanTab";
 import EscortTab from "../components/EscortTab";
 import EvacCoordTab from "../components/EvacCoordTab";
 import GlobalSearch from "../components/GlobalSearch";
@@ -58,6 +65,7 @@ import KpiTargets from "../components/KpiTargets";
 import LangSwitcher from "../components/LangSwitcher";
 import LostFoundTab from "../components/LostFoundTab";
 import LoyaltyAnalysisTab from "../components/LoyaltyAnalysisTab";
+import MeetingNotesTab from "../components/MeetingNotesTab";
 import NotificationCenter from "../components/NotificationCenter";
 import NotificationRulesTab from "../components/NotificationRulesTab";
 import OnboardingWizard, {
@@ -76,6 +84,7 @@ import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
 import VehicleLogTab from "../components/VehicleLogTab";
 import VisitTimeline from "../components/VisitTimeline";
+import VisitorBadgeSystemTab from "../components/VisitorBadgeSystemTab";
 import VisitorBroadcastModal from "../components/VisitorBroadcastModal";
 import VisitorComments from "../components/VisitorComments";
 import VisitorCountdown from "../components/VisitorCountdown";
@@ -90,9 +99,26 @@ import ZoneControlTab from "../components/ZoneControlTab";
 import { useLiveAlerts } from "../hooks/useLiveAlerts";
 import { getLang, t } from "../i18n";
 import {
+  deleteApprovalFlowTemplate,
+  deleteCompanyEvent,
+  deleteEventAttendee,
+  getAccessUpgradeRequests,
+  getApprovalFlowTemplates,
+  getCompanyEvents,
+  getEventAttendees,
   getHealthDeclarations,
   getImprovementTasks,
+  getMeetingNotes,
   getShiftHandovers,
+  getTemplateForCategory,
+  getVisitorBadgeSettings,
+  getVisitorTitle,
+  saveAccessUpgradeRequest,
+  saveApprovalFlowTemplate,
+  saveCompanyEvent,
+  saveEventAttendee,
+  saveMeetingNote,
+  saveVisitorBadgeSettings,
 } from "../store";
 
 import {
@@ -343,7 +369,20 @@ type Tab =
   | "evacuationcoord"
   | "groups"
   | "shiftswaps"
-  | "visitortags";
+  | "visitortags"
+  | "randevular"
+  | "ekipmankodunc"
+  | "staffcert"
+  | "roomcap"
+  | "journeyreplay"
+  | "muteahhitfirmalar"
+  | "formfields"
+  | "tutanaklar"
+  | "konsoliderapor"
+  | "erisimstalepleri"
+  | "etkinlikler"
+  | "rozetsistemi"
+  | "onayakilslablonlari";
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -2586,6 +2625,882 @@ function CompanySlaTab({ companyId }: { companyId: string }) {
   );
 }
 
+// ─── StaffCertTab ─────────────────────────────────────────────────────────────
+function StaffCertTab({ companyId }: { companyId: string }) {
+  const STORAGE_KEY = `safentry_staffcerts_${companyId}`;
+  type StaffCert = {
+    id: string;
+    type: string;
+    holderName: string;
+    issueDate: string;
+    expiryDate: string;
+    note: string;
+  };
+  const [certs, setCerts] = React.useState<StaffCert[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [form, setForm] = React.useState({
+    type: "Silah Ruhsatı",
+    holderName: "",
+    issueDate: "",
+    expiryDate: "",
+    note: "",
+  });
+  const [showForm, setShowForm] = React.useState(false);
+
+  const save = (updated: StaffCert[]) => {
+    setCerts(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const certTypes = ["Silah Ruhsatı", "İlk Yardım", "Yangın Söndürme", "Diğer"];
+
+  const getStatus = (expiryDate: string) => {
+    if (!expiryDate) return "valid";
+    const exp = new Date(expiryDate).getTime();
+    const now = Date.now();
+    const diff = exp - now;
+    if (diff < 0) return "expired";
+    if (diff < 30 * 24 * 60 * 60 * 1000) return "soon";
+    return "valid";
+  };
+
+  const expiredCount = certs.filter(
+    (c) => getStatus(c.expiryDate) === "expired",
+  ).length;
+  const soonCount = certs.filter(
+    (c) => getStatus(c.expiryDate) === "soon",
+  ).length;
+
+  const addCert = () => {
+    if (!form.holderName || !form.expiryDate) return;
+    const updated = [...certs, { ...form, id: Date.now().toString() }];
+    save(updated);
+    setForm({
+      type: "Silah Ruhsatı",
+      holderName: "",
+      issueDate: "",
+      expiryDate: "",
+      note: "",
+    });
+    setShowForm(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white">
+          🏅 Personel Sertifikaları & Lisanslar
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShowForm((v) => !v)}
+          style={{ background: "#0ea5e9" }}
+          className="px-4 py-2 rounded-xl text-white text-sm font-semibold"
+        >
+          + Sertifika Ekle
+        </button>
+      </div>
+
+      {(expiredCount > 0 || soonCount > 0) && (
+        <div
+          style={{
+            background: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.3)",
+          }}
+          className="rounded-xl p-3 text-sm text-red-300"
+        >
+          ⚠️ {expiredCount > 0 && `${expiredCount} sertifikanın süresi dolmuş. `}
+          {soonCount > 0 && `${soonCount} sertifika 30 gün içinde dolacak.`}
+        </div>
+      )}
+
+      {showForm && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+          className="rounded-xl p-4 space-y-3"
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                Sertifika Türü
+              </span>
+              <select
+                value={form.type}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, type: e.target.value }))
+                }
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              >
+                {certTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                İsim Soyisim
+              </span>
+              <input
+                value={form.holderName}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, holderName: e.target.value }))
+                }
+                placeholder="Personel adı"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              />
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                Düzenleme Tarihi
+              </span>
+              <input
+                type="date"
+                value={form.issueDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, issueDate: e.target.value }))
+                }
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              />
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                Son Geçerlilik Tarihi *
+              </span>
+              <input
+                type="date"
+                value={form.expiryDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, expiryDate: e.target.value }))
+                }
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <span className="text-slate-400 text-xs mb-1 block">Not</span>
+            <input
+              value={form.note}
+              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+              placeholder="Opsiyonel not..."
+              style={{
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.15)",
+              }}
+              className="w-full px-3 py-2 rounded-lg text-white text-sm"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={addCert}
+              style={{ background: "#0ea5e9" }}
+              className="px-4 py-2 rounded-lg text-white text-sm font-semibold"
+            >
+              Kaydet
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              style={{ background: "rgba(255,255,255,0.1)" }}
+              className="px-4 py-2 rounded-lg text-white text-sm"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      {certs.length === 0 ? (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          className="rounded-xl p-8 text-center text-slate-400"
+        >
+          Henüz sertifika kaydı yok. Yukarıdan ekleyebilirsiniz.
+        </div>
+      ) : (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          className="rounded-xl overflow-hidden"
+        >
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+                {[
+                  "Tür",
+                  "Personel",
+                  "Düzenleme",
+                  "Son Geçerlilik",
+                  "Durum",
+                  "Not",
+                  "",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="text-left text-slate-400 font-medium px-4 py-3 text-xs"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {certs.map((cert) => {
+                const status = getStatus(cert.expiryDate);
+                return (
+                  <tr
+                    key={cert.id}
+                    style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+                  >
+                    <td className="px-4 py-3 text-white">{cert.type}</td>
+                    <td className="px-4 py-3 text-slate-200">
+                      {cert.holderName}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400">
+                      {cert.issueDate || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300">
+                      {cert.expiryDate}
+                    </td>
+                    <td className="px-4 py-3">
+                      {status === "valid" && (
+                        <span
+                          style={{
+                            background: "rgba(34,197,94,0.2)",
+                            color: "#22c55e",
+                          }}
+                          className="px-2 py-0.5 rounded-full text-xs"
+                        >
+                          ✅ Geçerli
+                        </span>
+                      )}
+                      {status === "soon" && (
+                        <span
+                          style={{
+                            background: "rgba(245,158,11,0.2)",
+                            color: "#f59e0b",
+                          }}
+                          className="px-2 py-0.5 rounded-full text-xs"
+                        >
+                          ⚠️ Yakında Dolacak
+                        </span>
+                      )}
+                      {status === "expired" && (
+                        <span
+                          style={{
+                            background: "rgba(239,68,68,0.2)",
+                            color: "#ef4444",
+                          }}
+                          className="px-2 py-0.5 rounded-full text-xs"
+                        >
+                          ❌ Süresi Dolmuş
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 text-xs">
+                      {cert.note || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          save(certs.filter((c) => c.id !== cert.id))
+                        }
+                        style={{ color: "#ef4444" }}
+                        className="text-xs hover:opacity-80"
+                      >
+                        Sil
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RoomCapTab ───────────────────────────────────────────────────────────────
+function RoomCapTab({ companyId }: { companyId: string }) {
+  type RoomCap = { roomId: string; name: string; maxCapacity: number };
+  const STORAGE_KEY = `safentry_roomcap_${companyId}`;
+  const [roomCaps, setRoomCaps] = React.useState<RoomCap[]>(() => {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem(STORAGE_KEY) || "[]",
+      ) as RoomCap[];
+      if (stored.length > 0) return stored;
+      // Bootstrap from meetingRooms and zones
+      const rooms = (() => {
+        try {
+          return JSON.parse(
+            localStorage.getItem(`safentry_meetingrooms_${companyId}`) || "[]",
+          );
+        } catch {
+          return [];
+        }
+      })();
+      const zones = (() => {
+        try {
+          return JSON.parse(
+            localStorage.getItem(`safentry_zones_${companyId}`) || "[]",
+          );
+        } catch {
+          return [];
+        }
+      })();
+      const defaults: RoomCap[] = [
+        ...rooms.map((r: { id: string; name: string }) => ({
+          roomId: r.id,
+          name: r.name,
+          maxCapacity: 10,
+        })),
+        ...zones.map((z: { id: string; name: string }) => ({
+          roomId: z.id,
+          name: z.name,
+          maxCapacity: 20,
+        })),
+      ];
+      if (defaults.length > 0) return defaults;
+      return [
+        { roomId: "room1", name: "Konferans Salonu A", maxCapacity: 15 },
+        { roomId: "room2", name: "Toplantı Odası B", maxCapacity: 8 },
+        { roomId: "room3", name: "Lobi", maxCapacity: 30 },
+      ];
+    } catch {
+      return [];
+    }
+  });
+  const [occupancy] = React.useState<Record<string, number>>(() => {
+    const occ: Record<string, number> = {};
+    for (const r of roomCaps) {
+      occ[r.roomId] = Math.floor(Math.random() * (r.maxCapacity + 3));
+    }
+    return occ;
+  });
+  const [editId, setEditId] = React.useState<string | null>(null);
+  const [editVal, setEditVal] = React.useState<number>(10);
+  const [newRoom, setNewRoom] = React.useState({ name: "", maxCapacity: 10 });
+  const [showAdd, setShowAdd] = React.useState(false);
+
+  const save = (updated: RoomCap[]) => {
+    setRoomCaps(updated);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+  };
+
+  const overCapacityCount = roomCaps.filter(
+    (r) => (occupancy[r.roomId] || 0) >= r.maxCapacity,
+  ).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white">
+          🚦 Oda / Alan Kapasite Yönetimi
+        </h2>
+        <button
+          type="button"
+          onClick={() => setShowAdd((v) => !v)}
+          style={{ background: "#0ea5e9" }}
+          className="px-4 py-2 rounded-xl text-white text-sm font-semibold"
+        >
+          + Alan Ekle
+        </button>
+      </div>
+
+      {overCapacityCount > 0 && (
+        <div
+          style={{
+            background: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.3)",
+          }}
+          className="rounded-xl p-3 text-sm text-red-300"
+        >
+          🚨 {overCapacityCount} alan kapasitede veya üzerinde!
+        </div>
+      )}
+
+      {showAdd && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+          className="rounded-xl p-4 space-y-3"
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                Alan Adı
+              </span>
+              <input
+                value={newRoom.name}
+                onChange={(e) =>
+                  setNewRoom((r) => ({ ...r, name: e.target.value }))
+                }
+                placeholder="Toplantı Odası C"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              />
+            </div>
+            <div>
+              <span className="text-slate-400 text-xs mb-1 block">
+                Maks. Kapasite
+              </span>
+              <input
+                type="number"
+                value={newRoom.maxCapacity}
+                onChange={(e) =>
+                  setNewRoom((r) => ({
+                    ...r,
+                    maxCapacity: Number(e.target.value),
+                  }))
+                }
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+                className="w-full px-3 py-2 rounded-lg text-white text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!newRoom.name) return;
+                save([
+                  ...roomCaps,
+                  { roomId: Date.now().toString(), ...newRoom },
+                ]);
+                setShowAdd(false);
+                setNewRoom({ name: "", maxCapacity: 10 });
+              }}
+              style={{ background: "#0ea5e9" }}
+              className="px-4 py-2 rounded-lg text-white text-sm font-semibold"
+            >
+              Kaydet
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAdd(false)}
+              style={{ background: "rgba(255,255,255,0.1)" }}
+              className="px-4 py-2 rounded-lg text-white text-sm"
+            >
+              İptal
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {roomCaps.map((room) => {
+          const occ = occupancy[room.roomId] || 0;
+          const pct = Math.min(100, Math.round((occ / room.maxCapacity) * 100));
+          const barColor =
+            pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#22c55e";
+          return (
+            <div
+              key={room.roomId}
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: `1px solid ${pct >= 90 ? "rgba(239,68,68,0.4)" : pct >= 70 ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.1)"}`,
+              }}
+              className="rounded-xl p-4"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-white font-semibold">{room.name}</span>
+                <div className="flex items-center gap-2">
+                  {editId === room.roomId ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        value={editVal}
+                        onChange={(e) => setEditVal(Number(e.target.value))}
+                        style={{
+                          background: "rgba(255,255,255,0.1)",
+                          border: "1px solid rgba(255,255,255,0.2)",
+                          width: 60,
+                        }}
+                        className="px-2 py-1 rounded text-white text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          save(
+                            roomCaps.map((r) =>
+                              r.roomId === room.roomId
+                                ? { ...r, maxCapacity: editVal }
+                                : r,
+                            ),
+                          );
+                          setEditId(null);
+                        }}
+                        style={{ color: "#22c55e" }}
+                        className="text-xs"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditId(null)}
+                        style={{ color: "#ef4444" }}
+                        className="text-xs"
+                      >
+                        ✗
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditId(room.roomId);
+                        setEditVal(room.maxCapacity);
+                      }}
+                      style={{ color: "#0ea5e9" }}
+                      className="text-xs"
+                    >
+                      Düzenle
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      save(roomCaps.filter((r) => r.roomId !== room.roomId))
+                    }
+                    style={{ color: "#ef4444" }}
+                    className="text-xs"
+                  >
+                    Sil
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-sm mb-2">
+                <span style={{ color: barColor }} className="font-bold text-lg">
+                  {occ}
+                </span>
+                <span className="text-slate-400">
+                  / {room.maxCapacity} kişi
+                </span>
+                <span
+                  style={{ color: barColor, background: `${barColor}22` }}
+                  className="ml-auto px-2 py-0.5 rounded-full text-xs font-semibold"
+                >
+                  {pct}%
+                </span>
+              </div>
+              <div
+                style={{ background: "rgba(255,255,255,0.08)" }}
+                className="rounded-full h-2 overflow-hidden"
+              >
+                <div
+                  style={{
+                    width: `${pct}%`,
+                    background: barColor,
+                    transition: "width 0.5s",
+                  }}
+                  className="h-full rounded-full"
+                />
+              </div>
+              {occ >= room.maxCapacity && (
+                <p style={{ color: "#ef4444" }} className="text-xs mt-2">
+                  🚨 Kapasite dolu! Yeni giriş engellenebilir.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── JourneyReplayTab ─────────────────────────────────────────────────────────
+function JourneyReplayTab({
+  companyId,
+  visitors,
+}: {
+  companyId: string;
+  visitors: Visitor[];
+}) {
+  type JourneyLog = {
+    id: string;
+    visitorId: string;
+    visitorName: string;
+    zone: string;
+    entryTime: string;
+    exitTime?: string;
+  };
+  const STORAGE_KEY = `safentry_journeylog_${companyId}`;
+  const [selectedVisitor, setSelectedVisitor] = React.useState("");
+  const defaultZones = [
+    "Ana Giriş",
+    "Lobi",
+    "2. Kat - Ofis Alanı",
+    "Toplantı Odası A",
+    "Çıkış",
+  ];
+
+  const [logs, _setLogs] = React.useState<JourneyLog[]>(() => {
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem(STORAGE_KEY) || "[]",
+      ) as JourneyLog[];
+      // Auto-generate for active visitors if none exist
+      const activeVisitors = visitors.filter((v) => v.status === "active");
+      if (stored.length === 0 && activeVisitors.length > 0) {
+        const generated: JourneyLog[] = [];
+        for (const v of activeVisitors.slice(0, 3)) {
+          const zones = defaultZones.slice(
+            0,
+            Math.floor(Math.random() * 3) + 2,
+          );
+          for (let i = 0; i < zones.length; i++) {
+            const zone = zones[i];
+            const entryTime = new Date(
+              Date.now() - (zones.length - i) * 20 * 60 * 1000,
+            ).toISOString();
+            const exitTime =
+              i < zones.length - 1
+                ? new Date(
+                    Date.now() -
+                      (zones.length - i - 1) * 20 * 60 * 1000 +
+                      5 * 60 * 1000,
+                  ).toISOString()
+                : undefined;
+            generated.push({
+              id: `${v.visitorId}-${i}`,
+              visitorId: v.visitorId,
+              visitorName: v.name,
+              zone,
+              entryTime,
+              exitTime,
+            });
+          }
+        }
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(generated));
+        return generated;
+      }
+      return stored;
+    } catch {
+      return [];
+    }
+  });
+
+  const visitorLogs = logs.filter((l) => l.visitorId === selectedVisitor);
+
+  const formatTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  const getDuration = (entry: string, exit?: string) => {
+    if (!exit) return null;
+    const diff = Math.round(
+      (new Date(exit).getTime() - new Date(entry).getTime()) / 60000,
+    );
+    return `${diff} dk`;
+  };
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-xl font-bold text-white">
+        🗺️ Ziyaretçi Alan Erişim Geçmişi
+      </h2>
+
+      <div
+        style={{
+          background: "rgba(255,255,255,0.05)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+        className="rounded-xl p-4"
+      >
+        <span className="text-slate-400 text-sm mb-2 block">
+          Ziyaretçi Seçin
+        </span>
+        <select
+          value={selectedVisitor}
+          onChange={(e) => setSelectedVisitor(e.target.value)}
+          style={{
+            background: "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.15)",
+          }}
+          className="w-full px-3 py-2 rounded-lg text-white text-sm max-w-md"
+        >
+          <option value="">— Ziyaretçi seçin —</option>
+          {visitors.map((v) => (
+            <option key={v.visitorId} value={v.visitorId}>
+              {v.name} ({v.status === "active" ? "İçeride" : "Ayrıldı"})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selectedVisitor && visitorLogs.length === 0 && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          className="rounded-xl p-8 text-center text-slate-400"
+        >
+          Bu ziyaretçi için erişim kaydı bulunamadı.
+        </div>
+      )}
+
+      {!selectedVisitor && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          className="rounded-xl p-8 text-center text-slate-400"
+        >
+          Erişim geçmişini görüntülemek için bir ziyaretçi seçin.
+        </div>
+      )}
+
+      {selectedVisitor && visitorLogs.length > 0 && (
+        <div
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          className="rounded-xl p-4"
+        >
+          <h3 className="text-white font-semibold mb-4">
+            {visitors.find((v) => v.visitorId === selectedVisitor)?.name} —{" "}
+            {visitorLogs.length} erişim kaydı
+          </h3>
+          <div className="relative">
+            <div
+              style={{
+                position: "absolute",
+                left: 16,
+                top: 0,
+                bottom: 0,
+                width: 2,
+                background: "rgba(14,165,233,0.3)",
+              }}
+            />
+            <div className="space-y-3 pl-10">
+              {visitorLogs.map((log, i) => {
+                const isLast = i === visitorLogs.length - 1;
+                const isInside = !log.exitTime;
+                const duration = getDuration(log.entryTime, log.exitTime);
+                return (
+                  <div key={log.id} className="relative">
+                    <div
+                      style={{
+                        position: "absolute",
+                        left: -26,
+                        top: 4,
+                        width: 12,
+                        height: 12,
+                        borderRadius: "50%",
+                        background: isInside ? "#0ea5e9" : "#22c55e",
+                        border: "2px solid rgba(255,255,255,0.3)",
+                        zIndex: 1,
+                      }}
+                    />
+                    <div
+                      style={{
+                        background:
+                          isLast && isInside
+                            ? "rgba(14,165,233,0.1)"
+                            : "rgba(255,255,255,0.04)",
+                        border: `1px solid ${isLast && isInside ? "rgba(14,165,233,0.3)" : "rgba(255,255,255,0.08)"}`,
+                      }}
+                      className="rounded-lg p-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-medium">
+                          {log.zone}
+                        </span>
+                        {isInside ? (
+                          <span
+                            style={{
+                              background: "rgba(14,165,233,0.2)",
+                              color: "#0ea5e9",
+                            }}
+                            className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                          >
+                            📍 İçeride
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              background: "rgba(34,197,94,0.15)",
+                              color: "#22c55e",
+                            }}
+                            className="px-2 py-0.5 rounded-full text-xs"
+                          >
+                            ✓ Ayrıldı
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
+                        <span>🕐 Giriş: {formatTime(log.entryTime)}</span>
+                        {log.exitTime && (
+                          <span>🚪 Çıkış: {formatTime(log.exitTime)}</span>
+                        )}
+                        {duration && <span>⏱ {duration}</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const lang = getLang();
   const session = getSession()!;
@@ -2810,6 +3725,15 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   // Custom field management
   const [newFieldLabel, setNewFieldLabel] = useState("");
   const [newFieldRequired, setNewFieldRequired] = useState(false);
+  const [newFieldType, setNewFieldType] = useState("text");
+  const [newFieldOptions, setNewFieldOptions] = useState("");
+  // Advanced stats filter state
+  const [statsFilterOpen, setStatsFilterOpen] = useState(false);
+  const [statsFilterHost, setStatsFilterHost] = useState("");
+  const [statsFilterCategory, setStatsFilterCategory] = useState("");
+  const [statsFilterDateFrom, setStatsFilterDateFrom] = useState("");
+  const [statsFilterDateTo, setStatsFilterDateTo] = useState("");
+  const [statsFilterDept, setStatsFilterDept] = useState("");
 
   // Department/Floor management
   const [newDeptInput, setNewDeptInput] = useState("");
@@ -3433,6 +4357,8 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     });
     setNewFieldLabel("");
     setNewFieldRequired(false);
+    setNewFieldType("text");
+    setNewFieldOptions("");
     reload();
   };
 
@@ -3624,6 +4550,19 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "groups", label: "👥 Grup Ziyaretleri" },
     { key: "shiftswaps", label: "🔀 Vardiya Değişim" },
     { key: "visitortags", label: "🏷️ Etiketler" },
+    { key: "randevular", label: "📅 Randevular" },
+    { key: "ekipmankodunc", label: "🔧 Ekipman Ödünç" },
+    { key: "staffcert", label: "🏅 Personel Sertifikaları" },
+    { key: "roomcap", label: "🚦 Oda Kapasite" },
+    { key: "journeyreplay", label: "🗺️ Erişim Geçmişi" },
+    { key: "muteahhitfirmalar", label: "🏗 Müteahhit Firmalar" },
+    { key: "formfields", label: "📋 Form Alanları" },
+    { key: "tutanaklar", label: "📝 Tutanaklar" },
+    { key: "konsoliderapor", label: "🏢 Konsolide Rapor" },
+    { key: "erisimstalepleri", label: "⬆️ Erişim Talepleri" },
+    { key: "etkinlikler", label: "🎪 Etkinlikler" },
+    { key: "rozetsistemi", label: "🏅 Rozet Sistemi" },
+    { key: "onayakilslablonlari", label: "⚙️ Onay Şablonları" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -5494,6 +6433,184 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* STATISTICS TAB */}
         {tab === "statistics" && (
           <div id="statistics-print-section" className="space-y-6">
+            {/* Advanced Stats Filter Panel */}
+            {(() => {
+              const activeFilters = [
+                statsFilterHost,
+                statsFilterCategory,
+                statsFilterDateFrom,
+                statsFilterDateTo,
+                statsFilterDept,
+              ].filter(Boolean).length;
+              return (
+                <div
+                  className="rounded-2xl overflow-hidden"
+                  style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  <button
+                    type="button"
+                    data-ocid="statistics.filter.toggle"
+                    onClick={() => setStatsFilterOpen((o) => !o)}
+                    className="w-full flex items-center justify-between px-5 py-3 text-sm font-semibold text-white"
+                    style={{ background: "rgba(255,255,255,0.04)" }}
+                  >
+                    <span>
+                      🔍 Gelişmiş Filtre{" "}
+                      {activeFilters > 0 && (
+                        <span
+                          className="ml-2 px-2 py-0.5 rounded-full text-xs"
+                          style={{
+                            background: "rgba(14,165,233,0.3)",
+                            color: "#0ea5e9",
+                          }}
+                        >
+                          {activeFilters} filtre aktif
+                        </span>
+                      )}
+                    </span>
+                    <span>{statsFilterOpen ? "▲" : "▼"}</span>
+                  </button>
+                  {statsFilterOpen && (
+                    <div
+                      className="p-5 space-y-4"
+                      style={{ background: "rgba(255,255,255,0.02)" }}
+                    >
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        <div>
+                          <p className="text-slate-400 text-xs mb-1">
+                            Host Personel
+                          </p>
+                          <select
+                            data-ocid="statistics.filter.select"
+                            value={statsFilterHost}
+                            onChange={(e) => setStatsFilterHost(e.target.value)}
+                            className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          >
+                            <option value="">Tümü</option>
+                            {getStaffByCompany(session.companyId).map((s) => (
+                              <option key={s.staffId} value={s.staffId}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs mb-1">
+                            Ziyaretçi Kategorisi
+                          </p>
+                          <select
+                            value={statsFilterCategory}
+                            onChange={(e) =>
+                              setStatsFilterCategory(e.target.value)
+                            }
+                            className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          >
+                            <option value="">Tümü</option>
+                            {(
+                              findCompanyById(session.companyId)
+                                ?.customCategories ?? [
+                                "Misafir",
+                                "Müteahhit",
+                                "Teslimat",
+                                "Mülakat",
+                                "Tedarikçi",
+                                "Diğer",
+                              ]
+                            ).map((c) => (
+                              <option key={c} value={c}>
+                                {c}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs mb-1">
+                            Departman
+                          </p>
+                          <input
+                            data-ocid="statistics.filter.input"
+                            value={statsFilterDept}
+                            onChange={(e) => setStatsFilterDept(e.target.value)}
+                            placeholder="Departman adı..."
+                            className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs mb-1">
+                            Başlangıç Tarihi
+                          </p>
+                          <input
+                            type="date"
+                            value={statsFilterDateFrom}
+                            onChange={(e) =>
+                              setStatsFilterDateFrom(e.target.value)
+                            }
+                            className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-slate-400 text-xs mb-1">
+                            Bitiş Tarihi
+                          </p>
+                          <input
+                            type="date"
+                            value={statsFilterDateTo}
+                            onChange={(e) =>
+                              setStatsFilterDateTo(e.target.value)
+                            }
+                            className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          type="button"
+                          data-ocid="statistics.filter.submit_button"
+                          className="px-5 py-2 rounded-xl text-white text-sm font-semibold"
+                          style={{
+                            background: "rgba(14,165,233,0.4)",
+                            border: "1px solid rgba(14,165,233,0.5)",
+                          }}
+                          onClick={() => setStatsFilterOpen(false)}
+                        >
+                          Uygula
+                        </button>
+                        <button
+                          type="button"
+                          data-ocid="statistics.filter.cancel_button"
+                          className="px-5 py-2 rounded-xl text-slate-300 text-sm"
+                          style={{
+                            background: "rgba(255,255,255,0.05)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                          }}
+                          onClick={() => {
+                            setStatsFilterHost("");
+                            setStatsFilterCategory("");
+                            setStatsFilterDateFrom("");
+                            setStatsFilterDateTo("");
+                            setStatsFilterDept("");
+                          }}
+                        >
+                          Temizle
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {activeFilters > 0 && !statsFilterOpen && (
+                    <div
+                      className="px-5 py-2 text-xs"
+                      style={{
+                        background: "rgba(14,165,233,0.08)",
+                        color: "#0ea5e9",
+                      }}
+                    >
+                      ✅ {activeFilters} filtre aktif — filtrelenmiş veriler
+                      gösteriliyor
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             {/* PDF Download button */}
             <div className="flex items-center justify-between">
               <h2 className="text-white font-bold text-lg">
@@ -10227,6 +11344,257 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
 
         {tab === "visitortags" && (
           <VisitorTagsTab companyId={session.companyId} />
+        )}
+
+        {tab === "randevular" && (
+          <AppointmentCalendarTab
+            companyId={session.companyId}
+            appointments={getAppointments(session.companyId)}
+            onSave={(appt) => {
+              saveAppointment(appt);
+              reload();
+            }}
+          />
+        )}
+
+        {tab === "ekipmankodunc" && (
+          <EquipmentLoanTab
+            companyId={session.companyId}
+            visitors={visitors.filter((v) => v.status === "active")}
+            addNotificationFn={addNotification}
+          />
+        )}
+
+        {tab === "staffcert" && <StaffCertTab companyId={session.companyId} />}
+
+        {tab === "roomcap" && <RoomCapTab companyId={session.companyId} />}
+
+        {tab === "journeyreplay" && (
+          <JourneyReplayTab companyId={session.companyId} visitors={visitors} />
+        )}
+
+        {tab === "muteahhitfirmalar" && (
+          <ContractorFirmsTab
+            companyId={session.companyId}
+            contractorVisitors={visitors.filter(
+              (v) => v.category === "Müteahhit",
+            )}
+          />
+        )}
+
+        {tab === "formfields" && (
+          <div className="space-y-6 max-w-2xl">
+            <div>
+              <h2 className="text-white font-bold text-xl">
+                📋 Özelleştirilebilir Form Alanları
+              </h2>
+              <p className="text-slate-400 text-sm mt-0.5">
+                Ziyaretçi kayıt formuna şirkete özel alanlar ekleyin
+              </p>
+            </div>
+            {/* Existing custom fields list */}
+            {currentCustomFields.length > 0 && (
+              <div className="space-y-2">
+                {currentCustomFields.map((cf, i) => (
+                  <div
+                    key={cf.id}
+                    data-ocid={`formfields.item.${i + 1}`}
+                    className="flex items-center justify-between p-4 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.04)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    <div>
+                      <span className="text-white text-sm font-medium">
+                        {cf.label}
+                      </span>
+                      <span
+                        className="ml-3 text-xs px-2 py-0.5 rounded-full"
+                        style={{
+                          background: "rgba(14,165,233,0.15)",
+                          color: "#0ea5e9",
+                        }}
+                      >
+                        {cf.fieldType === "number"
+                          ? "Sayı"
+                          : cf.fieldType === "yesno"
+                            ? "Evet/Hayır"
+                            : cf.fieldType === "select"
+                              ? "Seçim Listesi"
+                              : "Metin"}
+                      </span>
+                      {cf.required && (
+                        <span className="ml-2 text-red-400 text-xs">
+                          Zorunlu
+                        </span>
+                      )}
+                      {cf.fieldType === "select" &&
+                        cf.options &&
+                        cf.options.length > 0 && (
+                          <span className="ml-2 text-slate-500 text-xs">
+                            {cf.options.join(", ")}
+                          </span>
+                        )}
+                    </div>
+                    <button
+                      type="button"
+                      data-ocid={`formfields.delete_button.${i + 1}`}
+                      onClick={() => removeCustomField(cf.id)}
+                      className="text-red-400 hover:text-red-300 text-sm px-3 py-1.5 rounded-lg"
+                      style={{ background: "rgba(239,68,68,0.1)" }}
+                    >
+                      Sil
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Add new field form */}
+            <div
+              className="p-5 rounded-2xl space-y-4"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.1)",
+              }}
+            >
+              <h3 className="text-white font-semibold text-sm">
+                Yeni Alan Ekle
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">Alan Adı *</p>
+                  <input
+                    data-ocid="formfields.input"
+                    value={newFieldLabel}
+                    onChange={(e) => setNewFieldLabel(e.target.value)}
+                    placeholder="Örn: Araç Plakası"
+                    className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                  />
+                </div>
+                <div>
+                  <p className="text-slate-400 text-xs mb-1">Alan Tipi</p>
+                  <select
+                    data-ocid="formfields.select"
+                    value={newFieldType}
+                    onChange={(e) => setNewFieldType(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#0f1729] border border-white/20 text-white text-sm focus:outline-none"
+                  >
+                    <option value="text">Metin</option>
+                    <option value="number">Sayı</option>
+                    <option value="yesno">Evet / Hayır</option>
+                    <option value="select">Seçim Listesi</option>
+                  </select>
+                </div>
+                {newFieldType === "select" && (
+                  <div className="sm:col-span-2">
+                    <p className="text-slate-400 text-xs mb-1">
+                      Seçenekler (her satıra bir seçenek)
+                    </p>
+                    <textarea
+                      data-ocid="formfields.textarea"
+                      value={newFieldOptions}
+                      onChange={(e) => setNewFieldOptions(e.target.value)}
+                      placeholder={"Seçenek 1\nSeçenek 2\nSeçenek 3"}
+                      rows={4}
+                      className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none resize-none"
+                    />
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="ff_required"
+                    checked={newFieldRequired}
+                    onChange={(e) => setNewFieldRequired(e.target.checked)}
+                    className="w-4 h-4 accent-[#0ea5e9]"
+                  />
+                  <label
+                    htmlFor="ff_required"
+                    className="text-slate-400 text-sm"
+                  >
+                    Zorunlu Alan
+                  </label>
+                </div>
+              </div>
+              <button
+                type="button"
+                data-ocid="formfields.primary_button"
+                onClick={addCustomField}
+                className="px-5 py-2 rounded-xl text-white text-sm font-semibold"
+                style={{
+                  background: "rgba(14,165,233,0.4)",
+                  border: "1px solid rgba(14,165,233,0.5)",
+                }}
+              >
+                Alan Ekle
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tab === "tutanaklar" && (
+          <MeetingNotesTab
+            companyId={session.companyId}
+            staffName={
+              staffList.find((s) => s.staffId === session.staffId)?.name ?? ""
+            }
+          />
+        )}
+
+        {/* ── FEATURE 2: Consolidated Report ── */}
+        {tab === "konsoliderapor" && (
+          <ConsolidatedReportTab
+            companyId={session.companyId}
+            visitors={visitors}
+            staffList={staffList}
+          />
+        )}
+
+        {/* ── FEATURE 3: Access Upgrade Requests ── */}
+        {tab === "erisimstalepleri" && (
+          <AccessUpgradeRequestsTab
+            companyId={session.companyId}
+            staffName={
+              staffList.find((s) => s.staffId === session.staffId)?.name ?? ""
+            }
+          />
+        )}
+
+        {/* ── FEATURE 4: Event Management ── */}
+        {tab === "etkinlikler" && (
+          <CompanyEventsTab
+            companyId={session.companyId}
+            staffId={session.staffId}
+            staffName={
+              staffList.find((s) => s.staffId === session.staffId)?.name ?? ""
+            }
+          />
+        )}
+
+        {/* ── FEATURE 5: Visitor Badge/Gamification System ── */}
+        {tab === "rozetsistemi" && (
+          <VisitorBadgeSystemTab
+            companyId={session.companyId}
+            visitors={visitors}
+          />
+        )}
+
+        {/* ── FEATURE 6: Approval Flow Templates ── */}
+        {tab === "onayakilslablonlari" && (
+          <ApprovalFlowTemplatesTab
+            companyId={session.companyId}
+            categories={[
+              "Misafir",
+              "Müteahhit",
+              "Teslimat",
+              "Mülakat",
+              "Tedarikçi",
+              "Diğer",
+              "Tümü",
+              ...(company?.customCategories ?? []),
+            ]}
+          />
         )}
 
         {tab === "profile" && company && (

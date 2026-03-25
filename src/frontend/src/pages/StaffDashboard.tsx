@@ -72,6 +72,7 @@ import {
   findPermitByIdNumber,
   findStaffById,
   findVisitorByCode,
+  getAccessUpgradeRequests,
   getAlertHistory,
   getAllStaff,
   getAnnouncements,
@@ -92,11 +93,13 @@ import {
   getMaintenanceRequests,
   getMeetingRooms,
   getPatrols,
+  getQueue,
   getSession,
   getStaffByCompany,
   getStaffMessages,
   getStaffPhoto,
   getVisitorBelongings,
+  getVisitorTitle,
   getVisitors,
   isBiometricRequired,
   isBlacklisted,
@@ -104,6 +107,7 @@ import {
   refreshSession,
   removeFromQueue,
   resetStaffCode,
+  saveAccessUpgradeRequest,
   saveAppointment,
   saveApprovalChainConfig,
   saveBelonging,
@@ -226,7 +230,8 @@ type Tab =
   | "handover"
   | "shiftswap"
   | "imptasks"
-  | "training";
+  | "training"
+  | "queue";
 
 const EMPTY_FORM = {
   name: "",
@@ -622,6 +627,11 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     null,
   );
   const [messages, setMessages] = useState<StaffMessage[]>([]);
+  const [visitorViewMode, setVisitorViewMode] = useState<"list" | "grid">(
+    () =>
+      (localStorage.getItem("safentry_visitor_view_mode") as "list" | "grid") ||
+      "list",
+  );
   const [msgInput, setMsgInput] = useState("");
 
   // Staff code renewal
@@ -723,6 +733,13 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
 
   // Badge reprint modal
   const [_reprintVisitor, setReprintVisitor] = useState<Visitor | null>(null);
+  const [accessUpgradeVisitor, setAccessUpgradeVisitor] =
+    useState<Visitor | null>(null);
+  const [accessUpgradeZones, setAccessUpgradeZones] = useState<string[]>([]);
+  const [accessUpgradeReason, setAccessUpgradeReason] = useState("");
+  const [accessUpgradeDuration, setAccessUpgradeDuration] = useState<
+    "1h" | "4h" | "8h" | "custom"
+  >("1h");
   const [_reprintReason, setReprintReason] = useState<
     "Kayıp" | "Hasar Gördü" | "Diğer"
   >("Kayıp");
@@ -1498,6 +1515,18 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setPendingVisitorData(null);
     setShowIdVerify(false);
     toast.success("Ziyaretçi başarıyla kaydedildi");
+    // Host auto-arrival notification
+    if (visitor.hostStaffId && visitor.hostStaffId !== session.staffId) {
+      addNotification({
+        id: Math.random().toString(36).substring(2, 9),
+        companyId: session.companyId,
+        type: "info",
+        message: `🚪 Ziyaretçiniz ${visitor.name} geldi - lütfen karşılayın`,
+        createdAt: Date.now(),
+        read: false,
+        relatedId: visitor.visitorId,
+      });
+    }
     // Biometric check trigger
     if (
       visitor.visitorPhoto &&
@@ -1832,6 +1861,18 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setKioskApprovalStatus(v.visitorId, "approved");
     removeFromQueue(session.companyId, v.visitorId);
     toast.success(`${v.name} giriş için onaylandı`);
+    // Host auto-arrival notification for kiosk approval
+    if (visitor.hostStaffId && visitor.hostStaffId !== session.staffId) {
+      addNotification({
+        id: Math.random().toString(36).substring(2, 9),
+        companyId: session.companyId,
+        type: "info",
+        message: `🚪 Ziyaretçiniz ${v.name} geldi - lütfen karşılayın`,
+        createdAt: Date.now(),
+        read: false,
+        relatedId: visitor.visitorId,
+      });
+    }
     reload();
   };
 
@@ -2157,6 +2198,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["mycalendar" as Tab, "📅 Takvimim"] as [Tab, string],
     ["messages" as Tab, "💬 Mesajlar"] as [Tab, string],
     ["training" as Tab, "🎓 Eğitim"] as [Tab, string],
+    ["queue" as Tab, "🔢 Bekleme Sırası"] as [Tab, string],
   ];
 
   return (
@@ -5303,20 +5345,66 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                       {cf.label}
                       {cf.required && " *"}
                     </p>
-                    <input
-                      data-ocid="register.custom_field.input"
-                      value={form.customFieldValues[cf.id] ?? ""}
-                      onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          customFieldValues: {
-                            ...f.customFieldValues,
-                            [cf.id]: e.target.value,
-                          },
-                        }))
-                      }
-                      className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
-                    />
+                    {cf.fieldType === "yesno" ? (
+                      <select
+                        data-ocid="register.custom_field.select"
+                        value={form.customFieldValues[cf.id] ?? ""}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            customFieldValues: {
+                              ...f.customFieldValues,
+                              [cf.id]: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-4 py-3 rounded-xl bg-[#0f1729] border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
+                      >
+                        <option value="">Seçin</option>
+                        <option value="Evet">Evet</option>
+                        <option value="Hayır">Hayır</option>
+                      </select>
+                    ) : cf.fieldType === "select" &&
+                      cf.options &&
+                      cf.options.length > 0 ? (
+                      <select
+                        data-ocid="register.custom_field.select"
+                        value={form.customFieldValues[cf.id] ?? ""}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            customFieldValues: {
+                              ...f.customFieldValues,
+                              [cf.id]: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-4 py-3 rounded-xl bg-[#0f1729] border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
+                      >
+                        <option value="">Seçin</option>
+                        {cf.options.map((opt: string) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        data-ocid="register.custom_field.input"
+                        type={cf.fieldType === "number" ? "number" : "text"}
+                        value={form.customFieldValues[cf.id] ?? ""}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            customFieldValues: {
+                              ...f.customFieldValues,
+                              [cf.id]: e.target.value,
+                            },
+                          }))
+                        }
+                        className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white focus:outline-none focus:border-[#f59e0b]"
+                      />
+                    )}
                   </div>
                 ))}
                 {/* Category-specific fields */}
@@ -6917,6 +7005,20 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                             >
                               🎁
                             </button>
+                            <button
+                              type="button"
+                              data-ocid={`active_visitors.access_upgrade.button.${i + 1}`}
+                              onClick={() => setAccessUpgradeVisitor(v)}
+                              title="Erişim Yükselt"
+                              className="px-3 py-2 rounded-lg text-sm font-medium transition-all hover:opacity-80"
+                              style={{
+                                background: "rgba(168,85,247,0.15)",
+                                border: "1px solid rgba(168,85,247,0.3)",
+                                color: "#c084fc",
+                              }}
+                            >
+                              ⬆️
+                            </button>
                           </div>
                           {/* Badge validity warning */}
                           {(() => {
@@ -6999,34 +7101,57 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 </div>
               )}
 
-              <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-white font-bold text-xl">Şu An Binada</h2>
                   <p className="text-slate-400 text-sm">
                     Henüz çıkış yapmamış ziyaretçiler
                   </p>
                 </div>
-                <div
-                  className="px-5 py-3 rounded-2xl text-center"
-                  style={{
-                    background: capacityExceeded
-                      ? "linear-gradient(135deg,rgba(239,68,68,0.2),rgba(220,38,38,0.2))"
-                      : "linear-gradient(135deg,rgba(14,165,233,0.2),rgba(2,132,199,0.2))",
-                    border: `1.5px solid ${
-                      capacityExceeded
-                        ? "rgba(239,68,68,0.4)"
-                        : "rgba(14,165,233,0.4)"
-                    }`,
-                  }}
-                >
-                  <div
-                    className="text-3xl font-bold"
-                    style={{ color: capacityExceeded ? "#ef4444" : "#0ea5e9" }}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    data-ocid="inside.toggle"
+                    onClick={() => {
+                      const next = visitorViewMode === "list" ? "grid" : "list";
+                      setVisitorViewMode(next);
+                      localStorage.setItem("safentry_visitor_view_mode", next);
+                    }}
+                    className="px-3 py-2 rounded-xl text-sm font-medium transition-all"
+                    style={{
+                      background: "rgba(255,255,255,0.08)",
+                      border: "1px solid rgba(255,255,255,0.15)",
+                      color: "#e2e8f0",
+                    }}
                   >
-                    {insideVisitors.length}
-                  </div>
-                  <div className="text-slate-400 text-xs">
-                    İçeride{maxCap > 0 ? ` / ${maxCap}` : ""}
+                    {visitorViewMode === "list"
+                      ? "👁 Görsel Mod"
+                      : "📋 Liste Modu"}
+                  </button>
+                  <div
+                    className="px-5 py-3 rounded-2xl text-center"
+                    style={{
+                      background: capacityExceeded
+                        ? "linear-gradient(135deg,rgba(239,68,68,0.2),rgba(220,38,38,0.2))"
+                        : "linear-gradient(135deg,rgba(14,165,233,0.2),rgba(2,132,199,0.2))",
+                      border: `1.5px solid ${
+                        capacityExceeded
+                          ? "rgba(239,68,68,0.4)"
+                          : "rgba(14,165,233,0.4)"
+                      }`,
+                    }}
+                  >
+                    <div
+                      className="text-3xl font-bold"
+                      style={{
+                        color: capacityExceeded ? "#ef4444" : "#0ea5e9",
+                      }}
+                    >
+                      {insideVisitors.length}
+                    </div>
+                    <div className="text-slate-400 text-xs">
+                      İçeride{maxCap > 0 ? ` / ${maxCap}` : ""}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -7038,6 +7163,87 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   title="Şu an içeride kimse yok"
                   description="Aktif ziyaretçi bulunmuyor."
                 />
+              ) : visitorViewMode === "grid" ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {insideVisitors
+                    .slice()
+                    .sort((a, b) => a.arrivalTime - b.arrivalTime)
+                    .map((v, i) => {
+                      const over4h = hoursSince(v.arrivalTime) >= 4;
+                      const elapsed = durationLabel(v.arrivalTime);
+                      const initials = v.name
+                        .split(" ")
+                        .map((n: string) => n[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+                      return (
+                        <button
+                          type="button"
+                          key={v.visitorId}
+                          data-ocid={`inside.item.${i + 1}`}
+                          className="p-4 rounded-2xl cursor-pointer transition-all hover:scale-105 text-left w-full"
+                          style={{
+                            background: "rgba(255,255,255,0.05)",
+                            border: `1.5px solid ${over4h ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.1)"}`,
+                          }}
+                          onClick={() => {
+                            toast.info(
+                              `${v.name} — ${v.category || "Ziyaretçi"} — ${durationLabel(v.arrivalTime)}`,
+                            );
+                          }}
+                        >
+                          <div className="flex flex-col items-center text-center gap-2">
+                            {v.visitorPhoto ? (
+                              <img
+                                src={v.visitorPhoto}
+                                alt={v.name}
+                                className="w-16 h-16 rounded-full object-cover border-2 border-white/20"
+                              />
+                            ) : (
+                              <div
+                                className="w-16 h-16 rounded-full flex items-center justify-center text-white font-bold text-xl"
+                                style={{ background: LABEL_COLORS[v.label] }}
+                              >
+                                {initials}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-white font-semibold text-sm leading-tight">
+                                {v.name}
+                              </p>
+                              <p className="text-slate-400 text-xs mt-0.5">
+                                {v.category || "Ziyaretçi"}
+                              </p>
+                              <p
+                                className="text-xs mt-1"
+                                style={{
+                                  color: over4h ? "#f59e0b" : "#94a3b8",
+                                }}
+                              >
+                                {elapsed}
+                              </p>
+                            </div>
+                            <span
+                              className="text-xs px-2 py-0.5 rounded-full"
+                              style={{
+                                background: `${LABEL_COLORS[v.label]}33`,
+                                color: LABEL_COLORS[v.label],
+                              }}
+                            >
+                              {v.label === "vip"
+                                ? "VIP"
+                                : v.label === "attention"
+                                  ? "Dikkat"
+                                  : v.label === "restricted"
+                                    ? "Kısıtlı"
+                                    : "Normal"}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                </div>
               ) : (
                 <div className="space-y-3">
                   {insideVisitors
@@ -9766,6 +9972,138 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
           )}
 
+          {tab === "queue" &&
+            (() => {
+              const queue = getQueue(session.companyId);
+              const queueVisitors = queue.map((q) => ({
+                ...q,
+                visitor: visitors.find((v) => v.visitorId === q.visitorId),
+              }));
+              return (
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-white font-bold text-xl">
+                        🔢 Bekleme Sırası
+                      </h2>
+                      <p className="text-slate-400 text-sm mt-0.5">
+                        Kiosk üzerinden kayıt olan ziyaretçilerin sırası
+                      </p>
+                    </div>
+                    <div
+                      className="px-4 py-2 rounded-xl text-center"
+                      style={{
+                        background: "rgba(14,165,233,0.15)",
+                        border: "1px solid rgba(14,165,233,0.3)",
+                      }}
+                    >
+                      <div className="text-2xl font-bold text-[#0ea5e9]">
+                        {queue.length}
+                      </div>
+                      <div className="text-slate-400 text-xs">Bekliyor</div>
+                    </div>
+                  </div>
+                  {queue.length === 0 ? (
+                    <div
+                      data-ocid="queue.empty_state"
+                      className="text-center py-12 text-slate-500"
+                    >
+                      <div className="text-5xl mb-3">🔢</div>
+                      <p className="text-lg font-medium">
+                        Bekleme sırasında kimse yok
+                      </p>
+                      <p className="text-sm mt-1">
+                        Ziyaretçiler kiosk üzerinden kayıt olduğunda buraya
+                        eklenirler
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {queueVisitors.map((q, i) => {
+                        const waitMins = Math.floor(
+                          (Date.now() - q.waitingSince) / 60000,
+                        );
+                        const host = q.visitor
+                          ? getStaffByCompany(session.companyId).find(
+                              (s) => s.staffId === q.visitor!.hostStaffId,
+                            )
+                          : null;
+                        return (
+                          <div
+                            key={q.visitorId}
+                            data-ocid={`queue.item.${i + 1}`}
+                            className="flex items-center justify-between p-4 rounded-2xl"
+                            style={{
+                              background: "rgba(255,255,255,0.04)",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                            }}
+                          >
+                            <div className="flex items-center gap-4">
+                              <div
+                                className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg"
+                                style={{ background: "rgba(14,165,233,0.3)" }}
+                              >
+                                #{q.queueNo}
+                              </div>
+                              <div>
+                                <p className="text-white font-semibold">
+                                  {q.visitorName}
+                                </p>
+                                {host && (
+                                  <p className="text-slate-400 text-xs">
+                                    Host: {host.name}
+                                  </p>
+                                )}
+                                <p className="text-slate-500 text-xs">
+                                  {waitMins} dk önce geldi
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                data-ocid={`queue.secondary_button.${i + 1}`}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-300"
+                                style={{
+                                  background: "rgba(245,158,11,0.15)",
+                                  border: "1px solid rgba(245,158,11,0.3)",
+                                }}
+                                onClick={() =>
+                                  toast.info(
+                                    `Sıra No ${q.queueNo}: ${q.visitorName} çağrıldı`,
+                                  )
+                                }
+                              >
+                                📣 Çağır
+                              </button>
+                              <button
+                                type="button"
+                                data-ocid={`queue.primary_button.${i + 1}`}
+                                className="px-3 py-1.5 rounded-lg text-xs font-medium text-emerald-300"
+                                style={{
+                                  background: "rgba(34,197,94,0.15)",
+                                  border: "1px solid rgba(34,197,94,0.3)",
+                                }}
+                                onClick={() => {
+                                  removeFromQueue(
+                                    session.companyId,
+                                    q.visitorId,
+                                  );
+                                  reload();
+                                }}
+                              >
+                                ✅ Karşılandı
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
           {tab === "profile" && (
             <div className="max-w-xl space-y-6">
               <div className="flex items-center gap-4">
@@ -10171,6 +10509,128 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           }
           onClose={() => setShowOcrModal(false)}
         />
+      )}
+
+      {/* Access Upgrade Modal */}
+      {accessUpgradeVisitor && (
+        <div
+          data-ocid="erisimstalepleri.modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl p-6 space-y-4"
+            style={{
+              background: "#0f1729",
+              border: "1px solid rgba(255,255,255,0.12)",
+            }}
+          >
+            <h3 className="text-white font-bold text-lg">
+              ⬆️ Erişim Yükseltme Talebi
+            </h3>
+            <p className="text-slate-400 text-sm">
+              Ziyaretçi:{" "}
+              <span className="text-white">{accessUpgradeVisitor.name}</span>
+            </p>
+            <div>
+              <p className="text-slate-400 text-xs mb-1">
+                Ek Bölgeler (virgülle ayırın)
+              </p>
+              <input
+                data-ocid="erisimstalepleri.input"
+                value={accessUpgradeZones.join(", ")}
+                onChange={(e) =>
+                  setAccessUpgradeZones(
+                    e.target.value
+                      .split(",")
+                      .map((z) => z.trim())
+                      .filter(Boolean),
+                  )
+                }
+                className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9]"
+                placeholder="Örn: Üretim Alanı, Depo"
+              />
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs mb-1">Gerekçe *</p>
+              <textarea
+                data-ocid="erisimstalepleri.textarea"
+                value={accessUpgradeReason}
+                onChange={(e) => setAccessUpgradeReason(e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-[#0ea5e9] resize-none"
+                placeholder="Neden ek erişim gerekiyor?"
+              />
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs mb-1">Süre</p>
+              <select
+                data-ocid="erisimstalepleri.select"
+                value={accessUpgradeDuration}
+                onChange={(e) =>
+                  setAccessUpgradeDuration(
+                    e.target.value as "1h" | "4h" | "8h" | "custom",
+                  )
+                }
+                className="w-full px-3 py-2 rounded-xl bg-[#0f1729] border border-white/20 text-white text-sm focus:outline-none"
+              >
+                <option value="1h">1 Saat</option>
+                <option value="4h">4 Saat</option>
+                <option value="8h">8 Saat</option>
+                <option value="custom">Özel</option>
+              </select>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="erisimstalepleri.submit_button"
+                disabled={
+                  !accessUpgradeReason.trim() || accessUpgradeZones.length === 0
+                }
+                onClick={() => {
+                  if (!accessUpgradeVisitor) return;
+                  saveAccessUpgradeRequest({
+                    id: `accupg_${Date.now()}`,
+                    companyId: accessUpgradeVisitor.companyId,
+                    visitId: accessUpgradeVisitor.visitorId,
+                    visitorId: accessUpgradeVisitor.visitorId,
+                    visitorName: accessUpgradeVisitor.name,
+                    requestedBy:
+                      staffList.find((s) => s.staffId === session?.staffId)
+                        ?.name ?? "Personel",
+                    zones: accessUpgradeZones,
+                    reason: accessUpgradeReason,
+                    duration: accessUpgradeDuration,
+                    status: "pending",
+                    createdAt: Date.now(),
+                  });
+                  toast.success("Erişim yükseltme talebi gönderildi");
+                  setAccessUpgradeVisitor(null);
+                  setAccessUpgradeZones([]);
+                  setAccessUpgradeReason("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                }}
+              >
+                Talep Gönder
+              </button>
+              <button
+                type="button"
+                data-ocid="erisimstalepleri.cancel_button"
+                onClick={() => setAccessUpgradeVisitor(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                İptal
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Floating Tour Button */}

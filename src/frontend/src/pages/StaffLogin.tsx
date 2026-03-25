@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createBackendSession } from "../backendSession";
 import { syncFromBackend } from "../backendSync";
 import LangSwitcher from "../components/LangSwitcher";
 import { useActor } from "../hooks/useActor";
@@ -107,6 +108,8 @@ export default function StaffLogin({ onNavigate, onRefresh }: Props) {
       loginTime: Date.now(),
     });
     localStorage.setItem(`safentry_current_session_id_${staffId}`, sessionId);
+    // Create backend session (fire-and-forget, non-blocking)
+    createBackendSession(companyId, staffId, foundStaff.role).catch(() => {});
     onNavigate("staff-dashboard");
   };
 
