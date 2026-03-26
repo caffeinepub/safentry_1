@@ -178,7 +178,7 @@ export interface Visitor {
   signatureData: string;
   vehiclePlate?: string;
   label: "normal" | "vip" | "attention" | "restricted";
-  status: "active" | "departed" | "preregistered";
+  status: "active" | "departed" | "preregistered" | "rejected";
   badgeQr: string;
   notes: string;
   category?: string;
@@ -213,6 +213,8 @@ export interface Visitor {
   hostSignatureData?: string;
   visitorTags?: string[];
   visitorLanguage?: string;
+  rejectionReason?: string;
+  isDraft?: boolean;
 }
 
 export interface MeetingTemplate {
@@ -264,6 +266,9 @@ export interface ScheduledReport {
 }
 
 export interface Announcement {
+  expiresAt?: number;
+  isPersistent?: boolean;
+  title?: string;
   id: string;
   companyId: string;
   message: string;
@@ -339,7 +344,8 @@ export type AppScreen =
   | "self-checkin"
   | "contractor-portal"
   | "welcome-pkg"
-  | "lobby-display";
+  | "lobby-display"
+  | "verify-badge";
 
 export interface ParkingSpace {
   id: string;

@@ -57,12 +57,14 @@ import {
   uploadBytesToBlob,
 } from "../utils/blobUpload";
 
+import SecurityScenariosTab from "../components/SecurityScenariosTab";
 import {
   type StaffMessage,
   addAlertHistory,
   addBadgeReprintLog,
   addGatePassLog,
   addNotification,
+  addVisitorNote,
   clearSession,
   computeVisitorTrustScore,
   deleteIncident,
@@ -99,6 +101,7 @@ import {
   getStaffMessages,
   getStaffPhoto,
   getVisitorBelongings,
+  getVisitorNotes,
   getVisitorTitle,
   getVisitors,
   isBiometricRequired,
@@ -232,7 +235,9 @@ type Tab =
   | "imptasks"
   | "training"
   | "queue"
-  | "punchin";
+  | "punchin"
+  | "scenarios"
+  | "drafts";
 
 const PUNCH_KEY = (companyId: string) => `safentry_punchlog_${companyId}`;
 
@@ -392,6 +397,124 @@ function getAppointmentCountdown(
       ? `${hours} sa ${mins > 0 ? `${mins} dk ` : ""}sonra`
       : `${diffMins} dk sonra`;
   return { label, color: "#22c55e" };
+}
+
+// ─── EmergencyContactSection ──────────────────────────────────────────────────
+const EC_KEY = (staffId: string) => `safentry_staff_emergency_${staffId}`;
+
+interface EmergencyContact {
+  name: string;
+  phone: string;
+  bloodType: string;
+}
+
+function getEmergencyContact(staffId: string): EmergencyContact {
+  try {
+    return (
+      JSON.parse(localStorage.getItem(EC_KEY(staffId)) ?? "null") ?? {
+        name: "",
+        phone: "",
+        bloodType: "",
+      }
+    );
+  } catch {
+    return { name: "", phone: "", bloodType: "" };
+  }
+}
+
+function saveEmergencyContact(staffId: string, ec: EmergencyContact) {
+  localStorage.setItem(EC_KEY(staffId), JSON.stringify(ec));
+}
+
+function EmergencyContactSection({ staffId }: { staffId: string }) {
+  const saved = getEmergencyContact(staffId);
+  const [name, setName] = useState(saved.name);
+  const [phone, setPhone] = useState(saved.phone);
+  const [bloodType, setBloodType] = useState(saved.bloodType);
+  const [saved_, setSaved_] = useState(false);
+
+  const handleSave = () => {
+    saveEmergencyContact(staffId, { name, phone, bloodType });
+    setSaved_(true);
+    setTimeout(() => setSaved_(false), 2000);
+  };
+
+  return (
+    <div
+      data-ocid="staff_profile.emergency_contact.panel"
+      className="p-5 rounded-2xl space-y-4"
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.1)",
+      }}
+    >
+      <p className="text-slate-300 text-sm font-semibold">
+        🚨 Acil İletişim Bilgisi
+      </p>
+      <p className="text-slate-500 text-xs">
+        Acil durumda ulaşılacak kişi bilgileri. Yöneticiler tahliye sırasında bu
+        bilgilere erişebilir.
+      </p>
+      <div className="space-y-3">
+        <input
+          data-ocid="staff_profile.emergency_name.input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Acil kişi adı"
+          className="w-full px-4 py-3 rounded-xl text-white text-sm focus:outline-none"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.15)",
+          }}
+        />
+        <input
+          data-ocid="staff_profile.emergency_phone.input"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="Telefon numarası"
+          className="w-full px-4 py-3 rounded-xl text-white text-sm focus:outline-none"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.15)",
+          }}
+        />
+        <select
+          data-ocid="staff_profile.emergency_blood.select"
+          value={bloodType}
+          onChange={(e) => setBloodType(e.target.value)}
+          className="w-full px-4 py-3 rounded-xl text-white text-sm focus:outline-none"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.15)",
+          }}
+        >
+          <option value="" style={{ background: "#0f1729" }}>
+            Kan Grubu Seçin
+          </option>
+          {["A+", "A-", "B+", "B-", "AB+", "AB-", "0+", "0-"].map((bt) => (
+            <option key={bt} value={bt} style={{ background: "#0f1729" }}>
+              {bt}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          data-ocid="staff_profile.emergency_save.button"
+          onClick={handleSave}
+          className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
+          style={{
+            background: saved_ ? "rgba(34,197,94,0.2)" : "rgba(0,212,170,0.15)",
+            border: saved_
+              ? "1px solid rgba(34,197,94,0.4)"
+              : "1px solid rgba(0,212,170,0.3)",
+            color: saved_ ? "#4ade80" : "#00d4aa",
+          }}
+        >
+          {saved_ ? "✓ Kaydedildi" : "💾 Kaydet"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ─── MaintenanceTab ────────────────────────────────────────────────────────────
@@ -790,6 +913,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
   // Notes dialog
   const [notesVisitor, setNotesVisitor] = useState<Visitor | null>(null);
   const [notesText, setNotesText] = useState("");
+  const [notesHistory, setNotesHistory] = useState<
+    Array<{ note: string; addedBy: string; date: string }>
+  >([]);
+  const [stickyNoteInput, setStickyNoteInput] = useState("");
 
   // CSV Bulk Import
   const [csvDialogOpen, setCsvDialogOpen] = useState(false);
@@ -930,6 +1057,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     null,
   );
   const [rejectReason, setRejectReason] = useState("");
+  // Feature: Kiosk visitor rejection modal with mandatory reason
+  const [kioskRejectModalVisitor, setKioskRejectModalVisitor] =
+    useState<KioskPendingVisitor | null>(null);
+  const [kioskRejectReason, setKioskRejectReason] = useState("");
+  // Feature: Draft visitor editing
+  const [editDraftId, setEditDraftId] = useState<string | null>(null);
 
   // QR Scanner
   const [_showQrScan, setShowQrScan] = useState(false);
@@ -1255,6 +1388,68 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setInviteCodeInput("");
   };
 
+  const saveDraft = () => {
+    if (!form.name.trim()) {
+      setFormError("Taslak için en azından ad soyad gereklidir.");
+      return;
+    }
+    const visitorId = editDraftId ?? generateVisitorId();
+    const visitor: Visitor = {
+      visitorId,
+      companyId: session.companyId,
+      registeredBy: session.staffId!,
+      name: form.name,
+      idNumber: form.idNumber || "---",
+      phone: form.phone || "",
+      hostStaffId: form.hostStaffId || "",
+      arrivalTime: new Date(form.arrivalTime).getTime(),
+      visitReason: form.visitReason || "",
+      visitType: form.visitType || "Misafir",
+      ndaAccepted: false,
+      signatureData: "",
+      label: form.label || "normal",
+      category: form.category || undefined,
+      status: "active",
+      badgeQr: `${window.location.origin}/verify-badge/${visitorId}`,
+      notes: "",
+      createdAt: Date.now(),
+      isDraft: true,
+    };
+    saveVisitor(visitor);
+    addAuditLog(
+      session.companyId,
+      staff?.name ?? "Personel",
+      session.staffId ?? "",
+      "visitor_draft_saved",
+      `${visitor.name} taslak olarak kaydedildi`,
+    );
+    setForm({
+      ...EMPTY_FORM,
+      arrivalTime: new Date().toISOString().slice(0, 16),
+    });
+    setFormError("");
+    setEditDraftId(null);
+    reload();
+    toast.success("Taslak kaydedildi");
+  };
+
+  const completeDraft = (v: Visitor) => {
+    setEditDraftId(v.visitorId);
+    setForm({
+      ...EMPTY_FORM,
+      arrivalTime: new Date().toISOString().slice(0, 16),
+      name: v.name,
+      idNumber: v.idNumber !== "---" ? v.idNumber : "",
+      phone: v.phone || "",
+      hostStaffId: v.hostStaffId || "",
+      visitReason: v.visitReason || "",
+      visitType: v.visitType || "Misafir",
+      label: (v.label as any) || "normal",
+      category: v.category || "",
+    });
+    setTab("register");
+  };
+
   const submitVisitor = () => {
     submitWithBypassRef.current = submitVisitor;
     if (!form.name || !form.idNumber || !form.phone || !form.hostStaffId) {
@@ -1451,7 +1646,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     }
 
     // Registration
-    const visitorId = generateVisitorId();
+    const visitorId = editDraftId ?? generateVisitorId();
     const visitor: Visitor = {
       visitorId,
       companyId: session.companyId,
@@ -1469,7 +1664,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       label: form.label,
       category: form.category,
       status: "active",
-      badgeQr: visitorId,
+      badgeQr: `${window.location.origin}/verify-badge/${visitorId}`,
       notes: "",
       createdAt: Date.now(),
       shiftType: getShiftType(form.arrivalTime),
@@ -1545,6 +1740,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     setVisitorTrustScore(null);
     setPendingVisitorData(null);
     setShowIdVerify(false);
+    setEditDraftId(null);
     toast.success("Ziyaretçi başarıyla kaydedildi");
     // Host auto-arrival notification
     if (visitor.hostStaffId && visitor.hostStaffId !== session.staffId) {
@@ -1878,7 +2074,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       label: "normal",
       category: v.category,
       status: "active",
-      badgeQr: v.visitorId,
+      badgeQr: `${window.location.origin}/verify-badge/${v.visitorId}`,
       notes: "",
       createdAt: v.createdAt,
       shiftType: v.shiftType,
@@ -1958,6 +2154,19 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     reload();
   };
 
+  // Save sticky note to visitor history
+  const saveStickyNote = () => {
+    if (!notesVisitor || !stickyNoteInput.trim()) return;
+    const newNote = {
+      note: stickyNoteInput.trim(),
+      addedBy: staff?.name ?? "Personel",
+      date: new Date().toLocaleString("tr-TR"),
+    };
+    addVisitorNote(session.companyId, notesVisitor.idNumber, newNote);
+    setNotesHistory((prev) => [...prev, newNote]);
+    setStickyNoteInput("");
+  };
+
   // CSV parse
   const handleCsvFile = (file: File) => {
     setCsvError("");
@@ -2016,7 +2225,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         label: "normal",
         category: row.category,
         status: "active",
-        badgeQr: visitorId,
+        badgeQr: `${window.location.origin}/verify-badge/${visitorId}`,
         notes: "",
         createdAt: Date.now(),
       };
@@ -2107,7 +2316,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
       label: "normal",
       category: "Misafir",
       status: "active",
-      badgeQr: visitorId,
+      badgeQr: `${window.location.origin}/verify-badge/${visitorId}`,
       notes: "",
       createdAt: Date.now(),
       department: inv.preData.department,
@@ -2147,8 +2356,12 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     reload();
   };
 
-  const activeVisitors = visitors.filter((v) => v.status === "active");
-  const insideVisitors = visitors.filter((v) => v.status === "active");
+  const activeVisitors = visitors.filter(
+    (v) => v.status === "active" && !v.isDraft,
+  );
+  const insideVisitors = visitors.filter(
+    (v) => v.status === "active" && !v.isDraft,
+  );
   const preregistered = visitors.filter((v) => v.status === "preregistered");
 
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -2238,6 +2451,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["training" as Tab, "🎓 Eğitim"] as [Tab, string],
     ["queue" as Tab, "🔢 Bekleme Sırası"] as [Tab, string],
     ["punchin" as Tab, "⏱️ Mesai Takibi"] as [Tab, string],
+    ["scenarios" as Tab, "📚 Senaryo Kütüphanesi"] as [Tab, string],
+    ["drafts" as Tab, "📝 Taslaklar"] as [Tab, string],
   ];
 
   return (
@@ -3289,22 +3504,103 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             }}
           >
             <div
-              className="w-full max-w-md p-6 rounded-2xl"
+              className="w-full max-w-lg p-6 rounded-2xl max-h-[90vh] overflow-y-auto"
               style={{
                 background: "#0f1729",
                 border: "1.5px solid rgba(245,158,11,0.3)",
               }}
             >
-              <h3 className="text-white font-bold text-lg mb-1">
-                Ziyaretçi Notu
-              </h3>
-              <p className="text-slate-400 text-sm mb-4">{notesVisitor.name}</p>
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-white font-bold text-lg">
+                  📋 Ziyaretçi Notları
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setNotesVisitor(null)}
+                  className="text-slate-400 hover:text-white text-xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <p className="text-slate-400 text-sm mb-4">
+                {notesVisitor.name}
+                {notesVisitor.idNumber && notesVisitor.idNumber !== "---" && (
+                  <span className="ml-2 text-slate-500 font-mono text-xs">
+                    {notesVisitor.idNumber}
+                  </span>
+                )}
+              </p>
+
+              {/* Geçmiş notlar */}
+              {notesHistory.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-amber-400 text-xs font-semibold mb-2">
+                    ⚠️ Bu ziyaretçiye ait {notesHistory.length} kayıtlı not var
+                  </p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {notesHistory.map((n, nIdx) => (
+                      <div
+                        key={`note-${nIdx}-${n.date}`}
+                        className="p-3 rounded-lg text-sm"
+                        style={{
+                          background: "rgba(245,158,11,0.07)",
+                          border: "1px solid rgba(245,158,11,0.2)",
+                        }}
+                      >
+                        <p className="text-white">{n.note}</p>
+                        <p className="text-slate-500 text-xs mt-1">
+                          {n.addedBy} · {n.date}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Yeni yapışkanlı not ekle */}
+              <div className="mb-4">
+                <p className="text-slate-400 text-xs mb-1">Yeni not ekle</p>
+                <textarea
+                  data-ocid="visitor_notes.sticky_textarea"
+                  value={stickyNoteInput}
+                  onChange={(e) => setStickyNoteInput(e.target.value)}
+                  placeholder="Bu ziyaretçi hakkında kalıcı not..."
+                  rows={2}
+                  className="w-full px-3 py-2 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none resize-none mb-2"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                  }}
+                />
+                <button
+                  type="button"
+                  data-ocid="visitor_notes.sticky_save_button"
+                  onClick={saveStickyNote}
+                  disabled={!stickyNoteInput.trim()}
+                  className="w-full py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-40"
+                  style={{
+                    background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                  }}
+                >
+                  + Kalıcı Not Kaydet
+                </button>
+              </div>
+
+              <hr
+                style={{ borderColor: "rgba(255,255,255,0.08)" }}
+                className="my-3"
+              />
+
+              {/* Ziyaret notu */}
+              <p className="text-slate-400 text-xs mb-1">
+                Bu ziyarete özel not
+              </p>
               <textarea
                 data-ocid="visitor_notes.textarea"
                 value={notesText}
                 onChange={(e) => setNotesText(e.target.value)}
-                placeholder="Not ekleyin..."
-                rows={4}
+                placeholder="Sadece bu ziyaret için not..."
+                rows={3}
                 className="w-full px-3 py-2 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none resize-none mb-4"
                 style={{
                   background: "rgba(255,255,255,0.07)",
@@ -3330,10 +3626,10 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                   onClick={saveNotes}
                   className="flex-1 py-2.5 rounded-xl text-white text-sm font-semibold"
                   style={{
-                    background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
                   }}
                 >
-                  Kaydet
+                  Ziyaret Notunu Kaydet
                 </button>
               </div>
             </div>
@@ -6416,22 +6712,64 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     </button>
                   </div>
                 )}
-              <button
-                type="button"
-                data-ocid="register.submit_button"
-                onClick={submitVisitor}
-                disabled={
-                  (company?.healthScreeningEnabled as boolean) &&
-                  ((company?.healthQuestions as any[]) ?? []).length > 0 &&
-                  healthPassed !== true
-                }
-                className="mt-6 w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity hover:opacity-90 disabled:opacity-40"
-                style={{
-                  background: "linear-gradient(135deg,#f59e0b,#d97706)",
-                }}
-              >
-                {t(lang, "registerVisitor")}
-              </button>
+              {editDraftId && (
+                <div
+                  className="mt-4 px-3 py-2 rounded-lg text-xs text-amber-300 flex items-center gap-2"
+                  style={{
+                    background: "rgba(245,158,11,0.1)",
+                    border: "1px solid rgba(245,158,11,0.3)",
+                  }}
+                >
+                  <span>📝</span> Taslak düzenleniyor — kaydetmek için aşağıdaki
+                  butonu kullanın.
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditDraftId(null);
+                      setForm({
+                        ...EMPTY_FORM,
+                        arrivalTime: new Date().toISOString().slice(0, 16),
+                      });
+                    }}
+                    className="ml-auto text-slate-400 hover:text-white"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+              <div className="mt-6 flex gap-3">
+                <button
+                  type="button"
+                  data-ocid="register.draft_save.button"
+                  onClick={saveDraft}
+                  className="flex-1 py-3.5 rounded-xl font-semibold text-sm transition-opacity hover:opacity-90"
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1.5px solid rgba(255,255,255,0.2)",
+                    color: "#94a3b8",
+                  }}
+                >
+                  📝 Taslak Kaydet
+                </button>
+                <button
+                  type="button"
+                  data-ocid="register.submit_button"
+                  onClick={submitVisitor}
+                  disabled={
+                    (company?.healthScreeningEnabled as boolean) &&
+                    ((company?.healthQuestions as any[]) ?? []).length > 0 &&
+                    healthPassed !== true
+                  }
+                  className="flex-1 py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity hover:opacity-90 disabled:opacity-40"
+                  style={{
+                    background: "linear-gradient(135deg,#f59e0b,#d97706)",
+                  }}
+                >
+                  {editDraftId
+                    ? "✅ Tamamla ve Kaydet"
+                    : t(lang, "registerVisitor")}
+                </button>
+              </div>
             </div>
           )}
 
@@ -6562,10 +6900,8 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                             type="button"
                             data-ocid={`kiosk.approval.cancel_button.${i + 1}`}
                             onClick={() => {
-                              const reason = window.prompt(
-                                "Reddetme nedeni (isteğe bağlı):",
-                              );
-                              rejectKioskVisitor(v, reason ?? undefined);
+                              setKioskRejectModalVisitor(v);
+                              setKioskRejectReason("");
                             }}
                             className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 border border-red-500/30 hover:bg-red-900/20"
                           >
@@ -6918,15 +7254,31 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                               onClick={() => {
                                 setNotesVisitor(v);
                                 setNotesText(v.notes ?? "");
+                                setStickyNoteInput("");
+                                setNotesHistory(
+                                  getVisitorNotes(
+                                    session.companyId,
+                                    v.idNumber,
+                                  ),
+                                );
                               }}
-                              title="Not Ekle"
+                              title="Notlar"
                               className="px-3 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-80"
                               style={{
-                                background: "rgba(245,158,11,0.15)",
+                                background:
+                                  v.idNumber &&
+                                  getVisitorNotes(session.companyId, v.idNumber)
+                                    .length > 0
+                                    ? "rgba(245,158,11,0.35)"
+                                    : "rgba(245,158,11,0.15)",
                                 border: "1px solid rgba(245,158,11,0.3)",
                               }}
                             >
-                              📝
+                              {v.idNumber &&
+                              getVisitorNotes(session.companyId, v.idNumber)
+                                .length > 0
+                                ? "⚠️"
+                                : "📝"}
                             </button>
                             <button
                               type="button"
@@ -10772,6 +11124,9 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                 </select>
               </div>
 
+              {/* Emergency Contact */}
+              <EmergencyContactSection staffId={session.staffId ?? ""} />
+
               {/* Logout */}
               <button
                 type="button"
@@ -10789,6 +11144,190 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
           )}
         </div>
       </div>
+
+      {/* SCENARIOS TAB */}
+      {tab === "scenarios" && (
+        <div>
+          <SecurityScenariosTab />
+        </div>
+      )}
+
+      {/* DRAFTS TAB */}
+      {tab === "drafts" && (
+        <div>
+          <h2 className="text-white font-bold text-xl mb-4">
+            📝 Taslak Ziyaretçiler
+          </h2>
+          {(() => {
+            const draftVisitors = visitors.filter((v) => v.isDraft);
+            if (draftVisitors.length === 0) {
+              return (
+                <div
+                  data-ocid="drafts.empty_state"
+                  className="text-center py-16 text-slate-500"
+                >
+                  <div className="text-5xl mb-3">📝</div>
+                  <p className="text-lg font-medium text-slate-400">
+                    Taslak yok
+                  </p>
+                  <p className="text-sm mt-1">
+                    Kayıt formunda "Taslak Kaydet" ile eksik kayıtları sonraya
+                    bırakabilirsiniz.
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div className="space-y-3" data-ocid="drafts.list">
+                {draftVisitors.map((v, i) => (
+                  <div
+                    key={v.visitorId}
+                    data-ocid={`drafts.item.${i + 1}`}
+                    className="flex items-center justify-between p-4 rounded-xl"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(245,158,11,0.25)",
+                    }}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 text-xs font-bold uppercase tracking-wide">
+                          Taslak
+                        </span>
+                        <span className="text-white font-medium">{v.name}</span>
+                      </div>
+                      <div className="text-slate-400 text-xs mt-0.5">
+                        {v.idNumber !== "---" ? v.idNumber : "TC girilmemiş"} ·{" "}
+                        {new Date(v.createdAt).toLocaleString("tr-TR")}
+                      </div>
+                      {v.visitReason && (
+                        <div className="text-slate-500 text-xs">
+                          {v.visitReason}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-ocid={`drafts.complete.button.${i + 1}`}
+                        onClick={() => completeDraft(v)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{
+                          background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                        }}
+                      >
+                        Tamamla
+                      </button>
+                      <button
+                        type="button"
+                        data-ocid={`drafts.delete.button.${i + 1}`}
+                        onClick={() => {
+                          const all = getVisitors(session.companyId).filter(
+                            (x) => x.visitorId !== v.visitorId,
+                          );
+                          localStorage.setItem(
+                            `safentry_visitors_${session.companyId}`,
+                            JSON.stringify(all),
+                          );
+                          reload();
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-400"
+                        style={{
+                          background: "rgba(239,68,68,0.1)",
+                          border: "1px solid rgba(239,68,68,0.3)",
+                        }}
+                      >
+                        Sil
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* KIOSK REJECT REASON MODAL */}
+      {kioskRejectModalVisitor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            data-ocid="kiosk_reject.dialog"
+            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+            style={{
+              background: "#0f1d35",
+              border: "1.5px solid rgba(239,68,68,0.4)",
+            }}
+          >
+            <div>
+              <h3 className="text-white font-bold text-lg">Girişi Reddet</h3>
+              <p className="text-slate-400 text-sm mt-1">
+                <span className="text-white font-medium">
+                  {kioskRejectModalVisitor.name}
+                </span>{" "}
+                için red gerekçesi giriniz.
+              </p>
+            </div>
+            <textarea
+              data-ocid="kiosk_reject.textarea"
+              value={kioskRejectReason}
+              onChange={(e) => setKioskRejectReason(e.target.value)}
+              placeholder="Reddetme gerekçesi (zorunlu)..."
+              rows={3}
+              className="w-full px-4 py-3 rounded-xl text-white text-sm resize-none focus:outline-none"
+              style={{
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.2)",
+              }}
+            />
+            {!kioskRejectReason.trim() && (
+              <p
+                data-ocid="kiosk_reject.error_state"
+                className="text-red-400 text-xs"
+              >
+                Gerekçe zorunludur.
+              </p>
+            )}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="kiosk_reject.cancel_button"
+                onClick={() => {
+                  setKioskRejectModalVisitor(null);
+                  setKioskRejectReason("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm text-slate-400 hover:bg-white/5 transition-colors"
+                style={{ border: "1px solid rgba(255,255,255,0.15)" }}
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                data-ocid="kiosk_reject.confirm_button"
+                disabled={!kioskRejectReason.trim()}
+                onClick={() => {
+                  rejectKioskVisitor(
+                    kioskRejectModalVisitor,
+                    kioskRejectReason,
+                  );
+                  setKioskRejectModalVisitor(null);
+                  setKioskRejectReason("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+                style={{
+                  background: "rgba(239,68,68,0.3)",
+                  border: "1px solid rgba(239,68,68,0.5)",
+                }}
+              >
+                Reddet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Bottom Navigation */}
       <div

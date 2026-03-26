@@ -1,26 +1,45 @@
-# Safentry v73
+# Safentry v79 - Badge Inventory, Satisfaction Trend, Blacklist Taxonomy
 
 ## Current State
-Safentry is a corporate visitor management system at v72. Features include kiosk mode, company dashboard with many tabs, staff dashboard, role-based access (admin/receptionist/staff), and extensive localStorage-based data management.
+- CompanyDashboard.tsx has 16169 lines with many feature tabs
+- Blacklist tab already has `reasonCategory` field with limited categories: Güvenlik Tehdidi, Yasak Kişi, Eski Çalışan, Hırsızlık, Diğer
+- Satisfaction trend exists in Stats tab as inline section but no dedicated standalone tab
+- No physical badge/card inventory management system exists
+- BlacklistEntry type already has optional `reasonCategory?: string`
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Kiosk bakım/devre dışı modu**: Admin can toggle kiosk into maintenance mode with a custom message. Kiosk reads this flag on load and shows a maintenance screen instead of the normal flow.
-2. **Granüler personel yetki matrisi**: Admin can configure per-staff module access (which tabs/sections each staff member can see), stored per company. New tab in CompanyDashboard.
-3. **GDPR veri yedek paketi**: New section in CompanyDashboard that exports all company data (visitors, staff, blacklist, appointments, incidents) as a downloadable JSON file.
+1. **BadgeInventoryTab component** - New tab `badgeinventory` in CompanyDashboard:
+   - Track physical badge/card stock: define total count, cards issued to active visitors, returned count
+   - Add/remove card entries with serial number, assigned visitor, issue date
+   - Low stock warning when available < 10
+   - Stats cards: Toplam Kart, Zimmetli, İade Edildi, Müsait
+   - Table of issued cards with visitor name, card serial, issue date, return action
+
+2. **SatisfactionTrendTab component** - New tab `satisfactiontrend` in CompanyDashboard:
+   - Dedicated time-series trend panel showing weekly satisfaction averages
+   - Bar/line chart built with SVG showing last 8 weeks of avg satisfaction scores
+   - Automatic alert banner when current week average drops >0.5 points vs previous week
+   - Category breakdown: how each visitor category scores over time
+   - Period selector: last 4 weeks / 8 weeks / 3 months
+
+3. **Blacklist category taxonomy enhancement** in the existing blacklist tab:
+   - Expand categories to: Güvenlik Tehdidi, Saldırgan Davranış, Hırsızlık, Politika İhlali, Eski Çalışan, Sahte Kimlik, Yasak Kişi, Diğer
+   - Add category statistics panel above the blacklist: pie-chart style count breakdown per category
+   - Add category filter buttons to filter the blacklist list by category
+   - Color code each category with distinct colors
 
 ### Modify
-- store.ts: Add getKioskMaintenanceMode / saveKioskMaintenanceMode, getStaffPermissions / saveStaffPermissions functions
-- KioskMode.tsx: Check maintenance mode on load, show maintenance screen if enabled
-- CompanyDashboard.tsx: Add "🔧 Kiosk Bakım", "🔑 Yetki Matrisi", "📦 Veri Yedeği" tabs/sections
+- CompanyDashboard.tsx: add `badgeinventory` and `satisfactiontrend` tabs to tab rendering and tab navigation menu
+- Blacklist section: add category stats panel, category filter, expanded category options
 
 ### Remove
-Nothing removed.
+- Nothing removed
 
 ## Implementation Plan
-1. Add store functions for kiosk maintenance mode and staff permissions
-2. Update KioskMode to check and display maintenance screen
-3. Add KioskMaintenanceSection component in CompanyDashboard
-4. Add StaffPermissionMatrix component in CompanyDashboard
-5. Add GDPRDataBackup component in CompanyDashboard
+1. Create `BadgeInventoryTab` component inline in CompanyDashboard (or separate file)
+2. Create `SatisfactionTrendTab` component inline in CompanyDashboard
+3. Update blacklist section: expand categories dropdown, add stats breakdown panel, add filter
+4. Register both new tabs in the tab navigation menu (with icons 🪪 and 📊)
+5. Add tab rendering cases for both new tabs

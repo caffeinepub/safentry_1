@@ -41,6 +41,7 @@ import StaffLogin from "./pages/StaffLogin";
 import StaffRegister from "./pages/StaffRegister";
 import SuperAdminPanel from "./pages/SuperAdminPanel";
 import Verify from "./pages/Verify";
+import VisitorBadgeVerifyPage from "./pages/VisitorBadgeVerifyPage";
 import VisitorFeedbackPage from "./pages/VisitorFeedbackPage";
 import VisitorTicketPage from "./pages/VisitorTicketPage";
 import Welcome from "./pages/Welcome";
@@ -105,6 +106,12 @@ function getContractorPortalId(): string | null {
 function getWelcomePkgVisitorId(): string | null {
   const path = window.location.pathname;
   const match = path.match(/^\/welcome-pkg\/([a-zA-Z0-9_]+)$/);
+  return match ? match[1] : null;
+}
+
+function getVerifyBadgeVisitId(): string | null {
+  const path = window.location.pathname;
+  const match = path.match(/^\/verify-badge\/([a-zA-Z0-9_]+)$/);
   return match ? match[1] : null;
 }
 
@@ -183,8 +190,10 @@ export default function App() {
   const welcomePkgVisitorId = getWelcomePkgVisitorId();
   const visitorTicketId = getVisitorTicketId();
   const lobbyDisplayCompanyId = getLobbyDisplayCompanyId();
+  const verifyBadgeVisitId = getVerifyBadgeVisitId();
 
   const getInitialScreen = (): AppScreen => {
+    if (verifyBadgeVisitId) return "verify-badge";
     if (lobbyDisplayCompanyId) return "lobby-display";
     if (confirmToken) return "appointment-confirm";
     if (inviteToken) return "invite";
@@ -462,6 +471,8 @@ export default function App() {
     );
   if (screen === "lobby-display")
     return <LobbyDisplayPage companyId={lobbyDisplayCompanyId ?? ""} />;
+  if (screen === "verify-badge")
+    return <VisitorBadgeVerifyPage visitId={verifyBadgeVisitId ?? ""} />;
   if (screen === "welcome-pkg")
     return (
       <>

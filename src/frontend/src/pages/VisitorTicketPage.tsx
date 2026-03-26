@@ -349,6 +349,23 @@ export default function VisitorTicketPage({ visitorId, onNavigate }: Props) {
             </div>
           </div>
 
+          {/* Rejection Reason */}
+          {visitor.status === "rejected" && visitor.rejectionReason && (
+            <div
+              data-ocid="visitor_ticket.rejection_reason.panel"
+              className="mx-6 mb-4 p-4 rounded-xl"
+              style={{
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid rgba(239,68,68,0.3)",
+              }}
+            >
+              <p className="text-red-400 text-xs font-bold uppercase tracking-wide mb-1">
+                🚫 Giriş Reddi Gerekçesi
+              </p>
+              <p className="text-red-200 text-sm">{visitor.rejectionReason}</p>
+            </div>
+          )}
+
           {/* Footer */}
           <div
             className="px-8 py-4 text-center"

@@ -2163,3 +2163,35 @@ export function saveStaffPermissions(
     JSON.stringify(perms),
   );
 }
+
+// ─── Visitor Sticky Notes (by TC/passport) ────────────────────────────────────
+export type VisitorNote = {
+  note: string;
+  addedBy: string;
+  date: string;
+};
+
+export function getVisitorNotes(
+  companyId: string,
+  idNumber: string,
+): VisitorNote[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_vnotes_${companyId}_${idNumber}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+
+export function addVisitorNote(
+  companyId: string,
+  idNumber: string,
+  note: VisitorNote,
+): void {
+  const list = getVisitorNotes(companyId, idNumber);
+  localStorage.setItem(
+    `safentry_vnotes_${companyId}_${idNumber}`,
+    JSON.stringify([...list, note]),
+  );
+}

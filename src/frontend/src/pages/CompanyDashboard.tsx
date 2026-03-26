@@ -27,6 +27,7 @@ import AppointmentCalendarTab from "../components/AppointmentCalendarTab";
 import ApprovalFlowTemplatesTab from "../components/ApprovalFlowTemplatesTab";
 import AuditReportTab from "../components/AuditReportTab";
 import BlackoutPeriodsTab from "../components/BlackoutPeriodsTab";
+import BoardAnnounceTab from "../components/BoardAnnounceTab";
 import BranchManager from "../components/BranchManager";
 import BroadcastModal from "../components/BroadcastModal";
 import BuildingMapTab from "../components/BuildingMapTab";
@@ -71,6 +72,7 @@ import LiveScoreTab from "../components/LiveScoreTab";
 import LostFoundTab from "../components/LostFoundTab";
 import LoyaltyAnalysisTab from "../components/LoyaltyAnalysisTab";
 import MeetingNotesTab from "../components/MeetingNotesTab";
+import MonthlyKpiTab from "../components/MonthlyKpiTab";
 import MsgTemplatesTab from "../components/MsgTemplatesTab";
 import NotificationCenter from "../components/NotificationCenter";
 import NotificationRulesTab from "../components/NotificationRulesTab";
@@ -88,6 +90,7 @@ import ShiftCalendar from "../components/ShiftCalendar";
 import { HandoverHistoryList } from "../components/ShiftHandoverModal";
 import ShiftSwapTab from "../components/ShiftSwapTab";
 import StaffPerformanceTab from "../components/StaffPerformanceTab";
+import StatsSummaryTab from "../components/StatsSummaryTab";
 import SurveyTemplateTab from "../components/SurveyTemplateTab";
 import SystemHealthPanel from "../components/SystemHealthPanel";
 import VehicleLogTab from "../components/VehicleLogTab";
@@ -408,7 +411,554 @@ type Tab =
   | "livescore"
   | "vehiclewaiting"
   | "policyversion"
-  | "demandforecast";
+  | "demandforecast"
+  | "boardannounce"
+  | "statssummary"
+  | "monthlykpi"
+  | "badgeinventory"
+  | "satisfactiontrend";
+
+// ─── Badge Inventory Tab ─────────────────────────────────────────────────────
+interface BadgeCard {
+  id: string;
+  serial: string;
+  assignedTo: string;
+  assignedAt: number;
+  status: "issued" | "available" | "lost";
+}
+
+const BadgeInventoryTab: React.FC<{ companyId: string }> = ({ companyId }) => {
+  const storageKey = `safentry_badge_inventory_${companyId}`;
+  const [cards, setCards] = React.useState<BadgeCard[]>(() =>
+    JSON.parse(localStorage.getItem(storageKey) || "[]"),
+  );
+  const [newSerial, setNewSerial] = React.useState("");
+  const [assignName, setAssignName] = React.useState<Record<string, string>>(
+    {},
+  );
+
+  const save = (updated: BadgeCard[]) => {
+    setCards(updated);
+    localStorage.setItem(storageKey, JSON.stringify(updated));
+  };
+
+  const addCard = () => {
+    if (!newSerial.trim()) return;
+    const card: BadgeCard = {
+      id: `badge_${Date.now()}`,
+      serial: newSerial.trim(),
+      assignedTo: "",
+      assignedAt: 0,
+      status: "available",
+    };
+    save([...cards, card]);
+    setNewSerial("");
+  };
+
+  const assignCard = (id: string) => {
+    const name = assignName[id];
+    if (!name?.trim()) return;
+    save(
+      cards.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              status: "issued" as const,
+              assignedTo: name.trim(),
+              assignedAt: Date.now(),
+            }
+          : c,
+      ),
+    );
+    setAssignName((prev) => ({ ...prev, [id]: "" }));
+  };
+
+  const returnCard = (id: string) => {
+    save(
+      cards.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              status: "available" as const,
+              assignedTo: "",
+              assignedAt: 0,
+            }
+          : c,
+      ),
+    );
+  };
+
+  const markLost = (id: string) => {
+    save(
+      cards.map((c) => (c.id === id ? { ...c, status: "lost" as const } : c)),
+    );
+  };
+
+  const total = cards.length;
+  const issued = cards.filter((c) => c.status === "issued").length;
+  const available = cards.filter((c) => c.status === "available").length;
+  const lost = cards.filter((c) => c.status === "lost").length;
+
+  const statusColor = (s: BadgeCard["status"]) =>
+    s === "available" ? "#0ea5e9" : s === "issued" ? "#f59e0b" : "#ef4444";
+  const statusLabel = (s: BadgeCard["status"]) =>
+    s === "available" ? "Müsait" : s === "issued" ? "Zimmetli" : "Kayıp";
+
+  return (
+    <div data-ocid="badgeinventory.section" className="space-y-6">
+      <h2 className="text-white font-bold text-lg">
+        🪪 Rozet / Kart Envanteri
+      </h2>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Toplam Kart", value: total, color: "#64748b" },
+          { label: "Zimmetli", value: issued, color: "#f59e0b" },
+          { label: "Müsait", value: available, color: "#0ea5e9" },
+          { label: "Kayıp", value: lost, color: "#ef4444" },
+        ].map((s) => (
+          <div
+            key={s.label}
+            className="rounded-xl p-4 text-center"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: `1px solid ${s.color}40`,
+            }}
+          >
+            <div className="text-2xl font-bold" style={{ color: s.color }}>
+              {s.value}
+            </div>
+            <div className="text-slate-400 text-xs mt-1">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Low stock warning */}
+      {available < 5 && available >= 0 && (
+        <div
+          data-ocid="badgeinventory.warning"
+          className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium"
+          style={{
+            background: "rgba(245,158,11,0.12)",
+            border: "1px solid rgba(245,158,11,0.35)",
+            color: "#f59e0b",
+          }}
+        >
+          ⚠️ Stok Uyarısı: Müsait kart sayısı 5'in altında ({available} kart
+          kaldı)
+        </div>
+      )}
+
+      {/* Add card form */}
+      <div
+        className="rounded-xl p-4 space-y-3"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div className="text-white font-medium text-sm">Yeni Kart Ekle</div>
+        <div className="flex gap-2">
+          <input
+            data-ocid="badgeinventory.serial.input"
+            value={newSerial}
+            onChange={(e) => setNewSerial(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCard()}
+            placeholder="Seri numarası (ör. BADGE-001)"
+            className="flex-1 px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-white text-sm focus:outline-none focus:border-teal-500"
+          />
+          <button
+            type="button"
+            data-ocid="badgeinventory.add.button"
+            onClick={addCard}
+            className="px-5 py-2 rounded-xl text-white text-sm font-medium"
+            style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)" }}
+          >
+            Kart Ekle
+          </button>
+        </div>
+      </div>
+
+      {/* Cards table */}
+      {cards.length === 0 ? (
+        <div
+          data-ocid="badgeinventory.empty_state"
+          className="text-center py-12 text-slate-500"
+        >
+          Henüz kart eklenmedi. Yukarıdan seri numarası girerek kart ekleyin.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {cards.map((card, i) => (
+            <div
+              key={card.id}
+              data-ocid={`badgeinventory.item.${i + 1}`}
+              className="flex flex-wrap items-center gap-3 p-4 rounded-xl"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: `1px solid ${statusColor(card.status)}30`,
+              }}
+            >
+              <div className="font-mono text-white text-sm flex-1 min-w-[120px]">
+                {card.serial}
+              </div>
+              <span
+                className="px-2 py-0.5 rounded-full text-xs font-medium"
+                style={{
+                  background: `${statusColor(card.status)}20`,
+                  color: statusColor(card.status),
+                  border: `1px solid ${statusColor(card.status)}40`,
+                }}
+              >
+                {statusLabel(card.status)}
+              </span>
+              {card.status === "issued" && (
+                <div className="text-slate-400 text-xs">
+                  {card.assignedTo} •{" "}
+                  {new Date(card.assignedAt).toLocaleDateString("tr-TR")}
+                </div>
+              )}
+              <div className="flex gap-2 ml-auto flex-wrap">
+                {card.status === "available" && (
+                  <div className="flex gap-1">
+                    <input
+                      value={assignName[card.id] || ""}
+                      onChange={(e) =>
+                        setAssignName((prev) => ({
+                          ...prev,
+                          [card.id]: e.target.value,
+                        }))
+                      }
+                      placeholder="Ziyaretçi adı"
+                      className="px-2 py-1 rounded-lg bg-white/10 border border-white/20 text-white text-xs focus:outline-none w-32"
+                    />
+                    <button
+                      type="button"
+                      data-ocid={`badgeinventory.assign.button.${i + 1}`}
+                      onClick={() => assignCard(card.id)}
+                      className="px-3 py-1 rounded-lg text-xs text-white"
+                      style={{
+                        background: "rgba(245,158,11,0.25)",
+                        border: "1px solid rgba(245,158,11,0.4)",
+                      }}
+                    >
+                      Zimmetle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => markLost(card.id)}
+                      className="px-3 py-1 rounded-lg text-xs text-red-400"
+                      style={{
+                        background: "rgba(239,68,68,0.1)",
+                        border: "1px solid rgba(239,68,68,0.3)",
+                      }}
+                    >
+                      Kayıp
+                    </button>
+                  </div>
+                )}
+                {card.status === "issued" && (
+                  <button
+                    type="button"
+                    data-ocid={`badgeinventory.return.button.${i + 1}`}
+                    onClick={() => returnCard(card.id)}
+                    className="px-3 py-1 rounded-lg text-xs text-teal-400"
+                    style={{
+                      background: "rgba(14,165,233,0.12)",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                    }}
+                  >
+                    İade Al
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── Satisfaction Trend Tab ──────────────────────────────────────────────────
+const SatisfactionTrendTab: React.FC<{ visitors: Visitor[] }> = ({
+  visitors,
+}) => {
+  const [period, setPeriod] = React.useState<4 | 8 | 12>(8);
+
+  const rated = visitors.filter(
+    (v) => typeof v.exitRating === "number" && v.exitRating > 0,
+  );
+
+  const getISOWeek = (date: Date): string => {
+    const tmp = new Date(date.getTime());
+    tmp.setHours(0, 0, 0, 0);
+    tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
+    const week1 = new Date(tmp.getFullYear(), 0, 4);
+    const wn = Math.round(
+      ((tmp.getTime() - week1.getTime()) / 86400000 +
+        ((week1.getDay() + 6) % 7)) /
+        7 +
+        1,
+    );
+    return `${tmp.getFullYear()}-W${String(wn).padStart(2, "0")}`;
+  };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: getISOWeek is stable
+  const weeklyData = React.useMemo(() => {
+    const weeks: Record<string, number[]> = {};
+    for (const v of rated) {
+      const wk = getISOWeek(new Date(v.arrivalTime));
+      if (!weeks[wk]) weeks[wk] = [];
+      weeks[wk].push(v.exitRating as number);
+    }
+    const sorted = Object.keys(weeks).sort().slice(-period);
+    return sorted.map((wk) => {
+      const vals = weeks[wk];
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      return {
+        week: wk.replace(/\d{4}-/, ""),
+        avg: Math.round(avg * 10) / 10,
+        count: vals.length,
+      };
+    });
+  }, [rated, period]);
+
+  const currentAvg = weeklyData[weeklyData.length - 1]?.avg ?? 0;
+  const prevAvg = weeklyData[weeklyData.length - 2]?.avg ?? 0;
+  const dropAlert = weeklyData.length >= 2 && currentAvg < prevAvg - 0.5;
+
+  const last30days = rated.filter(
+    (v) => Date.now() - new Date(v.arrivalTime).getTime() < 30 * 864e5,
+  );
+  const last30avg =
+    last30days.length > 0
+      ? Math.round(
+          (last30days.reduce((a, v) => a + (v.exitRating as number), 0) /
+            last30days.length) *
+            10,
+        ) / 10
+      : 0;
+
+  // Category breakdown
+  const catBreakdown = React.useMemo(() => {
+    const cats: Record<string, number[]> = {};
+    for (const v of rated) {
+      const cat = v.category || "Diğer";
+      if (!cats[cat]) cats[cat] = [];
+      cats[cat].push(v.exitRating as number);
+    }
+    return Object.entries(cats).map(([cat, vals]) => ({
+      cat,
+      avg:
+        Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10,
+      count: vals.length,
+    }));
+  }, [rated]);
+
+  if (rated.length < 3) {
+    return (
+      <div data-ocid="satisfactiontrend.section" className="space-y-4">
+        <h2 className="text-white font-bold text-lg">📊 Memnuniyet Trendi</h2>
+        <div
+          data-ocid="satisfactiontrend.empty_state"
+          className="text-center py-16 text-slate-500"
+        >
+          En az 3 değerlendirme gerekli. Henüz yeterli veri yok.
+        </div>
+      </div>
+    );
+  }
+
+  const barMax = 5;
+  const barW = Math.max(20, Math.floor(480 / weeklyData.length) - 6);
+
+  return (
+    <div data-ocid="satisfactiontrend.section" className="space-y-6">
+      <h2 className="text-white font-bold text-lg">📊 Memnuniyet Trendi</h2>
+
+      {dropAlert && (
+        <div
+          className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium"
+          style={{
+            background: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.35)",
+            color: "#ef4444",
+          }}
+        >
+          ⚠️ Bu hafta memnuniyet puanı geçen haftaya göre{" "}
+          {(prevAvg - currentAvg).toFixed(1)} puan düştü!
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Bu Hafta", value: currentAvg || "—" },
+          { label: "Geçen Hafta", value: prevAvg || "—" },
+          { label: "Son 30 Gün Ort.", value: last30avg || "—" },
+          { label: "Toplam Değerlendirme", value: rated.length },
+        ].map((s) => (
+          <div
+            key={s.label}
+            className="rounded-xl p-4 text-center"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <div className="text-2xl font-bold text-[#0ea5e9]">{s.value}</div>
+            <div className="text-slate-400 text-xs mt-1">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Period selector */}
+      <div className="flex gap-2 flex-wrap">
+        {([4, 8, 12] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            data-ocid={"satisfactiontrend.period.tab"}
+            onClick={() => setPeriod(p)}
+            className="px-4 py-1.5 rounded-lg text-xs font-medium transition-all"
+            style={
+              period === p
+                ? {
+                    background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    color: "#fff",
+                  }
+                : {
+                    background: "rgba(255,255,255,0.08)",
+                    color: "#94a3b8",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }
+            }
+          >
+            {p === 4 ? "Son 4 Hafta" : p === 8 ? "Son 8 Hafta" : "Son 3 Ay"}
+          </button>
+        ))}
+      </div>
+
+      {/* SVG Bar chart */}
+      <div
+        className="rounded-xl p-4 overflow-x-auto"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        {/* biome-ignore lint/a11y/noSvgWithoutTitle: chart SVG */}
+        <svg
+          width={Math.max(400, weeklyData.length * (barW + 6) + 60)}
+          height={180}
+          aria-label="Memnuniyet trendi bar grafiği"
+          role="img"
+        >
+          <title>Memnuniyet Trendi</title>
+          {/* Y axis labels */}
+          {[1, 2, 3, 4, 5].map((y) => (
+            <g key={y}>
+              <text
+                x={30}
+                y={160 - ((y - 1) * 120) / 4 + 4}
+                fill="#64748b"
+                fontSize={10}
+                textAnchor="end"
+              >
+                {y}
+              </text>
+              <line
+                x1={36}
+                y1={160 - ((y - 1) * 120) / 4}
+                x2={Math.max(400, weeklyData.length * (barW + 6) + 60) - 10}
+                y2={160 - ((y - 1) * 120) / 4}
+                stroke="rgba(255,255,255,0.05)"
+                strokeWidth={1}
+              />
+            </g>
+          ))}
+          {weeklyData.map((d, i) => {
+            const x = 40 + i * (barW + 6);
+            const barH = (d.avg / barMax) * 120;
+            const barColor =
+              d.avg >= 4 ? "#0ea5e9" : d.avg >= 3 ? "#f59e0b" : "#ef4444";
+            return (
+              <g key={d.week}>
+                <rect
+                  x={x}
+                  y={160 - barH}
+                  width={barW}
+                  height={barH}
+                  fill={barColor}
+                  rx={3}
+                  opacity={0.85}
+                />
+                <text
+                  x={x + barW / 2}
+                  y={155 - barH}
+                  fill="#fff"
+                  fontSize={9}
+                  textAnchor="middle"
+                >
+                  {d.avg}
+                </text>
+                <text
+                  x={x + barW / 2}
+                  y={175}
+                  fill="#64748b"
+                  fontSize={8}
+                  textAnchor="middle"
+                >
+                  {d.week}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Category breakdown */}
+      <div
+        className="rounded-xl p-4"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div className="text-white font-medium text-sm mb-3">
+          Kategori Bazlı Değerlendirme
+        </div>
+        <div className="space-y-2">
+          {catBreakdown.map((c) => (
+            <div key={c.cat} className="flex items-center gap-3">
+              <div className="text-slate-300 text-sm flex-1">{c.cat}</div>
+              <div className="text-slate-400 text-xs">
+                {c.count} değerlendirme
+              </div>
+              <div
+                className="px-3 py-0.5 rounded-full text-xs font-bold"
+                style={{
+                  background:
+                    c.avg >= 4
+                      ? "rgba(14,165,233,0.2)"
+                      : c.avg >= 3
+                        ? "rgba(245,158,11,0.2)"
+                        : "rgba(239,68,68,0.2)",
+                  color:
+                    c.avg >= 4 ? "#0ea5e9" : c.avg >= 3 ? "#f59e0b" : "#ef4444",
+                }}
+              >
+                ★ {c.avg}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 function getLast7DaysData(visitors: Visitor[]) {
   const days: { date: string; count: number }[] = [];
@@ -5398,6 +5948,7 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [blIdNumber, setBlIdNumber] = useState("");
   const [blReason, setBlReason] = useState("");
   const [blReasonCategory, setBlReasonCategory] = useState("Diğer");
+  const [blCategoryFilter, setBlCategoryFilter] = useState("");
   const [lockdownActive, setLockdownActive] = useState(() =>
     getLockdown(getSession()!.companyId),
   );
@@ -6329,6 +6880,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "vehiclewaiting", label: "🚗 Araçta Bekleme" },
     { key: "policyversion", label: "📜 Politika Versiyonları" },
     { key: "demandforecast", label: "📊 Yoğunluk Tahmini" },
+    { key: "boardannounce", label: "📌 Duyuru Panosu" },
+    { key: "statssummary", label: "📈 İstatistik Özet" },
+    { key: "monthlykpi", label: "📊 Aylık KPI" },
+    { key: "badgeinventory", label: "🪪 Rozet Envanteri" },
+    { key: "satisfactiontrend", label: "📊 Memnuniyet Trendi" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -8072,6 +8628,96 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {/* BLACKLIST TAB */}
         {tab === "blacklist" && (
           <div>
+            {/* Category Stats Panel */}
+            {(() => {
+              const CATEGORY_COLORS_BL: Record<string, string> = {
+                "Güvenlik Tehdidi": "#ef4444",
+                "Saldırgan Davranış": "#f97316",
+                Hırsızlık: "#f59e0b",
+                "Politika İhlali": "#a855f7",
+                "Eski Çalışan": "#64748b",
+                "Sahte Kimlik": "#ec4899",
+                "Yasak Kişi": "#6366f1",
+                Diğer: "#475569",
+              };
+              const catCounts: Record<string, number> = {};
+              for (const b of blacklist) {
+                const cat = b.reasonCategory || "Diğer";
+                catCounts[cat] = (catCounts[cat] ?? 0) + 1;
+              }
+              const activeCats = Object.entries(catCounts).filter(
+                ([, c]) => c > 0,
+              );
+              if (activeCats.length === 0) return null;
+              return (
+                <div className="mb-4 space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {activeCats.map(([cat, count]) => (
+                      <span
+                        key={cat}
+                        className="px-3 py-1 rounded-full text-xs font-medium"
+                        style={{
+                          background: `${CATEGORY_COLORS_BL[cat] ?? "#475569"}25`,
+                          color: CATEGORY_COLORS_BL[cat] ?? "#94a3b8",
+                          border: `1px solid ${CATEGORY_COLORS_BL[cat] ?? "#475569"}40`,
+                        }}
+                      >
+                        {cat}: {count}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBlCategoryFilter("")}
+                      className="px-3 py-1 rounded-lg text-xs font-medium transition-all"
+                      style={
+                        blCategoryFilter === ""
+                          ? {
+                              background:
+                                "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                              color: "#fff",
+                            }
+                          : {
+                              background: "rgba(255,255,255,0.08)",
+                              color: "#94a3b8",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                            }
+                      }
+                    >
+                      Tümü
+                    </button>
+                    {activeCats.map(([cat]) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() =>
+                          setBlCategoryFilter(
+                            blCategoryFilter === cat ? "" : cat,
+                          )
+                        }
+                        className="px-3 py-1 rounded-lg text-xs font-medium transition-all"
+                        style={
+                          blCategoryFilter === cat
+                            ? {
+                                background: `${CATEGORY_COLORS_BL[cat] ?? "#475569"}50`,
+                                color: CATEGORY_COLORS_BL[cat] ?? "#fff",
+                                border: `1px solid ${CATEGORY_COLORS_BL[cat] ?? "#475569"}`,
+                              }
+                            : {
+                                background: `${CATEGORY_COLORS_BL[cat] ?? "#475569"}15`,
+                                color: CATEGORY_COLORS_BL[cat] ?? "#94a3b8",
+                                border: `1px solid ${CATEGORY_COLORS_BL[cat] ?? "#475569"}30`,
+                              }
+                        }
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="flex flex-wrap gap-3 mb-6">
               <input
                 data-ocid="blacklist.idnumber.input"
@@ -8095,9 +8741,12 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               >
                 {[
                   "Güvenlik Tehdidi",
-                  "Yasak Kişi",
-                  "Eski Çalışan",
+                  "Saldırgan Davranış",
                   "Hırsızlık",
+                  "Politika İhlali",
+                  "Eski Çalışan",
+                  "Sahte Kimlik",
+                  "Yasak Kişi",
                   "Diğer",
                 ].map((cat) => (
                   <option key={cat} value={cat} className="bg-[#0f1729]">
@@ -8136,61 +8785,67 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               />
             ) : (
               <div className="space-y-3">
-                {blacklist.map((b, i) => (
-                  <div
-                    key={b.idNumber}
-                    data-ocid={`blacklist.item.${i + 1}`}
-                    className="flex items-center justify-between p-4 rounded-xl border border-red-500/20 bg-red-900/10"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="text-white font-mono font-medium">
-                          {b.idNumber}
-                        </div>
-                        {b.reasonCategory && (
-                          <span
-                            className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
-                            style={{
-                              background:
-                                b.reasonCategory === "Güvenlik Tehdidi"
-                                  ? "rgba(239,68,68,0.3)"
-                                  : b.reasonCategory === "Yasak Kişi"
-                                    ? "rgba(168,85,247,0.3)"
-                                    : b.reasonCategory === "Eski Çalışan"
-                                      ? "rgba(245,158,11,0.3)"
-                                      : b.reasonCategory === "Hırsızlık"
-                                        ? "rgba(249,115,22,0.3)"
-                                        : "rgba(100,116,139,0.3)",
-                              border: "1px solid rgba(255,255,255,0.15)",
-                            }}
-                          >
-                            {b.reasonCategory}
-                          </span>
-                        )}
-                      </div>
-                      {b.reason && (
-                        <div className="text-slate-400 text-xs mt-0.5">
-                          {b.reason}
-                        </div>
-                      )}
-                      <div className="text-slate-500 text-xs">
-                        {formatDateTime(b.addedAt)}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      data-ocid={`blacklist.delete_button.${i + 1}`}
-                      onClick={() => doRemoveBl(b.idNumber)}
-                      className="px-3 py-1.5 rounded-lg text-xs text-red-400 transition-all hover:opacity-80"
-                      style={{
-                        background: "rgba(239,68,68,0.15)",
-                        border: "1px solid rgba(239,68,68,0.35)",
-                      }}
+                {blacklist
+                  .filter(
+                    (b) =>
+                      !blCategoryFilter ||
+                      b.reasonCategory === blCategoryFilter,
+                  )
+                  .map((b, i) => (
+                    <div
+                      key={b.idNumber}
+                      data-ocid={`blacklist.item.${i + 1}`}
+                      className="flex items-center justify-between p-4 rounded-xl border border-red-500/20 bg-red-900/10"
                     >
-                      {t(lang, "remove")}
-                    </button>
-                  </div>
-                ))}
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="text-white font-mono font-medium">
+                            {b.idNumber}
+                          </div>
+                          {b.reasonCategory && (
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                              style={{
+                                background:
+                                  b.reasonCategory === "Güvenlik Tehdidi"
+                                    ? "rgba(239,68,68,0.3)"
+                                    : b.reasonCategory === "Yasak Kişi"
+                                      ? "rgba(168,85,247,0.3)"
+                                      : b.reasonCategory === "Eski Çalışan"
+                                        ? "rgba(245,158,11,0.3)"
+                                        : b.reasonCategory === "Hırsızlık"
+                                          ? "rgba(249,115,22,0.3)"
+                                          : "rgba(100,116,139,0.3)",
+                                border: "1px solid rgba(255,255,255,0.15)",
+                              }}
+                            >
+                              {b.reasonCategory}
+                            </span>
+                          )}
+                        </div>
+                        {b.reason && (
+                          <div className="text-slate-400 text-xs mt-0.5">
+                            {b.reason}
+                          </div>
+                        )}
+                        <div className="text-slate-500 text-xs">
+                          {formatDateTime(b.addedAt)}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        data-ocid={`blacklist.delete_button.${i + 1}`}
+                        onClick={() => doRemoveBl(b.idNumber)}
+                        className="px-3 py-1.5 rounded-lg text-xs text-red-400 transition-all hover:opacity-80"
+                        style={{
+                          background: "rgba(239,68,68,0.15)",
+                          border: "1px solid rgba(239,68,68,0.35)",
+                        }}
+                      >
+                        {t(lang, "remove")}
+                      </button>
+                    </div>
+                  ))}
               </div>
             )}
           </div>
@@ -10210,6 +10865,101 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 ))}
               </div>
             )}
+            {/* Staff Emergency Contacts */}
+            <div className="mt-8">
+              <h3 className="text-white font-bold text-base mb-4">
+                🚨 Personel Acil İletişim Bilgileri
+              </h3>
+              {(() => {
+                const staffWithEC = staffList
+                  .map((s) => {
+                    try {
+                      const ec = JSON.parse(
+                        localStorage.getItem(
+                          `safentry_staff_emergency_${s.staffId}`,
+                        ) ?? "null",
+                      );
+                      return ec && (ec.name || ec.phone)
+                        ? { staff: s, ec }
+                        : null;
+                    } catch {
+                      return null;
+                    }
+                  })
+                  .filter(Boolean) as {
+                  staff: (typeof staffList)[0];
+                  ec: { name: string; phone: string; bloodType: string };
+                }[];
+
+                if (staffWithEC.length === 0) {
+                  return (
+                    <div
+                      className="text-center py-8 text-slate-500 rounded-xl"
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px dashed rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <p className="text-sm">
+                        Henüz acil iletişim bilgisi eklenmemiş.
+                      </p>
+                      <p className="text-xs mt-1">
+                        Personel "Hesabım" sekmesinden kendi acil iletişim
+                        bilgilerini ekleyebilir.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {staffWithEC.map(({ staff: s, ec }) => (
+                      <div
+                        key={s.staffId}
+                        className="p-4 rounded-xl"
+                        style={{
+                          background: "rgba(239,68,68,0.07)",
+                          border: "1px solid rgba(239,68,68,0.2)",
+                        }}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <p className="text-white font-semibold text-sm">
+                              {s.name}
+                            </p>
+                            <p className="text-slate-400 text-xs mt-0.5">
+                              {s.role === "admin" ? "Yönetici" : "Personel"}
+                            </p>
+                          </div>
+                          {ec.bloodType && (
+                            <span
+                              className="px-2 py-0.5 rounded text-xs font-bold text-red-300"
+                              style={{ background: "rgba(239,68,68,0.2)" }}
+                            >
+                              {ec.bloodType}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 space-y-1">
+                          {ec.name && (
+                            <p className="text-slate-300 text-xs">
+                              👤 Acil Kişi:{" "}
+                              <span className="text-white">{ec.name}</span>
+                            </p>
+                          )}
+                          {ec.phone && (
+                            <p className="text-slate-300 text-xs">
+                              📞 Tel:{" "}
+                              <span className="text-white">{ec.phone}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
 
@@ -13442,6 +14192,36 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
             companyId={session.companyId}
             visitors={visitors}
           />
+        )}
+
+        {tab === "boardannounce" && (
+          <BoardAnnounceTab
+            companyId={session.companyId}
+            staffName={
+              staffList.find((s) => s.staffId === session.staffId)?.name ??
+              "Admin"
+            }
+          />
+        )}
+        {tab === "statssummary" && (
+          <StatsSummaryTab
+            visitors={visitors}
+            companyId={session.companyId}
+            companyName={company?.name || session.companyId}
+          />
+        )}
+        {tab === "monthlykpi" && (
+          <MonthlyKpiTab
+            visitors={visitors}
+            staffList={staffList}
+            companyId={session.companyId}
+          />
+        )}
+        {tab === "badgeinventory" && (
+          <BadgeInventoryTab companyId={session.companyId} />
+        )}
+        {tab === "satisfactiontrend" && (
+          <SatisfactionTrendTab visitors={visitors} />
         )}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
