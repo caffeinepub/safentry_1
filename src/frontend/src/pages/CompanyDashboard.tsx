@@ -134,6 +134,7 @@ import {
 } from "../store";
 
 import {
+  type PermitRenewal,
   addAlertHistory,
   addGatePassLog,
   addNotification,
@@ -416,7 +417,10 @@ type Tab =
   | "statssummary"
   | "monthlykpi"
   | "badgeinventory"
-  | "satisfactiontrend";
+  | "satisfactiontrend"
+  | "entrytrafik"
+  | "hostreminder"
+  | "permitworkflow";
 
 // ─── Badge Inventory Tab ─────────────────────────────────────────────────────
 interface BadgeCard {
@@ -6134,6 +6138,13 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   );
   const [showMeetingRoomForm, setShowMeetingRoomForm] = useState(false);
   const [showMassCheckoutModal, setShowMassCheckoutModal] = useState(false);
+  // hostreminder tab state
+  const [hrLocalMinutes, setHrLocalMinutes] = useState(30);
+  const [hrLocalEnabled, setHrLocalEnabled] = useState(true);
+  // permitworkflow tab state
+  const [pwShowNewForm, setPwShowNewForm] = useState(false);
+  const [pwNewRenewalName, setPwNewRenewalName] = useState("");
+  const [pwNewRenewalNotes, setPwNewRenewalNotes] = useState("");
   const [massCheckoutReason, setMassCheckoutReason] = useState<
     "mesai" | "acil"
   >("mesai");
@@ -6885,6 +6896,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "monthlykpi", label: "📊 Aylık KPI" },
     { key: "badgeinventory", label: "🪪 Rozet Envanteri" },
     { key: "satisfactiontrend", label: "📊 Memnuniyet Trendi" },
+    { key: "entrytrafik", label: "🚪 Giriş Trafik Analizi" },
+    { key: "hostreminder", label: "⏰ Host Hatırlatma" },
+    { key: "permitworkflow", label: "🔄 İzin Yenileme" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -14223,6 +14237,843 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
         {tab === "satisfactiontrend" && (
           <SatisfactionTrendTab visitors={visitors} />
         )}
+        {tab === "entrytrafik" &&
+          (() => {
+            // Compute hourly traffic from visitors
+            const hourCounts: Record<number, number> = {};
+            for (let h = 0; h < 24; h++) hourCounts[h] = 0;
+            for (const v of visitors) {
+              const h = new Date(v.arrivalTime).getHours();
+              hourCounts[h] = (hourCounts[h] || 0) + 1;
+            }
+            const peakHour = Object.entries(hourCounts).sort(
+              (a, b) => Number(b[1]) - Number(a[1]),
+            )[0];
+
+            // Entry points from localStorage
+            const entryPoints: { id: string; name: string; type: string }[] =
+              (() => {
+                try {
+                  return JSON.parse(
+                    localStorage.getItem(
+                      `safentry_entrypoints_${session.companyId}`,
+                    ) || "[]",
+                  );
+                } catch {
+                  return [];
+                }
+              })();
+
+            // Assign visitors to entry points by index for simulation
+            const epTraffic: Record<string, number> = {};
+            for (const ep of entryPoints) epTraffic[ep.id] = 0;
+            visitors.forEach((_v, i) => {
+              if (entryPoints.length > 0) {
+                const ep = entryPoints[i % entryPoints.length];
+                epTraffic[ep.id] = (epTraffic[ep.id] || 0) + 1;
+              }
+            });
+
+            const morningVisitors = visitors.filter((v) => {
+              const h = new Date(v.arrivalTime).getHours();
+              return h >= 8 && h < 13;
+            }).length;
+            const afternoonVisitors = visitors.filter((v) => {
+              const h = new Date(v.arrivalTime).getHours();
+              return h >= 13 && h < 18;
+            }).length;
+            const eveningVisitors = visitors.filter((v) => {
+              const h = new Date(v.arrivalTime).getHours();
+              return h >= 18;
+            }).length;
+
+            return (
+              <div data-ocid="entrytrafik.section" className="space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <h2 className="text-white font-bold text-lg">
+                    🚪 Giriş Noktası Trafik Analizi
+                  </h2>
+                  <span className="text-slate-400 text-sm">
+                    Toplam {visitors.length} ziyaret verisi
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    {
+                      label: "Sabah Vardiyası",
+                      sub: "08:00–13:00",
+                      count: morningVisitors,
+                      color: "#0ea5e9",
+                    },
+                    {
+                      label: "Öğleden Sonra",
+                      sub: "13:00–18:00",
+                      count: afternoonVisitors,
+                      color: "#22c55e",
+                    },
+                    {
+                      label: "Akşam/Gece",
+                      sub: "18:00+",
+                      count: eveningVisitors,
+                      color: "#f59e0b",
+                    },
+                  ].map((s) => (
+                    <div
+                      key={s.label}
+                      className="p-4 rounded-2xl text-center"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <p
+                        className="text-2xl font-bold"
+                        style={{ color: s.color }}
+                      >
+                        {s.count}
+                      </p>
+                      <p className="text-white text-sm font-medium mt-1">
+                        {s.label}
+                      </p>
+                      <p className="text-slate-400 text-xs">{s.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {peakHour && Number(peakHour[1]) > 0 && (
+                  <div
+                    className="p-4 rounded-2xl"
+                    style={{
+                      background: "rgba(14,165,233,0.06)",
+                      border: "1px solid rgba(14,165,233,0.2)",
+                    }}
+                  >
+                    <p className="text-[#0ea5e9] font-semibold text-sm">
+                      🕐 En Yoğun Saat: {peakHour[0]}:00–
+                      {Number(peakHour[0]) + 1}:00
+                    </p>
+                    <p className="text-slate-300 text-sm mt-1">
+                      {peakHour[1]} ziyaretçi bu saatte giriş yaptı
+                    </p>
+                  </div>
+                )}
+
+                <div
+                  className="p-4 rounded-2xl space-y-3"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.07)",
+                  }}
+                >
+                  <h3 className="text-white font-semibold text-sm mb-3">
+                    📊 Saatlik Dağılım
+                  </h3>
+                  {visitors.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-4">
+                      Henüz ziyaretçi verisi yok
+                    </p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {[
+                        7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+                      ].map((h) => {
+                        const cnt = hourCounts[h] || 0;
+                        const maxCnt = Math.max(
+                          ...Object.values(hourCounts),
+                          1,
+                        );
+                        const pct = (cnt / maxCnt) * 100;
+                        return (
+                          <div key={h} className="flex items-center gap-3">
+                            <span className="text-slate-400 text-xs w-12 shrink-0">
+                              {h}:00
+                            </span>
+                            <div className="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{
+                                  width: `${pct}%`,
+                                  background:
+                                    "linear-gradient(90deg,#0ea5e9,#22c55e)",
+                                }}
+                              />
+                            </div>
+                            <span className="text-slate-300 text-xs w-6 text-right">
+                              {cnt}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {entryPoints.length > 0 && (
+                  <div
+                    className="p-4 rounded-2xl space-y-3"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <h3 className="text-white font-semibold text-sm">
+                      🚪 Giriş Noktası Bazlı Trafik
+                    </h3>
+                    {entryPoints.map((ep, i) => {
+                      const cnt = epTraffic[ep.id] || 0;
+                      const total =
+                        Object.values(epTraffic).reduce((a, b) => a + b, 0) ||
+                        1;
+                      const pct = Math.round((cnt / total) * 100);
+                      return (
+                        <div key={ep.id} className="flex items-center gap-3">
+                          <span className="text-slate-300 text-sm flex-1">
+                            {ep.name}
+                          </span>
+                          <div className="w-32 bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${pct}%`,
+                                background: i % 2 === 0 ? "#0ea5e9" : "#22c55e",
+                              }}
+                            />
+                          </div>
+                          <span className="text-slate-400 text-xs w-16 text-right">
+                            {cnt} ({pct}%)
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {entryPoints.length === 0 && (
+                  <p className="text-slate-500 text-sm text-center py-4">
+                    Giriş noktaları tanımlamak için "Giriş Noktaları" sekmesini
+                    kullanın
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        {tab === "hostreminder" &&
+          (() => {
+            const REMINDER_KEY = `safentry_hostreminder_${session.companyId}`;
+            const reminderConfig: { minutesBefore: number; enabled: boolean } =
+              (() => {
+                try {
+                  return JSON.parse(
+                    localStorage.getItem(REMINDER_KEY) ||
+                      '{"minutesBefore":30,"enabled":true}',
+                  );
+                } catch {
+                  return { minutesBefore: 30, enabled: true };
+                }
+              })();
+
+            const appointments: {
+              id: string;
+              hostName: string;
+              visitorName: string;
+              date: string;
+              time: string;
+              purpose: string;
+            }[] = (() => {
+              try {
+                return JSON.parse(
+                  localStorage.getItem(
+                    `safentry_appointments_${session.companyId}`,
+                  ) || "[]",
+                );
+              } catch {
+                return [];
+              }
+            })();
+
+            const now = Date.now();
+            const upcomingReminders = appointments.filter((apt) => {
+              try {
+                const aptTime = new Date(`${apt.date}T${apt.time}`).getTime();
+                const diff = (aptTime - now) / 60000;
+                return diff > 0 && diff <= reminderConfig.minutesBefore + 15;
+              } catch {
+                return false;
+              }
+            });
+
+            return (
+              <div
+                data-ocid="hostreminder.section"
+                className="space-y-6 max-w-lg"
+              >
+                <h2 className="text-white font-bold text-lg">
+                  ⏰ Randevu Öncesi Host Hatırlatma
+                </h2>
+
+                <div
+                  className="p-5 rounded-2xl space-y-5"
+                  style={{
+                    background: "rgba(255,255,255,0.04)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <h3 className="text-white font-semibold text-sm">
+                    ⚙️ Hatırlatma Ayarları
+                  </h3>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-300 text-sm">
+                      Hatırlatma aktif
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setHrLocalEnabled((e: boolean) => !e)}
+                      className="w-12 h-6 rounded-full transition-all relative"
+                      style={{
+                        background: hrLocalEnabled
+                          ? "#0ea5e9"
+                          : "rgba(255,255,255,0.1)",
+                      }}
+                    >
+                      <span
+                        className="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all shadow"
+                        style={{ left: hrLocalEnabled ? "26px" : "2px" }}
+                      />
+                    </button>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-300 text-sm block mb-2">
+                      Randevudan kaç dakika önce hatırlat?
+                    </span>
+                    <div className="grid grid-cols-4 gap-2">
+                      {[15, 30, 60, 120].map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => setHrLocalMinutes(m)}
+                          className="py-2 rounded-xl text-sm font-semibold transition-all"
+                          style={{
+                            background:
+                              hrLocalMinutes === m
+                                ? "linear-gradient(135deg,#0ea5e9,#0284c7)"
+                                : "rgba(255,255,255,0.06)",
+                            color: hrLocalMinutes === m ? "#fff" : "#94a3b8",
+                            border:
+                              hrLocalMinutes === m
+                                ? "1px solid rgba(14,165,233,0.4)"
+                                : "1px solid rgba(255,255,255,0.08)",
+                          }}
+                        >
+                          {m < 60 ? `${m} dk` : `${m / 60} sa`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem(
+                        REMINDER_KEY,
+                        JSON.stringify({
+                          minutesBefore: hrLocalMinutes,
+                          enabled: hrLocalEnabled,
+                        }),
+                      );
+                      toast.success("Hatırlatma ayarları kaydedildi.");
+                    }}
+                    className="w-full py-2.5 rounded-xl text-sm font-bold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    }}
+                  >
+                    Kaydet
+                  </button>
+                </div>
+
+                <div
+                  className="p-5 rounded-2xl space-y-3"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.07)",
+                  }}
+                >
+                  <h3 className="text-white font-semibold text-sm">
+                    📋 Yaklaşan Hatırlatmalar
+                  </h3>
+                  {upcomingReminders.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-4">
+                      {reminderConfig.minutesBefore} dakika içinde başlayacak
+                      randevu yok
+                    </p>
+                  ) : (
+                    upcomingReminders.map((apt, i) => {
+                      const aptTime = new Date(
+                        `${apt.date}T${apt.time}`,
+                      ).getTime();
+                      const minsLeft = Math.round((aptTime - now) / 60000);
+                      return (
+                        <div
+                          key={apt.id}
+                          data-ocid={`hostreminder.item.${i + 1}`}
+                          className="flex items-center justify-between gap-3 p-3 rounded-xl"
+                          style={{
+                            background: "rgba(245,158,11,0.08)",
+                            border: "1px solid rgba(245,158,11,0.2)",
+                          }}
+                        >
+                          <div>
+                            <p className="text-white text-sm font-medium">
+                              {apt.visitorName}
+                            </p>
+                            <p className="text-slate-400 text-xs">
+                              Host: {apt.hostName} • {apt.time}
+                            </p>
+                          </div>
+                          <span className="text-amber-400 text-xs font-bold shrink-0">
+                            {minsLeft} dk kaldı
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {(() => {
+                  const today = new Date().toISOString().split("T")[0];
+                  const todayApts = appointments.filter(
+                    (a: { date: string }) => a.date === today,
+                  );
+                  return todayApts.length > 0 ? (
+                    <div
+                      className="p-5 rounded-2xl space-y-3"
+                      style={{
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.07)",
+                      }}
+                    >
+                      <h3 className="text-white font-semibold text-sm">
+                        📅 Bugünkü Randevular ({todayApts.length})
+                      </h3>
+                      {todayApts.slice(0, 8).map(
+                        (apt: {
+                          id: string;
+                          time: string;
+                          visitorName: string;
+                          hostName: string;
+                        }) => (
+                          <div
+                            key={apt.id}
+                            className="flex items-center justify-between gap-2 text-sm"
+                          >
+                            <span className="text-slate-300">
+                              {apt.time} – {apt.visitorName}
+                            </span>
+                            <span className="text-slate-400 text-xs">
+                              Host: {apt.hostName}
+                            </span>
+                          </div>
+                        ),
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            );
+          })()}
+        {tab === "permitworkflow" &&
+          (() => {
+            const permits_local: {
+              id: string;
+              visitorId: string;
+              visitorName: string;
+              permitType: string;
+              validUntil: number;
+              status: string;
+              notes: string;
+            }[] = (() => {
+              try {
+                return JSON.parse(
+                  localStorage.getItem(
+                    `safentry_permits_${session.companyId}`,
+                  ) || "[]",
+                );
+              } catch {
+                return [];
+              }
+            })();
+
+            const renewals = getPermitRenewals(session.companyId);
+            const now2 = Date.now();
+            const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+
+            const expiredPermits = permits_local.filter(
+              (p) => p.validUntil < now2,
+            );
+            const expiringPermits = permits_local.filter(
+              (p) => p.validUntil >= now2 && p.validUntil - now2 <= thirtyDays,
+            );
+
+            const pendingRenewals = renewals.filter(
+              (r: { status: string }) => r.status === "pending",
+            );
+            const approvedRenewals = renewals.filter(
+              (r: { status: string }) => r.status === "approved",
+            );
+            const rejectedRenewals = renewals.filter(
+              (r: { status: string }) => r.status === "rejected",
+            );
+
+            return (
+              <div data-ocid="permitworkflow.section" className="space-y-6">
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <h2 className="text-white font-bold text-lg">
+                    🔄 Müteahhit İzin Yenileme İş Akışı
+                  </h2>
+                  <button
+                    type="button"
+                    data-ocid="permitworkflow.new.button"
+                    onClick={() => setPwShowNewForm((f: boolean) => !f)}
+                    className="px-4 py-2 rounded-xl text-sm font-bold text-white"
+                    style={{
+                      background: "linear-gradient(135deg,#0ea5e9,#0284c7)",
+                    }}
+                  >
+                    + Yenileme Talebi
+                  </button>
+                </div>
+
+                {pwShowNewForm && (
+                  <div
+                    className="p-5 rounded-2xl space-y-4"
+                    style={{
+                      background: "rgba(14,165,233,0.06)",
+                      border: "1px solid rgba(14,165,233,0.2)",
+                    }}
+                  >
+                    <h3 className="text-[#0ea5e9] font-semibold text-sm">
+                      📝 Yeni Yenileme Talebi
+                    </h3>
+                    <input
+                      value={pwNewRenewalName}
+                      onChange={(e) => setPwNewRenewalName(e.target.value)}
+                      placeholder="Müteahhit adı / şirket adı"
+                      className="w-full px-4 py-2.5 rounded-xl text-sm text-white outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    />
+                    <textarea
+                      value={pwNewRenewalNotes}
+                      onChange={(e) => setPwNewRenewalNotes(e.target.value)}
+                      placeholder="İzin türü ve notlar (isteğe bağlı)"
+                      rows={2}
+                      className="w-full px-4 py-2.5 rounded-xl text-sm text-white outline-none resize-none"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        data-ocid="permitworkflow.new.submit"
+                        onClick={() => {
+                          if (!pwNewRenewalName.trim()) {
+                            toast.error("Müteahhit adı gerekli.");
+                            return;
+                          }
+                          savePermitRenewal({
+                            id: `renewal_${Date.now()}`,
+                            companyId: session.companyId,
+                            permitId: `permit_${Date.now()}`,
+                            contractorName:
+                              pwNewRenewalName.trim() +
+                              (pwNewRenewalNotes.trim()
+                                ? ` [${pwNewRenewalNotes.trim()}]`
+                                : ""),
+                            status: "pending",
+                            requestedAt: Date.now(),
+                          });
+                          toast.success("Yenileme talebi oluşturuldu.");
+                          setPwNewRenewalName("");
+                          setPwNewRenewalNotes("");
+                          setPwShowNewForm(false);
+                          reload();
+                        }}
+                        className="flex-1 py-2 rounded-xl text-sm font-bold text-white"
+                        style={{
+                          background: "linear-gradient(135deg,#22c55e,#16a34a)",
+                        }}
+                      >
+                        Talep Oluştur
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPwShowNewForm(false)}
+                        className="px-4 py-2 rounded-xl text-sm text-slate-400"
+                        style={{ background: "rgba(255,255,255,0.06)" }}
+                      >
+                        İptal
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    {
+                      label: "Bekleyen",
+                      count: pendingRenewals.length,
+                      color: "#f59e0b",
+                    },
+                    {
+                      label: "Onaylanan",
+                      count: approvedRenewals.length,
+                      color: "#22c55e",
+                    },
+                    {
+                      label: "Reddedilen",
+                      count: rejectedRenewals.length,
+                      color: "#ef4444",
+                    },
+                  ].map((s) => (
+                    <div
+                      key={s.label}
+                      className="p-4 rounded-2xl text-center"
+                      style={{
+                        background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                      }}
+                    >
+                      <p
+                        className="text-2xl font-bold"
+                        style={{ color: s.color }}
+                      >
+                        {s.count}
+                      </p>
+                      <p className="text-slate-300 text-sm mt-1">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {(expiredPermits.length > 0 || expiringPermits.length > 0) && (
+                  <div
+                    className="p-5 rounded-2xl space-y-3"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <h3 className="text-white font-semibold text-sm">
+                      📅 İzin Geçerlilik Durumu
+                    </h3>
+                    {expiredPermits.length > 0 && (
+                      <div>
+                        <p className="text-red-400 text-xs font-semibold mb-2">
+                          ❌ Süresi Dolmuş ({expiredPermits.length})
+                        </p>
+                        {expiredPermits.slice(0, 5).map(
+                          (p: {
+                            id: string;
+                            visitorName: string;
+                            validUntil: number;
+                          }) => (
+                            <div
+                              key={p.id}
+                              className="flex items-center justify-between gap-2 text-sm mb-1.5"
+                            >
+                              <span className="text-slate-300">
+                                {p.visitorName || "—"}
+                              </span>
+                              <span className="text-red-400 text-xs">
+                                {new Date(p.validUntil).toLocaleDateString(
+                                  "tr-TR",
+                                )}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    )}
+                    {expiringPermits.length > 0 && (
+                      <div>
+                        <p className="text-amber-400 text-xs font-semibold mb-2">
+                          ⚠️ 30 Gün İçinde Dolacak ({expiringPermits.length})
+                        </p>
+                        {expiringPermits.slice(0, 5).map(
+                          (p: {
+                            id: string;
+                            visitorName: string;
+                            validUntil: number;
+                          }) => (
+                            <div
+                              key={p.id}
+                              className="flex items-center justify-between gap-2 text-sm mb-1.5"
+                            >
+                              <span className="text-slate-300">
+                                {p.visitorName || "—"}
+                              </span>
+                              <span className="text-amber-400 text-xs">
+                                {new Date(p.validUntil).toLocaleDateString(
+                                  "tr-TR",
+                                )}
+                              </span>
+                            </div>
+                          ),
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {pendingRenewals.length > 0 && (
+                  <div
+                    className="p-5 rounded-2xl space-y-3"
+                    style={{
+                      background: "rgba(245,158,11,0.05)",
+                      border: "1px solid rgba(245,158,11,0.2)",
+                    }}
+                  >
+                    <h3 className="text-amber-400 font-semibold text-sm">
+                      ⏳ Onay Bekleyen Talepler
+                    </h3>
+                    {pendingRenewals.map((r: PermitRenewal, ri: number) => (
+                      <div
+                        key={r.id}
+                        data-ocid={`permitworkflow.pending.${ri + 1}`}
+                        className="p-3 rounded-xl space-y-2"
+                        style={{ background: "rgba(255,255,255,0.03)" }}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-white text-sm font-medium">
+                              {r.contractorName}
+                            </p>
+                            <p className="text-slate-500 text-xs mt-1">
+                              {new Date(r.requestedAt).toLocaleString("tr-TR")}
+                            </p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            <button
+                              type="button"
+                              data-ocid={`permitworkflow.approve.${ri + 1}`}
+                              onClick={() => {
+                                savePermitRenewal({
+                                  ...r,
+                                  status: "approved",
+                                  reviewedAt: Date.now(),
+                                  reviewedBy: session.staffId ?? "admin",
+                                });
+                                toast.success(
+                                  `${r.contractorName} izin yenileme onaylandı.`,
+                                );
+                                reload();
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-white"
+                              style={{
+                                background:
+                                  "linear-gradient(135deg,#22c55e,#16a34a)",
+                              }}
+                            >
+                              Onayla
+                            </button>
+                            <button
+                              type="button"
+                              data-ocid={`permitworkflow.reject.${ri + 1}`}
+                              onClick={() => {
+                                savePermitRenewal({
+                                  ...r,
+                                  status: "rejected",
+                                  reviewedAt: Date.now(),
+                                  reviewedBy: session.staffId ?? "admin",
+                                });
+                                toast.error(
+                                  `${r.contractorName} izin yenileme reddedildi.`,
+                                );
+                                reload();
+                              }}
+                              className="px-3 py-1.5 rounded-lg text-xs text-red-400 border border-red-500/30"
+                            >
+                              Reddet
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {renewals.filter(
+                  (r: { status: string }) => r.status !== "pending",
+                ).length > 0 && (
+                  <div
+                    className="p-5 rounded-2xl space-y-3"
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.07)",
+                    }}
+                  >
+                    <h3 className="text-white font-semibold text-sm">
+                      📋 İşlem Geçmişi
+                    </h3>
+                    {renewals
+                      .filter((r: { status: string }) => r.status !== "pending")
+                      .slice(0, 10)
+                      .map(
+                        (r: {
+                          id: string;
+                          contractorName: string;
+                          status: string;
+                          reviewedAt?: number;
+                        }) => (
+                          <div
+                            key={r.id}
+                            className="flex items-center justify-between gap-2 text-sm py-1.5 border-b border-white/5 last:border-0"
+                          >
+                            <span className="text-slate-300">
+                              {r.contractorName}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.status === "approved" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}
+                              >
+                                {r.status === "approved"
+                                  ? "Onaylandı"
+                                  : "Reddedildi"}
+                              </span>
+                              {r.reviewedAt && (
+                                <span className="text-slate-500 text-xs">
+                                  {new Date(r.reviewedAt).toLocaleDateString(
+                                    "tr-TR",
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ),
+                      )}
+                  </div>
+                )}
+
+                {renewals.length === 0 && permits_local.length === 0 && (
+                  <div className="text-center py-10">
+                    <p className="text-5xl mb-3">🔄</p>
+                    <p className="text-slate-400">
+                      Henüz izin yenileme kaydı yok.
+                    </p>
+                    <p className="text-slate-500 text-sm mt-1">
+                      İzinler sekmesinden müteahhit izinleri
+                      tanımlayabilirsiniz.
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
