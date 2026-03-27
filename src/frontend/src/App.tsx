@@ -192,25 +192,25 @@ export default function App() {
   const lobbyDisplayCompanyId = getLobbyDisplayCompanyId();
   const verifyBadgeVisitId = getVerifyBadgeVisitId();
 
-  const getInitialScreen = (): AppScreen => {
-    if (verifyBadgeVisitId) return "verify-badge";
-    if (lobbyDisplayCompanyId) return "lobby-display";
-    if (confirmToken) return "appointment-confirm";
-    if (inviteToken) return "invite";
-    if (preRegToken) return "prereg";
-    if (appealParams) return "blacklist-appeal";
-    if (selfPreRegCode) return "self-prereg";
-    if (selfCheckinCompanyId) return "self-checkin";
-    if (contractorPortalId) return "contractor-portal";
-    if (welcomePkgVisitorId) return "welcome-pkg";
-    if (visitorTicketId) return "visitor-ticket";
-    if (feedbackCode) return "visitor-feedback";
-    if (!hasLang) return "language";
-    if (!session) return "welcome";
-    return session.type === "company" ? "company-dashboard" : "staff-dashboard";
-  };
-
-  const [screen, setScreen] = useState<AppScreen>(getInitialScreen);
+  const [screen, setScreen] = useState<AppScreen>(() => {
+    if (verifyBadgeVisitId) return "verify-badge" as AppScreen;
+    if (lobbyDisplayCompanyId) return "lobby-display" as AppScreen;
+    if (confirmToken) return "appointment-confirm" as AppScreen;
+    if (inviteToken) return "invite" as AppScreen;
+    if (preRegToken) return "prereg" as AppScreen;
+    if (appealParams) return "blacklist-appeal" as AppScreen;
+    if (selfPreRegCode) return "self-prereg" as AppScreen;
+    if (selfCheckinCompanyId) return "self-checkin" as AppScreen;
+    if (contractorPortalId) return "contractor-portal" as AppScreen;
+    if (welcomePkgVisitorId) return "welcome-pkg" as AppScreen;
+    if (visitorTicketId) return "visitor-ticket" as AppScreen;
+    if (feedbackCode) return "visitor-feedback" as AppScreen;
+    if (!hasLang) return "language" as AppScreen;
+    if (!session) return "welcome" as AppScreen;
+    return (
+      session.type === "company" ? "company-dashboard" : "staff-dashboard"
+    ) as AppScreen;
+  });
   const [kioskCompanyId, setKioskCompanyId] = useState<string | null>(null);
   const [currentInviteToken, setCurrentInviteToken] = useState<string | null>(
     inviteToken,
