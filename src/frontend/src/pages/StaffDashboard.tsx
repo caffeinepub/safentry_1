@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useLanguage } from "../LanguageContext";
 import { addAuditLog } from "../auditLog";
 import CsvImportModal from "../components/CsvImportModal";
 import DailyBriefing from "../components/DailyBriefing";
@@ -44,7 +45,7 @@ import { getVisitorTags } from "../components/VisitorTagsTab";
 import { getZones } from "../components/ZoneControlTab";
 import { useCameraCapture as useCamera } from "../hooks/useCameraCapture";
 import { useLiveAlerts } from "../hooks/useLiveAlerts";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import { useQRScanner } from "../qr-code/useQRScanner";
 import {
   findEntryPointForCategory,
@@ -288,6 +289,7 @@ const EMPTY_FORM = {
   emergencyContactPhone: "",
   policyAccepted: false,
   zonePermissions: [] as string[],
+  isConfidential: false,
 };
 
 const EMPTY_APPT = {
@@ -718,7 +720,7 @@ function MaintenanceTab({
 }
 
 export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const session = getSession()!;
   const staff = findStaffById(session.staffId!)!;
   const company = findCompanyById(session.companyId);
@@ -1695,6 +1697,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
         companions.filter((c) => c.name.trim()).length > 0
           ? companions.filter((c) => c.name.trim())
           : undefined,
+      isConfidential: form.isConfidential || undefined,
     };
     // Show ID verification dialog before saving
     setPendingVisitorData(visitor);
@@ -6420,6 +6423,43 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
                     </div>
                   </label>
                 </div>
+                {/* Confidential Visit Toggle */}
+                <div
+                  className="p-4 rounded-xl"
+                  style={{
+                    background: form.isConfidential
+                      ? "rgba(139,92,246,0.08)"
+                      : "rgba(255,255,255,0.04)",
+                    border: form.isConfidential
+                      ? "1.5px solid rgba(139,92,246,0.35)"
+                      : "1.5px solid rgba(255,255,255,0.12)",
+                  }}
+                >
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      data-ocid="register.confidential.checkbox"
+                      type="checkbox"
+                      checked={form.isConfidential}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          isConfidential: e.target.checked,
+                        }))
+                      }
+                      className="w-4 h-4 rounded accent-purple-500 shrink-0"
+                    />
+                    <div>
+                      <span className="text-slate-200 text-sm font-medium">
+                        🔒 Gizli Ziyaret
+                      </span>
+                      <p className="text-slate-400 text-xs mt-0.5">
+                        Ziyaretçi adı ve firma bilgisi yalnızca yöneticilere
+                        görünür; lobi ekranı ve genel raporlarda gizlenir.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
                 {company?.ishgEnabled && (
                   <div
                     className="p-4 rounded-xl"

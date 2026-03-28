@@ -1,27 +1,26 @@
-# Safentry v80
+# Safentry
 
 ## Current State
-Safentry v79 is live. CompanyDashboard has tabs for badgeinventory and satisfactiontrend as the last two added. The AppTab type union ends at `satisfactiontrend`. Entry point management exists (EntryPointManager component), but no traffic analytics tab. Permit renewals exist in the permits tab, but no dedicated standalone workflow tab. No appointment pre-host reminder settings exist.
+V83 canlıda. CompanyDashboard.tsx (17673 satır), StaffDashboard.tsx (11607 satır). Ön kayıt portalı, zamanlanmış raporlar ve kayıp eşya zaten mevcut.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Giriş Noktası Trafik Analizi tab** (`entrytrafik`) - analyzes traffic per entry point using visitor arrival data, shows hourly distribution chart, shift comparison, top entry points
-2. **Randevu Öncesi Host Hatırlatma** (`hostreminder`) - settings tab to configure reminder timing (15/30/60/120 min); runtime simulation that marks upcoming appointments as reminder-sent; shows pending reminders
-3. **Müteahhit İzin Yenileme İş Akışı** (`permitworkflow`) - dedicated tab showing permit expiry timeline, auto-detected expiring permits, renewal request creation by admin, approval/reject flow with full audit trail
+1. **Gizli/Anonim Ziyaret Modu** -- Ziyaretçi kaydında "Gizli Ziyaret" toggle; aktifse isim/firma lobi ekranında, ziyaretçi rehberinde, genel raporlarda maskeleniyor ("Gizli Ziyaretçi" görünür); yalnızca admin tam bilgiye erişebilir. CompanyDashboard'da "🕵️ Gizli Ziyaretler" sekmesi.
+2. **Departman Bazlı Onay Akışı** -- CompanyDashboard'da "🏛️ Departman Onay Kuralları" sekmesi; her departmana onay tipi atanıyor (otomatik onay / tek onaylayıcı / çoklu onaylayıcı); ziyaretçi kaydında host departmanına göre ilgili kural tetikleniyor, kural adı kayıt üzerinde görünüyor.
+3. **Geçici Erişim Kartı Zimmet Defteri** -- CompanyDashboard'da "🗝️ Kart Zimmet Defteri" sekmesi; kart numarası + açıklama + zimmetlenen ziyaretçi/personel kaydı; çıkış yapılmak istenince iade edilmemiş kart varsa uyarı; iade edilmeyen kartlar listesi ve raporu.
 
 ### Modify
-- AppTab union type: add `entrytrafik | hostreminder | permitworkflow`
-- Tab list: add 3 new entries
-- Tab render section: add 3 new blocks
+- Visitor kaydına `isConfidential: boolean` alanı ekleniyor
+- Ziyaretçi listesinde gizli kayıtlar maskeleniyor (admin hariç)
+- Visitor exit akışında zimmetli kart kontrolü yapılıyor
 
 ### Remove
-- Nothing removed
+Hiçbir şey kaldırılmıyor.
 
 ## Implementation Plan
-1. Extend AppTab type
-2. Add tab list entries with labels
-3. Implement EntryTrafficTab component inline
-4. Implement HostReminderTab component inline
-5. Implement PermitWorkflowTab component inline
-6. Add tab render blocks
+1. `types.ts`'e `isConfidential`, `departmentApprovalRule`, `cardIssuance` tipleri ekle
+2. Visitor kayıt formuna gizli ziyaret toggle ekle
+3. Visitor listesinde maskeleme mantığı: `isConfidential && !isAdmin` → "🕵️ Gizli Ziyaretçi"
+4. CompanyDashboard'a 3 yeni sekme ekle: gizli ziyaretler (sadece admin), departman onay kuralları, kart zimmet defteri
+5. Çıkış akışında zimmetli kart uyarısı

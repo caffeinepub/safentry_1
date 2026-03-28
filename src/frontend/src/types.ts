@@ -215,6 +215,7 @@ export interface Visitor {
   visitorLanguage?: string;
   rejectionReason?: string;
   isDraft?: boolean;
+  isConfidential?: boolean;
 }
 
 export interface MeetingTemplate {
@@ -888,4 +889,17 @@ export interface ApprovalFlowTemplate {
   visitorCategory: string;
   steps: ApprovalStep[];
   createdAt: number;
+}
+
+// ─── Card Issuance (Zimmet Defteri) ──────────────────────────────────────────
+export interface CardIssuance {
+  id: string;
+  cardNumber: string;
+  cardType: "Geçiş Kartı" | "Anahtar" | "Manyetik Kart" | "Diğer";
+  issuedTo: string;
+  visitorRecordId?: string;
+  issuedAt: string;
+  returnedAt?: string;
+  issuedBy: string;
+  notes?: string;
 }

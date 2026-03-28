@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useLanguage } from "../LanguageContext";
 import { useActor } from "../hooks/useActor";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import { saveCompany } from "../store";
 import type { AppScreen, Company } from "../types";
 import {
@@ -24,7 +25,7 @@ const FIELDS: {
 ];
 
 export default function CompanyRegister({ onNavigate }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const { actor } = useActor();
   const [form, setForm] = useState({
     name: "",

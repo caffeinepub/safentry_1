@@ -1,6 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import { LanguageProvider } from "./LanguageContext";
 import {
   createBackendSession,
   deleteBackendSession,
@@ -10,7 +11,6 @@ import {
 } from "./backendSession";
 import { setBackendActor } from "./backendSync";
 import { useActor } from "./hooks/useActor";
-import { getLang } from "./i18n";
 import InvitePage from "./pages/InvitePage";
 import {
   addNotification,
@@ -128,7 +128,7 @@ function getAppealParams(): { tc: string } | null {
   return { tc: match[1] ?? "" };
 }
 
-export default function App() {
+function AppInner() {
   const [, forceRender] = useState(0);
   const refresh = () => forceRender((x) => x + 1);
   const { actor } = useActor();
@@ -337,8 +337,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [screen, navigate]);
 
-  void getLang();
-
   if (screen === "invite" && currentInviteToken)
     return (
       <>
@@ -481,4 +479,12 @@ export default function App() {
       </>
     );
   return null;
+}
+
+export default function App() {
+  return (
+    <LanguageProvider>
+      <AppInner />
+    </LanguageProvider>
+  );
 }

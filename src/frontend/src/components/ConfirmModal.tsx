@@ -1,4 +1,5 @@
-import { getLang, t } from "../i18n";
+import { useLanguage } from "../LanguageContext";
+import { t } from "../i18n";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -21,7 +22,7 @@ export default function ConfirmModal({
   onCancel,
   message,
 }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <DialogContent className="bg-[#0f1729] border border-white/10 text-white">

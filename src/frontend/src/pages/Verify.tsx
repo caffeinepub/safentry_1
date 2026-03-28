@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useLanguage } from "../LanguageContext";
 import QRCode from "../components/QRCode";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import {
   findCompanyById,
   findStaffById,
@@ -21,7 +22,7 @@ interface Props {
 }
 
 export default function Verify({ onNavigate }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const [code, setCode] = useState("");
   const [visitor, setVisitor] = useState<Visitor | null>(null);
   const [notFound, setNotFound] = useState(false);

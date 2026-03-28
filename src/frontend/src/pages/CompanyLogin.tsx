@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useLanguage } from "../LanguageContext";
 import { createBackendSession } from "../backendSession";
 import { syncFromBackend } from "../backendSync";
 import LangSwitcher from "../components/LangSwitcher";
 import { useActor } from "../hooks/useActor";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import {
   findCompanyByLoginCode,
   purgeExpiredVisitors,
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export default function CompanyLogin({ onNavigate, onRefresh }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const { actor } = useActor();
   const [code, setCode] = useState("");
   const [error, setError] = useState("");

@@ -1,9 +1,10 @@
 import { useState } from "react";
+import { useLanguage } from "../LanguageContext";
 import { createBackendSession } from "../backendSession";
 import { syncFromBackend } from "../backendSync";
 import LangSwitcher from "../components/LangSwitcher";
 import { useActor } from "../hooks/useActor";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import {
   addStaffSession,
   findStaffById,
@@ -19,7 +20,7 @@ interface Props {
 }
 
 export default function StaffLogin({ onNavigate, onRefresh }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const { actor } = useActor();
   const [staffId, setStaffId] = useState("");
   const [companyId, setCompanyId] = useState("");

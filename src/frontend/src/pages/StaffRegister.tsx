@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { useLanguage } from "../LanguageContext";
 import { StaffRole } from "../backend";
 import { useActor } from "../hooks/useActor";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import { lookupInviteCode, saveStaff } from "../store";
 import type { AppScreen, Staff } from "../types";
 import { copyToClipboard, generateStaffId } from "../utils";
@@ -11,7 +12,7 @@ interface Props {
 }
 
 export default function StaffRegister({ onNavigate }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const { actor } = useActor();
   const [form, setForm] = useState({
     name: "",

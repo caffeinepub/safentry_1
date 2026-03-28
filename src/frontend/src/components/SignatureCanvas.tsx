@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getLang, t } from "../i18n";
+import { useLanguage } from "../LanguageContext";
+import { t } from "../i18n";
 import { Button } from "./ui/button";
 
 interface Props {
@@ -10,7 +11,7 @@ interface Props {
 export default function SignatureCanvas({ onChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
-  const lang = getLang();
+  const { lang } = useLanguage();
 
   const getPos = (e: React.MouseEvent | React.TouchEvent) => {
     const canvas = canvasRef.current!;

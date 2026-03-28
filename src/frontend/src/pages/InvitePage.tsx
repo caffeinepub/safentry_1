@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import LangSwitcher from "../components/LangSwitcher";
 import SignatureCanvas from "../components/SignatureCanvas";
-import { getLang } from "../i18n";
 import {
   findCompanyById,
   findInvitationByToken,
@@ -17,7 +16,6 @@ interface Props {
 }
 
 export default function InvitePage({ token, onNavigate }: Props) {
-  void getLang();
   const [invitation, setInvitation] = useState<Invitation | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [submitted, setSubmitted] = useState(false);

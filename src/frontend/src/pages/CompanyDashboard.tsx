@@ -21,6 +21,7 @@ import {
   YAxis,
 } from "recharts";
 import { toast } from "sonner";
+import { useLanguage } from "../LanguageContext";
 import { addAuditLog, getAuditLogs } from "../auditLog";
 import AccessUpgradeRequestsTab from "../components/AccessUpgradeRequestsTab";
 import AppointmentCalendarTab from "../components/AppointmentCalendarTab";
@@ -109,7 +110,7 @@ import WebhookIntegrationsTab from "../components/WebhookIntegrationsTab";
 import WorkingCalendar from "../components/WorkingCalendar";
 import ZoneControlTab from "../components/ZoneControlTab";
 import { useLiveAlerts } from "../hooks/useLiveAlerts";
-import { getLang, t } from "../i18n";
+import { t } from "../i18n";
 import {
   deleteApprovalFlowTemplate,
   deleteCompanyEvent,
@@ -246,6 +247,7 @@ import type {
   BelongingsItem,
   BlacklistAppeal,
   BlacklistEntry,
+  CardIssuance,
   CategoryTimeRestriction,
   Company,
   ContractorPermit,
@@ -420,7 +422,10 @@ type Tab =
   | "satisfactiontrend"
   | "entrytrafik"
   | "hostreminder"
-  | "permitworkflow";
+  | "permitworkflow"
+  | "confidential"
+  | "deptapproval"
+  | "cardissuance";
 
 // ─── Badge Inventory Tab ─────────────────────────────────────────────────────
 interface BadgeCard {
@@ -5805,7 +5810,7 @@ function GDPRDataExportPanel({
   );
 }
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
-  const lang = getLang();
+  const { lang } = useLanguage();
   const session = getSession()!;
   const company = findCompanyById(session.companyId)!;
   const [tab, setTab] = useState<Tab>("visitors");
@@ -6145,6 +6150,59 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const [pwShowNewForm, setPwShowNewForm] = useState(false);
   const [pwNewRenewalName, setPwNewRenewalName] = useState("");
   const [pwNewRenewalNotes, setPwNewRenewalNotes] = useState("");
+
+  // ─── Card Issuance state ──────────────────────────────────────────────────
+  const [cardIssuances, setCardIssuances] = React.useState<CardIssuance[]>(
+    () => {
+      try {
+        return JSON.parse(
+          localStorage.getItem(`cardIssuances_${session.companyId}`) || "[]",
+        );
+      } catch {
+        return [];
+      }
+    },
+  );
+  const saveCardIssuances = (arr: CardIssuance[]) => {
+    localStorage.setItem(
+      `cardIssuances_${session.companyId}`,
+      JSON.stringify(arr),
+    );
+    setCardIssuances(arr);
+  };
+  const [ciShowForm, setCiShowForm] = React.useState(false);
+  const [ciForm, setCiForm] = React.useState({
+    cardNumber: "",
+    cardType: "Geçiş Kartı" as CardIssuance["cardType"],
+    issuedTo: "",
+    notes: "",
+  });
+  const [ciCheckoutWarningVisitor, setCiCheckoutWarningVisitor] =
+    React.useState<Visitor | null>(null);
+  const [_ciPendingCheckoutId, setCiPendingCheckoutId] = React.useState<
+    string | null
+  >(null);
+
+  // ─── Dept Approval Rules state ────────────────────────────────────────────
+  const [deptRules, setDeptRules] = React.useState<Record<string, string>>(
+    () => {
+      try {
+        return JSON.parse(
+          localStorage.getItem(`deptApprovalRules_${session.companyId}`) ||
+            "{}",
+        );
+      } catch {
+        return {};
+      }
+    },
+  );
+  const saveDeptRules = (rules: Record<string, string>) => {
+    localStorage.setItem(
+      `deptApprovalRules_${session.companyId}`,
+      JSON.stringify(rules),
+    );
+    setDeptRules(rules);
+  };
   const [massCheckoutReason, setMassCheckoutReason] = useState<
     "mesai" | "acil"
   >("mesai");
@@ -6899,6 +6957,9 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "entrytrafik", label: "🚪 Giriş Trafik Analizi" },
     { key: "hostreminder", label: "⏰ Host Hatırlatma" },
     { key: "permitworkflow", label: "🔄 İzin Yenileme" },
+    { key: "confidential", label: "🕵️ Gizli Ziyaretler" },
+    { key: "deptapproval", label: "🏛️ Departman Onay Kuralları" },
+    { key: "cardissuance", label: "🗝️ Kart Zimmet Defteri" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -8235,8 +8296,24 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                               }}
                               className="text-white font-medium text-sm hover:text-[#38bdf8] hover:underline transition-colors bg-transparent border-none cursor-pointer p-0"
                             >
-                              {v.name}
+                              {v.isConfidential &&
+                              session.type !== "company" &&
+                              session.staffRole !== "admin"
+                                ? "🕵️ Gizli Ziyaretçi"
+                                : v.name}
                             </button>
+                            {v.isConfidential && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-xs font-semibold"
+                                style={{
+                                  background: "rgba(139,92,246,0.2)",
+                                  color: "#a78bfa",
+                                  border: "1px solid rgba(139,92,246,0.35)",
+                                }}
+                              >
+                                🔒 Gizli
+                              </span>
+                            )}
                             {statusBadge(v)}
                             {v.category && (
                               <span
@@ -15074,6 +15151,588 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             );
           })()}
+        {tab === "confidential" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">
+                🕵️ Gizli Ziyaretler
+              </h2>
+              <span className="text-xs text-slate-400">
+                Yalnızca yöneticiler görebilir
+              </span>
+            </div>
+            {(() => {
+              const confVisitors = visitors.filter((v) => v.isConfidential);
+              if (confVisitors.length === 0) {
+                return (
+                  <div
+                    data-ocid="confidential.empty_state"
+                    className="text-center py-16 text-slate-400"
+                  >
+                    <div className="text-5xl mb-3">🕵️</div>
+                    <p className="font-semibold">Henüz gizli ziyaret yok</p>
+                    <p className="text-xs mt-1">
+                      Ziyaretçi kaydında "Gizli Ziyaret" seçeneği
+                      işaretlendiğinde burada görünür.
+                    </p>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-3" data-ocid="confidential.list">
+                  {confVisitors.map((v, i) => {
+                    const host = staffList.find(
+                      (s) => s.staffId === v.hostStaffId,
+                    );
+                    return (
+                      <div
+                        key={v.visitorId}
+                        data-ocid={`confidential.item.${i + 1}`}
+                        className="rounded-xl p-4 flex flex-col gap-2"
+                        style={{
+                          background: "rgba(15,23,42,0.7)",
+                          border: "1px solid rgba(139,92,246,0.3)",
+                        }}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-2xl">🕵️</span>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white">
+                                {v.name}
+                              </span>
+                              <span
+                                className="text-xs px-2 py-0.5 rounded-full"
+                                style={{
+                                  background: "rgba(139,92,246,0.2)",
+                                  color: "#a78bfa",
+                                  border: "1px solid rgba(139,92,246,0.4)",
+                                }}
+                              >
+                                Gizli
+                              </span>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full ${v.status === "active" ? "text-green-400" : "text-slate-400"}`}
+                                style={{
+                                  background:
+                                    v.status === "active"
+                                      ? "rgba(34,197,94,0.15)"
+                                      : "rgba(100,116,139,0.15)",
+                                  border: `1px solid ${v.status === "active" ? "rgba(34,197,94,0.3)" : "rgba(100,116,139,0.3)"}`,
+                                }}
+                              >
+                                {v.status === "active"
+                                  ? "Aktif"
+                                  : "Çıkış Yaptı"}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {v.visitReason || "—"} · {v.visitType || "—"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
+                          <span>🏢 {v.category || "Genel"}</span>
+                          <span>👤 Host: {host?.name || v.hostStaffId}</span>
+                          <span>
+                            🕐 Giriş:{" "}
+                            {new Date(v.arrivalTime).toLocaleString("tr-TR")}
+                          </span>
+                          <span>📞 {v.phone || "—"}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {tab === "deptapproval" && (
+          <div className="space-y-4 max-w-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">
+                🏛️ Departman Bazlı Onay Kuralları
+              </h2>
+            </div>
+            {departments.length === 0 ? (
+              <div
+                data-ocid="deptapproval.empty_state"
+                className="text-center py-16 text-slate-400 rounded-xl"
+                style={{
+                  background: "rgba(15,23,42,0.5)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div className="text-4xl mb-3">🏢</div>
+                <p className="font-semibold">Henüz departman tanımlanmamış</p>
+                <p className="text-xs mt-1">
+                  Önce "🏢 Departmanlar" sekmesinden departman oluşturun.
+                </p>
+                <button
+                  type="button"
+                  data-ocid="deptapproval.link.button"
+                  onClick={() => setTab("departments")}
+                  className="mt-4 px-4 py-2 rounded-xl text-sm font-semibold"
+                  style={{
+                    background: "rgba(14,165,233,0.15)",
+                    border: "1px solid rgba(14,165,233,0.35)",
+                    color: "#38bdf8",
+                  }}
+                >
+                  Departmanlar sekmesine git →
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3" data-ocid="deptapproval.list">
+                {departments.map((dept, i) => {
+                  const currentRule = deptRules[dept.id] || "Otomatik Onay";
+                  return (
+                    <div
+                      key={dept.id}
+                      data-ocid={`deptapproval.item.${i + 1}`}
+                      className="rounded-xl p-4 flex items-center gap-4"
+                      style={{
+                        background: "rgba(15,23,42,0.7)",
+                        border: "1px solid rgba(14,165,233,0.18)",
+                      }}
+                    >
+                      <div className="flex-1">
+                        <p className="font-semibold text-white text-sm">
+                          {dept.name}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {dept.floor ? `Kat: ${dept.floor}` : "Açıklama yok"}
+                        </p>
+                      </div>
+                      <div>
+                        <select
+                          data-ocid={`deptapproval.select.${i + 1}`}
+                          value={currentRule}
+                          onChange={(e) => {
+                            const updated = {
+                              ...deptRules,
+                              [dept.id]: e.target.value,
+                            };
+                            saveDeptRules(updated);
+                            toast.success(
+                              `${dept.name} için onay kuralı güncellendi.`,
+                            );
+                          }}
+                          className="text-xs rounded-lg px-3 py-1.5 outline-none"
+                          style={{
+                            background: "rgba(14,165,233,0.12)",
+                            border: "1px solid rgba(14,165,233,0.3)",
+                            color: "#38bdf8",
+                          }}
+                        >
+                          <option value="Otomatik Onay">
+                            ✅ Otomatik Onay
+                          </option>
+                          <option value="Tek Onaylayıcı">
+                            👤 Tek Onaylayıcı
+                          </option>
+                          <option value="Çoklu Onaylayıcı">
+                            👥 Çoklu Onaylayıcı (2 kişi)
+                          </option>
+                        </select>
+                      </div>
+                      <span
+                        className="text-xs px-2 py-1 rounded-full shrink-0"
+                        style={{
+                          background:
+                            currentRule === "Otomatik Onay"
+                              ? "rgba(34,197,94,0.15)"
+                              : currentRule === "Tek Onaylayıcı"
+                                ? "rgba(251,191,36,0.15)"
+                                : "rgba(239,68,68,0.15)",
+                          color:
+                            currentRule === "Otomatik Onay"
+                              ? "#4ade80"
+                              : currentRule === "Tek Onaylayıcı"
+                                ? "#fbbf24"
+                                : "#f87171",
+                          border: `1px solid ${currentRule === "Otomatik Onay" ? "rgba(34,197,94,0.3)" : currentRule === "Tek Onaylayıcı" ? "rgba(251,191,36,0.3)" : "rgba(239,68,68,0.3)"}`,
+                        }}
+                      >
+                        {currentRule === "Otomatik Onay"
+                          ? "Oto"
+                          : currentRule === "Tek Onaylayıcı"
+                            ? "1 Onay"
+                            : "2 Onay"}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div className="text-xs text-slate-500 mt-2 px-1">
+                  Değişiklikler otomatik kaydedilir. Bu kurallar ziyaretçi
+                  kartlarında onay rozeti olarak gösterilir.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "cardissuance" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-bold text-white">
+                🗝️ Kart Zimmet Defteri
+              </h2>
+              <button
+                type="button"
+                data-ocid="cardissuance.open_modal_button"
+                onClick={() => setCiShowForm(true)}
+                className="px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+                style={{
+                  background: "rgba(14,165,233,0.15)",
+                  border: "1px solid rgba(14,165,233,0.35)",
+                  color: "#38bdf8",
+                }}
+              >
+                + Yeni Zimmet
+              </button>
+            </div>
+
+            {/* Overdue warning */}
+            {(() => {
+              const overdue = cardIssuances.filter(
+                (c) =>
+                  !c.returnedAt &&
+                  Date.now() - new Date(c.issuedAt).getTime() >
+                    24 * 3600 * 1000,
+              );
+              if (overdue.length > 0)
+                return (
+                  <div
+                    data-ocid="cardissuance.error_state"
+                    className="p-3 rounded-xl flex items-center gap-3"
+                    style={{
+                      background: "rgba(239,68,68,0.12)",
+                      border: "1px solid rgba(239,68,68,0.35)",
+                    }}
+                  >
+                    <span className="text-xl">⚠️</span>
+                    <span className="text-red-400 text-sm font-semibold">
+                      {overdue.length} adet iade edilmemiş kart 24 saati geçti!
+                    </span>
+                  </div>
+                );
+              return null;
+            })()}
+
+            {/* New issuance form */}
+            {ciShowForm && (
+              <div
+                data-ocid="cardissuance.dialog"
+                className="rounded-xl p-4 space-y-3"
+                style={{
+                  background: "rgba(15,23,42,0.85)",
+                  border: "1px solid rgba(14,165,233,0.25)",
+                }}
+              >
+                <h3 className="text-sm font-bold text-white">
+                  Yeni Zimmet Kaydı
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label
+                      htmlFor="ci-card-number"
+                      className="text-xs text-slate-400 block mb-1"
+                    >
+                      Kart Numarası
+                    </label>
+                    <input
+                      id="ci-card-number"
+                      type="text"
+                      data-ocid="cardissuance.input"
+                      value={ciForm.cardNumber}
+                      onChange={(e) =>
+                        setCiForm((f) => ({ ...f, cardNumber: e.target.value }))
+                      }
+                      placeholder="örn. KRT-001"
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="ci-card-type"
+                      className="text-xs text-slate-400 block mb-1"
+                    >
+                      Kart Tipi
+                    </label>
+                    <select
+                      id="ci-card-type"
+                      data-ocid="cardissuance.select"
+                      value={ciForm.cardType}
+                      onChange={(e) =>
+                        setCiForm((f) => ({
+                          ...f,
+                          cardType: e.target.value as CardIssuance["cardType"],
+                        }))
+                      }
+                      className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                      style={{
+                        background: "rgba(14,165,233,0.10)",
+                        border: "1px solid rgba(14,165,233,0.25)",
+                        color: "#38bdf8",
+                      }}
+                    >
+                      <option>Geçiş Kartı</option>
+                      <option>Anahtar</option>
+                      <option>Manyetik Kart</option>
+                      <option>Diğer</option>
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label
+                      htmlFor="ci-issued-to"
+                      className="text-xs text-slate-400 block mb-1"
+                    >
+                      Zimmetlenen Kişi
+                    </label>
+                    <input
+                      id="ci-issued-to"
+                      type="text"
+                      data-ocid="cardissuance.textarea"
+                      value={ciForm.issuedTo}
+                      onChange={(e) =>
+                        setCiForm((f) => ({ ...f, issuedTo: e.target.value }))
+                      }
+                      placeholder="Ziyaretçi veya personel adı"
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label
+                      htmlFor="ci-notes"
+                      className="text-xs text-slate-400 block mb-1"
+                    >
+                      Notlar (isteğe bağlı)
+                    </label>
+                    <input
+                      id="ci-notes"
+                      type="text"
+                      value={ciForm.notes}
+                      onChange={(e) =>
+                        setCiForm((f) => ({ ...f, notes: e.target.value }))
+                      }
+                      placeholder="Ek not..."
+                      className="w-full px-3 py-2 rounded-lg text-sm text-white outline-none"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    data-ocid="cardissuance.submit_button"
+                    onClick={() => {
+                      if (
+                        !ciForm.cardNumber.trim() ||
+                        !ciForm.issuedTo.trim()
+                      ) {
+                        toast.error(
+                          "Kart numarası ve zimmetlenen kişi zorunludur.",
+                        );
+                        return;
+                      }
+                      const issuerStaff = staffList.find(
+                        (s) => s.staffId === session.staffId,
+                      );
+                      const newIssuance: CardIssuance = {
+                        id: `ci_${Date.now()}`,
+                        cardNumber: ciForm.cardNumber.trim(),
+                        cardType: ciForm.cardType,
+                        issuedTo: ciForm.issuedTo.trim(),
+                        issuedAt: new Date().toISOString(),
+                        issuedBy:
+                          issuerStaff?.name || session.staffId || "Yönetici",
+                        notes: ciForm.notes.trim() || undefined,
+                      };
+                      saveCardIssuances([...cardIssuances, newIssuance]);
+                      setCiForm({
+                        cardNumber: "",
+                        cardType: "Geçiş Kartı",
+                        issuedTo: "",
+                        notes: "",
+                      });
+                      setCiShowForm(false);
+                      toast.success(
+                        `${newIssuance.cardNumber} kartı zimmetlendi.`,
+                      );
+                    }}
+                    className="flex-1 py-2 rounded-xl text-sm font-semibold text-white"
+                    style={{
+                      background: "rgba(14,165,233,0.2)",
+                      border: "1px solid rgba(14,165,233,0.4)",
+                    }}
+                  >
+                    Zimmetlе
+                  </button>
+                  <button
+                    type="button"
+                    data-ocid="cardissuance.cancel_button"
+                    onClick={() => setCiShowForm(false)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-400"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                    }}
+                  >
+                    İptal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Active issuances */}
+            <div>
+              <h3 className="text-sm font-semibold text-slate-300 mb-2">
+                📋 Aktif Zimmetler (
+                {cardIssuances.filter((c) => !c.returnedAt).length})
+              </h3>
+              {cardIssuances.filter((c) => !c.returnedAt).length === 0 ? (
+                <div
+                  data-ocid="cardissuance.empty_state"
+                  className="text-center py-8 text-slate-500 rounded-xl"
+                  style={{
+                    background: "rgba(15,23,42,0.5)",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  Teslim edilmemiş kart yok ✓
+                </div>
+              ) : (
+                <div className="space-y-2" data-ocid="cardissuance.list">
+                  {cardIssuances
+                    .filter((c) => !c.returnedAt)
+                    .map((ci, i) => {
+                      const isOverdue =
+                        Date.now() - new Date(ci.issuedAt).getTime() >
+                        24 * 3600 * 1000;
+                      return (
+                        <div
+                          key={ci.id}
+                          data-ocid={`cardissuance.item.${i + 1}`}
+                          className="rounded-xl p-3 flex items-center gap-3"
+                          style={{
+                            background: "rgba(15,23,42,0.7)",
+                            border: `1px solid ${isOverdue ? "rgba(239,68,68,0.35)" : "rgba(14,165,233,0.18)"}`,
+                          }}
+                        >
+                          <div className="text-xl">
+                            {ci.cardType === "Anahtar"
+                              ? "🔑"
+                              : ci.cardType === "Manyetik Kart"
+                                ? "💳"
+                                : "🪪"}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-white">
+                              {ci.cardNumber}{" "}
+                              <span className="font-normal text-slate-400">
+                                → {ci.issuedTo}
+                              </span>
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {ci.cardType} ·{" "}
+                              {new Date(ci.issuedAt).toLocaleString("tr-TR")} ·{" "}
+                              {ci.issuedBy}
+                            </p>
+                            {isOverdue && (
+                              <p className="text-xs text-red-400 font-semibold mt-0.5">
+                                ⚠️ 24 saati geçti
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            data-ocid={`cardissuance.save_button.${i + 1}`}
+                            onClick={() => {
+                              const updated = cardIssuances.map((c) =>
+                                c.id === ci.id
+                                  ? {
+                                      ...c,
+                                      returnedAt: new Date().toISOString(),
+                                    }
+                                  : c,
+                              );
+                              saveCardIssuances(updated);
+                              toast.success(`${ci.cardNumber} iade alındı.`);
+                            }}
+                            className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{
+                              background: "rgba(34,197,94,0.15)",
+                              border: "1px solid rgba(34,197,94,0.35)",
+                              color: "#4ade80",
+                            }}
+                          >
+                            ✓ İade Alındı
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            {/* Returned issuances */}
+            {cardIssuances.filter((c) => c.returnedAt).length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-slate-300 mb-2">
+                  ✅ İade Geçmişi (
+                  {cardIssuances.filter((c) => c.returnedAt).length})
+                </h3>
+                <div className="space-y-2">
+                  {cardIssuances
+                    .filter((c) => c.returnedAt)
+                    .map((ci, i) => (
+                      <div
+                        key={ci.id}
+                        data-ocid={`cardissuance.row.${i + 1}`}
+                        className="rounded-xl p-3 flex items-center gap-3 opacity-70"
+                        style={{
+                          background: "rgba(15,23,42,0.5)",
+                          border: "1px solid rgba(255,255,255,0.07)",
+                        }}
+                      >
+                        <div className="text-xl">
+                          {ci.cardType === "Anahtar"
+                            ? "🔑"
+                            : ci.cardType === "Manyetik Kart"
+                              ? "💳"
+                              : "🪪"}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-slate-300">
+                            {ci.cardNumber} → {ci.issuedTo}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            İade:{" "}
+                            {new Date(ci.returnedAt!).toLocaleString("tr-TR")}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === "profile" && company && (
           <div className="max-w-lg space-y-4">
             {/* Company Code */}
@@ -17648,6 +18307,103 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
                 }}
               >
                 İptal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Card Return Warning Dialog */}
+      {ciCheckoutWarningVisitor && (
+        <div
+          data-ocid="cardissuance.dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.75)" }}
+        >
+          <div
+            className="rounded-2xl p-6 max-w-sm w-full mx-4 space-y-4"
+            style={{
+              background: "#0f172a",
+              border: "1px solid rgba(251,191,36,0.4)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-3xl">⚠️</span>
+              <div>
+                <h3 className="text-white font-bold">Zimmetli Kart Uyarısı</h3>
+                <p className="text-yellow-400 text-sm mt-1">
+                  Bu ziyaretçinin zimmetinde kart var. İade alındı mı?
+                </p>
+              </div>
+            </div>
+            <div className="space-y-1 text-xs text-slate-400">
+              {cardIssuances
+                .filter(
+                  (c) =>
+                    !c.returnedAt &&
+                    c.issuedTo
+                      .toLowerCase()
+                      .includes(ciCheckoutWarningVisitor.name.toLowerCase()),
+                )
+                .map((ci) => (
+                  <div
+                    key={ci.id}
+                    className="px-3 py-1.5 rounded-lg"
+                    style={{ background: "rgba(255,255,255,0.05)" }}
+                  >
+                    🪪 {ci.cardNumber} ({ci.cardType})
+                  </div>
+                ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                data-ocid="cardissuance.confirm_button"
+                onClick={() => {
+                  const v = ciCheckoutWarningVisitor;
+                  const now = Date.now();
+                  saveVisitor({ ...v, status: "departed", departureTime: now });
+                  const updated = cardIssuances.map((c) =>
+                    !c.returnedAt &&
+                    c.issuedTo.toLowerCase().includes(v.name.toLowerCase())
+                      ? { ...c, returnedAt: new Date().toISOString() }
+                      : c,
+                  );
+                  saveCardIssuances(updated);
+                  reload();
+                  setCiCheckoutWarningVisitor(null);
+                  setCiPendingCheckoutId(null);
+                  toast.success(`${v.name} çıkış yaptı, kartlar iade alındı.`);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white"
+                style={{
+                  background: "rgba(34,197,94,0.2)",
+                  border: "1px solid rgba(34,197,94,0.4)",
+                }}
+              >
+                ✓ Evet, iade alındı
+              </button>
+              <button
+                type="button"
+                data-ocid="cardissuance.cancel_button"
+                onClick={() => {
+                  const v = ciCheckoutWarningVisitor;
+                  const now = Date.now();
+                  saveVisitor({ ...v, status: "departed", departureTime: now });
+                  reload();
+                  setCiCheckoutWarningVisitor(null);
+                  setCiPendingCheckoutId(null);
+                  toast.warning(
+                    `${v.name} çıkış yapıldı ancak kart iade edilmedi.`,
+                  );
+                }}
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-300"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                }}
+              >
+                Çıkış Yap
               </button>
             </div>
           </div>
