@@ -26,6 +26,7 @@ import { StaffImprovementTasksTab } from "../components/ImprovementTasksTab";
 import InteractiveTour, { isTourDone } from "../components/InteractiveTour";
 import LangSwitcher from "../components/LangSwitcher";
 import LeaveManagementTab from "../components/LeaveManagementTab";
+import { DailyTasksTab } from "../components/NewFeatureTabs";
 import NotificationCenter from "../components/NotificationCenter";
 import OcrScanModal from "../components/OcrScanModal";
 import PatrolTab from "../components/PatrolTab";
@@ -238,7 +239,8 @@ type Tab =
   | "queue"
   | "punchin"
   | "scenarios"
-  | "drafts";
+  | "drafts"
+  | "dailytasks";
 
 const PUNCH_KEY = (companyId: string) => `safentry_punchlog_${companyId}`;
 
@@ -2456,6 +2458,7 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
     ["punchin" as Tab, "⏱️ Mesai Takibi"] as [Tab, string],
     ["scenarios" as Tab, "📚 Senaryo Kütüphanesi"] as [Tab, string],
     ["drafts" as Tab, "📝 Taslaklar"] as [Tab, string],
+    ["dailytasks" as Tab, "📋 Günlük Görevler"] as [Tab, string],
   ];
 
   return (
@@ -11626,6 +11629,16 @@ export default function StaffDashboard({ onNavigate, onRefresh }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {tab === "dailytasks" && (
+        <DailyTasksTab
+          companyId={session.companyId}
+          staffId={session.staffId}
+          staffName={staff?.name ?? session.staffId}
+          isAdmin={staff?.role === "admin"}
+          staffList={staffList}
+        />
       )}
 
       {/* Floating Tour Button */}

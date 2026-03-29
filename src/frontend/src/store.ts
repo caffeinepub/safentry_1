@@ -2195,3 +2195,72 @@ export function addVisitorNote(
     JSON.stringify([...list, note]),
   );
 }
+
+// ─── Catering / İkram Talepleri ───────────────────────────────────────────────
+export type CateringRequest = {
+  id: string;
+  companyId: string;
+  visitorName: string;
+  hostStaffId: string;
+  hostName: string;
+  appointmentId?: string;
+  items: string[]; // e.g. ["Çay", "Kahve"]
+  notes: string;
+  status: "pending" | "preparing" | "delivered" | "cancelled";
+  createdAt: number;
+  updatedAt: number;
+};
+
+export function getCateringRequests(companyId: string): CateringRequest[] {
+  try {
+    return JSON.parse(
+      localStorage.getItem(`safentry_catering_${companyId}`) || "[]",
+    );
+  } catch {
+    return [];
+  }
+}
+export function saveCateringRequest(r: CateringRequest): void {
+  const list = getCateringRequests(r.companyId).filter((x) => x.id !== r.id);
+  localStorage.setItem(
+    `safentry_catering_${r.companyId}`,
+    JSON.stringify([...list, r]),
+  );
+}
+export function deleteCateringRequest(companyId: string, id: string): void {
+  const list = getCateringRequests(companyId).filter((x) => x.id !== id);
+  localStorage.setItem(`safentry_catering_${companyId}`, JSON.stringify(list));
+}
+
+// ─── Max Stay Duration Settings ───────────────────────────────────────────────
+export type MaxStaySettings = {
+  enabled: boolean;
+  maxHours: number; // default 4
+  warnBeforeMinutes: number; // warn X minutes before max
+};
+
+export function getMaxStaySettings(companyId: string): MaxStaySettings {
+  try {
+    return (
+      JSON.parse(
+        localStorage.getItem(`safentry_maxstay_${companyId}`) || "null",
+      ) ?? { enabled: false, maxHours: 4, warnBeforeMinutes: 30 }
+    );
+  } catch {
+    return { enabled: false, maxHours: 4, warnBeforeMinutes: 30 };
+  }
+}
+export function saveMaxStaySettings(
+  companyId: string,
+  s: MaxStaySettings,
+): void {
+  localStorage.setItem(`safentry_maxstay_${companyId}`, JSON.stringify(s));
+}
+
+// ─── Kiosk Auto-Photo Setting ─────────────────────────────────────────────────
+export function getKioskAutoPhoto(companyId: string): boolean {
+  return localStorage.getItem(`safentry_kiosk_autophoto_${companyId}`) === "1";
+}
+export function saveKioskAutoPhoto(companyId: string, v: boolean): void {
+  localStorage.setItem(`safentry_kiosk_autophoto_${companyId}`, v ? "1" : "0");
+}

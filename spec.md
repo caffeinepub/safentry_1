@@ -1,26 +1,23 @@
-# Safentry
+# Safentry v86
 
 ## Current State
-V83 canlıda. CompanyDashboard.tsx (17673 satır), StaffDashboard.tsx (11607 satır). Ön kayıt portalı, zamanlanmış raporlar ve kayıp eşya zaten mevcut.
+Safentry is a multi-tenant corporate VMS with 85+ versions. The frontend is a large React/TypeScript app with localStorage + backend persistence. v85 added catering requests, max visit duration alerts, and kiosk auto-photo.
 
 ## Requested Changes (Diff)
 
 ### Add
-1. **Gizli/Anonim Ziyaret Modu** -- Ziyaretçi kaydında "Gizli Ziyaret" toggle; aktifse isim/firma lobi ekranında, ziyaretçi rehberinde, genel raporlarda maskeleniyor ("Gizli Ziyaretçi" görünür); yalnızca admin tam bilgiye erişebilir. CompanyDashboard'da "🕵️ Gizli Ziyaretler" sekmesi.
-2. **Departman Bazlı Onay Akışı** -- CompanyDashboard'da "🏛️ Departman Onay Kuralları" sekmesi; her departmana onay tipi atanıyor (otomatik onay / tek onaylayıcı / çoklu onaylayıcı); ziyaretçi kaydında host departmanına göre ilgili kural tetikleniyor, kural adı kayıt üzerinde görünüyor.
-3. **Geçici Erişim Kartı Zimmet Defteri** -- CompanyDashboard'da "🗝️ Kart Zimmet Defteri" sekmesi; kart numarası + açıklama + zimmetlenen ziyaretçi/personel kaydı; çıkış yapılmak istenince iade edilmemiş kart varsa uyarı; iade edilmeyen kartlar listesi ve raporu.
+1. **Hassas alan çift onay zorunluluğu** -- High-security areas (server room, production floor, vault) require TWO separate personnel approvals before visitor entry is granted. Each approval is logged with timestamp and approver ID.
+2. **Ziyaretçi yeniden giriş soğuma süresi** -- After a visitor exits, they cannot re-enter until a configurable cooldown period expires (e.g. 2 hours). Not a blacklist — a temporary hold rule. Configurable per company.
+3. **Personel günlük görev listesi** -- Each shift, personnel are assigned tasks (e.g. "08:00 - Gate B check", "10:00 - patrol", "12:00 - report submission"). Completed tasks are checked off. Incomplete tasks auto-transfer to the handover report.
 
 ### Modify
-- Visitor kaydına `isConfidential: boolean` alanı ekleniyor
-- Ziyaretçi listesinde gizli kayıtlar maskeleniyor (admin hariç)
-- Visitor exit akışında zimmetli kart kontrolü yapılıyor
+- Company Panel: add "🔐 Çift Onay Alanları", "⏳ Soğuma Süresi" tabs
+- Personnel Panel: add "📋 Günlük Görevler" tab
 
 ### Remove
-Hiçbir şey kaldırılmıyor.
+- Nothing removed
 
 ## Implementation Plan
-1. `types.ts`'e `isConfidential`, `departmentApprovalRule`, `cardIssuance` tipleri ekle
-2. Visitor kayıt formuna gizli ziyaret toggle ekle
-3. Visitor listesinde maskeleme mantığı: `isConfidential && !isAdmin` → "🕵️ Gizli Ziyaretçi"
-4. CompanyDashboard'a 3 yeni sekme ekle: gizli ziyaretler (sadece admin), departman onay kuralları, kart zimmet defteri
-5. Çıkış akışında zimmetli kart uyarısı
+1. Add dual-approval area management tab in Company Panel (define areas, assign required approvers, view pending/approved log)
+2. Add cooldown period configuration tab in Company Panel (set cooldown duration in minutes/hours, view blocked re-entries)
+3. Add daily task list tab in Personnel Panel (create tasks with time/description, mark complete, view incomplete tasks summary)

@@ -18,6 +18,7 @@ import {
   getDeptTodayVisitorCount,
   getFrequentVisitors,
   getKioskApprovalStatus,
+  getKioskAutoPhoto,
   getKioskContent,
   getLockdown,
   getNextQueueNo,
@@ -146,6 +147,7 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
 
   // Camera for photo
   const [showCamera, setShowCamera] = useState(false);
+  const [autoPhotoMode, setAutoPhotoMode] = useState(false);
   const [photoUploadProgress, setPhotoUploadProgress] = useState<number | null>(
     null,
   );
@@ -453,7 +455,13 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
       "kiosk_submission",
       `${visitor.name} (${visitor.idNumber}) kiosk üzerinden başvurdu (onay bekliyor)`,
     );
-    setScreen("waiting");
+    if (getKioskAutoPhoto(companyId) && !form.visitorPhoto) {
+      setAutoPhotoMode(true);
+      setShowCamera(true);
+      camera.startCamera();
+    } else {
+      setScreen("waiting");
+    }
   };
 
   if (kioskMaint?.enabled) {
@@ -1875,6 +1883,22 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
               </div>
             ) : showCamera ? (
               <div>
+                {autoPhotoMode && (
+                  <div
+                    className="mb-3 px-4 py-3 rounded-xl text-center"
+                    style={{
+                      background: "rgba(14,165,233,0.15)",
+                      border: "1px solid rgba(14,165,233,0.3)",
+                    }}
+                  >
+                    <p className="text-teal-300 font-semibold text-lg">
+                      📸 Lütfen Kameraya Bakın
+                    </p>
+                    <p className="text-slate-400 text-sm mt-0.5">
+                      Fotoğrafınız ziyaret kaydına eklenecektir
+                    </p>
+                  </div>
+                )}
                 <div
                   className="relative rounded-2xl overflow-hidden mb-3"
                   style={{ height: "240px", width: "100%" }}
@@ -1915,6 +1939,10 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                           );
                         } finally {
                           setPhotoUploadProgress(null);
+                          if (autoPhotoMode) {
+                            setAutoPhotoMode(false);
+                            setScreen("waiting");
+                          }
                         }
                       }
                     }}
@@ -1931,6 +1959,10 @@ export default function KioskMode({ companyId, onNavigate }: Props) {
                     onClick={() => {
                       setShowCamera(false);
                       camera.stopCamera();
+                      if (autoPhotoMode) {
+                        setAutoPhotoMode(false);
+                        setScreen("waiting");
+                      }
                     }}
                     className="px-4 py-3 rounded-xl text-slate-400 hover:text-white transition-colors"
                     style={{

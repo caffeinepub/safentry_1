@@ -75,6 +75,7 @@ import LoyaltyAnalysisTab from "../components/LoyaltyAnalysisTab";
 import MeetingNotesTab from "../components/MeetingNotesTab";
 import MonthlyKpiTab from "../components/MonthlyKpiTab";
 import MsgTemplatesTab from "../components/MsgTemplatesTab";
+import { CooldownTab, DualApprovalTab } from "../components/NewFeatureTabs";
 import NotificationCenter from "../components/NotificationCenter";
 import NotificationRulesTab from "../components/NotificationRulesTab";
 import OnboardingWizard, {
@@ -143,6 +144,7 @@ import {
   autoAssignParkingSpot,
   clearSession,
   deleteApprovedVisitor,
+  deleteCateringRequest,
   deleteDepartment,
   deleteDocumentTemplate,
   deleteEscort,
@@ -167,6 +169,7 @@ import {
   getBlacklist,
   getBlacklistAppeals,
   getBranches,
+  getCateringRequests,
   getCompanyDepartments,
   getCompanyFloors,
   getCustomCategories,
@@ -179,10 +182,12 @@ import {
   getGatePassLogs,
   getHostReviews,
   getIncidents,
+  getKioskAutoPhoto,
   getKioskContent,
   getLockdown,
   getLostFound,
   getMaintenanceRequests,
+  getMaxStaySettings,
   getMeetingRooms,
   getNotificationRules,
   getPermitRenewals,
@@ -210,6 +215,7 @@ import {
   saveApprovedVisitor,
   saveBelonging,
   saveBlacklistAppeal,
+  saveCateringRequest,
   saveCompany,
   saveDashboardWidgetConfig,
   saveDepartment,
@@ -217,9 +223,11 @@ import {
   saveEscort,
   saveIncident,
   saveInviteCode,
+  saveKioskAutoPhoto,
   saveKioskContent,
   saveLostFound,
   saveMaintenanceRequest,
+  saveMaxStaySettings,
   saveMeetingRoom,
   saveNotificationRule,
   savePermit,
@@ -425,7 +433,12 @@ type Tab =
   | "permitworkflow"
   | "confidential"
   | "deptapproval"
-  | "cardissuance";
+  | "cardissuance"
+  | "catering"
+  | "maxstay"
+  | "kioskautophoto"
+  | "dualapproval"
+  | "cooldown";
 
 // ─── Badge Inventory Tab ─────────────────────────────────────────────────────
 interface BadgeCard {
@@ -5809,6 +5822,568 @@ function GDPRDataExportPanel({
     </div>
   );
 }
+
+// ─── Catering Tab ─────────────────────────────────────────────────────────────
+function CateringTab({
+  companyId,
+  staffList,
+}: { companyId: string; staffList: import("../types").Staff[] }) {
+  const [requests, setRequests] = React.useState(() =>
+    getCateringRequests(companyId),
+  );
+  const [form, setForm] = React.useState({
+    visitorName: "",
+    hostStaffId: "",
+    items: [] as string[],
+    notes: "",
+  });
+  const [showForm, setShowForm] = React.useState(false);
+  const menuItems = [
+    "☕ Türk Kahvesi",
+    "🍵 Çay",
+    "💧 Su",
+    "🧃 Meyve Suyu",
+    "🍪 Kurabiye",
+    "🍫 Çikolata",
+    "🥐 Poğaça",
+    "🍎 Meyve Tabağı",
+  ];
+  const refresh = () => setRequests(getCateringRequests(companyId));
+  const addRequest = () => {
+    if (!form.visitorName || !form.hostStaffId || form.items.length === 0)
+      return;
+    const host = staffList.find((s) => s.staffId === form.hostStaffId);
+    const r = {
+      id: Math.random().toString(36).substring(2, 10),
+      companyId,
+      visitorName: form.visitorName,
+      hostStaffId: form.hostStaffId,
+      hostName: host?.name ?? form.hostStaffId,
+      items: form.items,
+      notes: form.notes,
+      status: "pending" as const,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    saveCateringRequest(r);
+    setForm({ visitorName: "", hostStaffId: "", items: [], notes: "" });
+    setShowForm(false);
+    refresh();
+  };
+  const updateStatus = (
+    id: string,
+    status: "pending" | "preparing" | "delivered" | "cancelled",
+  ) => {
+    const r = requests.find((x) => x.id === id);
+    if (!r) return;
+    saveCateringRequest({ ...r, status, updatedAt: Date.now() });
+    refresh();
+  };
+  const statusColor: Record<string, string> = {
+    pending: "rgba(234,179,8,0.15)",
+    preparing: "rgba(59,130,246,0.15)",
+    delivered: "rgba(34,197,94,0.15)",
+    cancelled: "rgba(239,68,68,0.15)",
+  };
+  const statusLabel: Record<string, string> = {
+    pending: "Bekliyor",
+    preparing: "Hazırlanıyor",
+    delivered: "Teslim Edildi",
+    cancelled: "İptal",
+  };
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-white">☕ İkram Talepleri</h2>
+        <button
+          type="button"
+          onClick={() => setShowForm(!showForm)}
+          className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all"
+          style={{
+            background: "rgba(14,165,233,0.2)",
+            border: "1px solid rgba(14,165,233,0.4)",
+          }}
+        >
+          {showForm ? "İptal" : "+ Yeni Talep"}
+        </button>
+      </div>
+      <p className="text-slate-400 text-sm">
+        Ziyaretçi randevularına ikram talebi oluşturun, hazırlık ve teslimat
+        durumunu takip edin.
+      </p>
+      {showForm && (
+        <div
+          className="rounded-2xl p-5 space-y-3"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          <input
+            value={form.visitorName}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, visitorName: e.target.value }))
+            }
+            placeholder="Ziyaretçi adı *"
+            className="w-full px-4 py-3 rounded-xl text-white text-sm"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          />
+          <select
+            value={form.hostStaffId}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, hostStaffId: e.target.value }))
+            }
+            className="w-full px-4 py-3 rounded-xl text-white text-sm"
+            style={{
+              background: "rgba(30,41,59,0.9)",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          >
+            <option value="">-- Host Personel Seçin *</option>
+            {staffList.map((s) => (
+              <option key={s.staffId} value={s.staffId}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+          <div>
+            <p className="text-slate-400 text-xs mb-2">
+              İkram Seçin (en az 1) *
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {menuItems.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      items: f.items.includes(item)
+                        ? f.items.filter((i) => i !== item)
+                        : [...f.items, item],
+                    }))
+                  }
+                  className="px-3 py-2 rounded-lg text-sm transition-all text-left"
+                  style={{
+                    background: form.items.includes(item)
+                      ? "rgba(14,165,233,0.25)"
+                      : "rgba(255,255,255,0.05)",
+                    border: `1px solid ${form.items.includes(item) ? "rgba(14,165,233,0.5)" : "rgba(255,255,255,0.1)"}`,
+                    color: form.items.includes(item) ? "#38bdf8" : "#94a3b8",
+                  }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+          <textarea
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            placeholder="Ek not (isteğe bağlı)"
+            rows={2}
+            className="w-full px-4 py-3 rounded-xl text-white text-sm resize-none"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+            }}
+          />
+          <button
+            type="button"
+            onClick={addRequest}
+            disabled={
+              !form.visitorName || !form.hostStaffId || form.items.length === 0
+            }
+            className="w-full py-3 rounded-xl font-semibold text-white transition-all disabled:opacity-40"
+            style={{
+              background: "rgba(14,165,233,0.3)",
+              border: "1px solid rgba(14,165,233,0.5)",
+            }}
+          >
+            Talep Oluştur
+          </button>
+        </div>
+      )}
+      {requests.length === 0 ? (
+        <div className="text-center py-12 text-slate-500">
+          <p className="text-4xl mb-3">☕</p>
+          <p>Henüz ikram talebi bulunmuyor.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {[...requests]
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .map((r) => (
+              <div
+                key={r.id}
+                className="rounded-2xl p-4"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-white font-medium">
+                        {r.visitorName}
+                      </span>
+                      <span
+                        className="px-2 py-0.5 rounded-full text-xs font-medium"
+                        style={{
+                          background: statusColor[r.status],
+                          color: "#e2e8f0",
+                        }}
+                      >
+                        {statusLabel[r.status]}
+                      </span>
+                    </div>
+                    <p className="text-slate-400 text-sm">Host: {r.hostName}</p>
+                    <p className="text-slate-300 text-sm mt-1">
+                      {r.items.join(", ")}
+                    </p>
+                    {r.notes && (
+                      <p className="text-slate-500 text-xs mt-1">
+                        Not: {r.notes}
+                      </p>
+                    )}
+                    <p className="text-slate-600 text-xs mt-1">
+                      {new Date(r.createdAt).toLocaleString("tr-TR")}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {r.status === "pending" && (
+                      <button
+                        type="button"
+                        onClick={() => updateStatus(r.id, "preparing")}
+                        className="px-2 py-1 rounded-lg text-xs text-blue-300 transition-all"
+                        style={{ background: "rgba(59,130,246,0.15)" }}
+                      >
+                        Hazırlanıyor
+                      </button>
+                    )}
+                    {r.status === "preparing" && (
+                      <button
+                        type="button"
+                        onClick={() => updateStatus(r.id, "delivered")}
+                        className="px-2 py-1 rounded-lg text-xs text-green-300 transition-all"
+                        style={{ background: "rgba(34,197,94,0.15)" }}
+                      >
+                        Teslim Edildi
+                      </button>
+                    )}
+                    {(r.status === "pending" || r.status === "preparing") && (
+                      <button
+                        type="button"
+                        onClick={() => updateStatus(r.id, "cancelled")}
+                        className="px-2 py-1 rounded-lg text-xs text-red-300 transition-all"
+                        style={{ background: "rgba(239,68,68,0.1)" }}
+                      >
+                        İptal
+                      </button>
+                    )}
+                    {(r.status === "delivered" || r.status === "cancelled") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteCateringRequest(companyId, r.id);
+                          refresh();
+                        }}
+                        className="px-2 py-1 rounded-lg text-xs text-slate-400 transition-all"
+                        style={{ background: "rgba(255,255,255,0.05)" }}
+                      >
+                        Sil
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Max Stay Tab ─────────────────────────────────────────────────────────────
+function MaxStayTab({
+  companyId,
+  visitors,
+}: { companyId: string; visitors: import("../types").Visitor[] }) {
+  const [settings, setSettings] = React.useState(() =>
+    getMaxStaySettings(companyId),
+  );
+  const [saved, setSaved] = React.useState(false);
+  const save = () => {
+    saveMaxStaySettings(companyId, settings);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  const now = Date.now();
+  const activeVisitors = visitors.filter((v) => v.status === "active");
+  const maxMs = settings.maxHours * 60 * 60 * 1000;
+  const warnMs =
+    (settings.maxHours * 60 - settings.warnBeforeMinutes) * 60 * 1000;
+  const exceeded = activeVisitors.filter((v) => now - v.arrivalTime > maxMs);
+  const warning = activeVisitors.filter(
+    (v) => now - v.arrivalTime > warnMs && now - v.arrivalTime <= maxMs,
+  );
+  const formatDuration = (ms: number) => {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return h > 0 ? `${h}s ${m}dk` : `${m}dk`;
+  };
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-bold text-white mb-1">
+          ⏱️ Maksimum Ziyaret Süresi
+        </h2>
+        <p className="text-slate-400 text-sm">
+          Ziyaretçilerin binada kalabileceği maksimum süreyi belirleyin. Süreyi
+          aşanlar için otomatik uyarı gösterilir.
+        </p>
+      </div>
+      <div
+        className="rounded-2xl p-5 space-y-4"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-slate-300 font-medium">
+            Özelliği Etkinleştir
+          </span>
+          <button
+            type="button"
+            onClick={() => setSettings((s) => ({ ...s, enabled: !s.enabled }))}
+            className={`w-12 h-6 rounded-full transition-all relative ${settings.enabled ? "bg-teal-500" : "bg-slate-600"}`}
+          >
+            <span
+              className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-all ${settings.enabled ? "left-6" : "left-0.5"}`}
+            />
+          </button>
+        </div>
+        {settings.enabled && (
+          <>
+            <div>
+              <label
+                htmlFor="maxstay-hrs"
+                className="text-slate-400 text-sm block mb-1"
+              >
+                Maksimum Süre (saat)
+              </label>
+              <input
+                id="maxstay-hrs"
+                type="number"
+                min={1}
+                max={24}
+                value={settings.maxHours}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    maxHours: Number(e.target.value),
+                  }))
+                }
+                className="w-full px-4 py-3 rounded-xl text-white text-sm"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="maxstay-warn"
+                className="text-slate-400 text-sm block mb-1"
+              >
+                Kaç Dakika Önce Uyarı Verilsin?
+              </label>
+              <input
+                id="maxstay-warn"
+                type="number"
+                min={5}
+                max={120}
+                value={settings.warnBeforeMinutes}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    warnBeforeMinutes: Number(e.target.value),
+                  }))
+                }
+                className="w-full px-4 py-3 rounded-xl text-white text-sm"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              />
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={save}
+          className="w-full py-3 rounded-xl font-semibold text-white transition-all"
+          style={{
+            background: saved ? "rgba(34,197,94,0.3)" : "rgba(14,165,233,0.25)",
+            border: `1px solid ${saved ? "rgba(34,197,94,0.5)" : "rgba(14,165,233,0.4)"}`,
+          }}
+        >
+          {saved ? "✓ Kaydedildi" : "Kaydet"}
+        </button>
+      </div>
+      {settings.enabled && (
+        <div className="space-y-3">
+          {exceeded.length > 0 && (
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background: "rgba(239,68,68,0.08)",
+                border: "1px solid rgba(239,68,68,0.3)",
+              }}
+            >
+              <p className="text-red-400 font-semibold mb-2">
+                🚨 Süre Aşıldı ({exceeded.length} ziyaretçi)
+              </p>
+              {exceeded.map((v) => (
+                <div
+                  key={v.visitorId}
+                  className="flex justify-between py-1 border-b border-red-900/30 last:border-0"
+                >
+                  <span className="text-white text-sm">{v.name}</span>
+                  <span className="text-red-300 text-sm">
+                    {formatDuration(now - v.arrivalTime)} içeride
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {warning.length > 0 && (
+            <div
+              className="rounded-2xl p-4"
+              style={{
+                background: "rgba(234,179,8,0.08)",
+                border: "1px solid rgba(234,179,8,0.3)",
+              }}
+            >
+              <p className="text-yellow-400 font-semibold mb-2">
+                ⚠️ Süre Dolmak Üzere ({warning.length} ziyaretçi)
+              </p>
+              {warning.map((v) => (
+                <div
+                  key={v.visitorId}
+                  className="flex justify-between py-1 border-b border-yellow-900/30 last:border-0"
+                >
+                  <span className="text-white text-sm">{v.name}</span>
+                  <span className="text-yellow-300 text-sm">
+                    {formatDuration(now - v.arrivalTime)} içeride
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {exceeded.length === 0 && warning.length === 0 && (
+            <div className="text-center py-8 text-slate-500">
+              <p className="text-3xl mb-2">✅</p>
+              <p className="text-sm">
+                Tüm aktif ziyaretçiler izin verilen süre içinde.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Kiosk Auto-Photo Tab ─────────────────────────────────────────────────────
+function KioskAutoPhotoTab({ companyId }: { companyId: string }) {
+  const [enabled, setEnabled] = React.useState(() =>
+    getKioskAutoPhoto(companyId),
+  );
+  const [saved, setSaved] = React.useState(false);
+  const save = (v: boolean) => {
+    setEnabled(v);
+    saveKioskAutoPhoto(companyId, v);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+  return (
+    <div className="space-y-5 max-w-lg">
+      <div>
+        <h2 className="text-xl font-bold text-white mb-1">
+          📸 Kiosk Otomatik Fotoğraf
+        </h2>
+        <p className="text-slate-400 text-sm">
+          Etkinleştirildiğinde kiosk'ta ziyaretçi kaydı tamamlanır tamamlanmaz
+          kamera otomatik olarak açılır ve fotoğraf çekimi başlar. Ziyaretçinin
+          ekstra adım atmasına gerek kalmaz.
+        </p>
+      </div>
+      <div
+        className="rounded-2xl p-6 space-y-5"
+        style={{
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white font-medium">Otomatik Fotoğraf Çekimi</p>
+            <p className="text-slate-500 text-xs mt-0.5">
+              Kayıt sonrası kamera otomatik açılır
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => save(!enabled)}
+            className={`w-14 h-7 rounded-full transition-all relative flex-shrink-0 ${enabled ? "bg-teal-500" : "bg-slate-600"}`}
+          >
+            <span
+              className={`absolute top-0.5 w-6 h-6 bg-white rounded-full shadow transition-all ${enabled ? "left-7" : "left-0.5"}`}
+            />
+          </button>
+        </div>
+        <div
+          className="rounded-xl p-4 space-y-2"
+          style={{
+            background: "rgba(14,165,233,0.05)",
+            border: "1px solid rgba(14,165,233,0.15)",
+          }}
+        >
+          <p className="text-teal-400 text-sm font-medium">Nasıl Çalışır?</p>
+          <ul className="text-slate-400 text-sm space-y-1 list-disc list-inside">
+            <li>Ziyaretçi kiosk formunu doldurup kaydeder</li>
+            <li>Sistem kamerayı otomatik olarak açar</li>
+            <li>Ekranda "Lütfen kameraya bakın" talimatı çıkar</li>
+            <li>Ziyaretçi butona basar, fotoğraf çekilir ve kayda eklenir</li>
+            <li>Ziyaretçi dilerse fotoğrafı atlayabilir</li>
+          </ul>
+        </div>
+        {saved && (
+          <div className="text-center text-green-400 text-sm font-medium">
+            ✓ Ayar kaydedildi
+          </div>
+        )}
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-400">Durum:</span>
+          <span
+            className={
+              enabled ? "text-green-400 font-medium" : "text-slate-500"
+            }
+          >
+            {enabled ? "✅ Etkin" : "⭕ Devre Dışı"}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
   const { lang } = useLanguage();
   const session = getSession()!;
@@ -6960,6 +7535,11 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
     { key: "confidential", label: "🕵️ Gizli Ziyaretler" },
     { key: "deptapproval", label: "🏛️ Departman Onay Kuralları" },
     { key: "cardissuance", label: "🗝️ Kart Zimmet Defteri" },
+    { key: "catering", label: "☕ İkram Talepleri" },
+    { key: "maxstay", label: "⏱️ Max Ziyaret Süresi" },
+    { key: "kioskautophoto", label: "📸 Kiosk Otomatik Fotoğraf" },
+    { key: "dualapproval", label: "🔐 Çift Onay Alanları" },
+    { key: "cooldown", label: "⏳ Soğuma Süresi" },
     { key: "profile", label: t(lang, "profile") },
   ];
 
@@ -15731,6 +16311,30 @@ export default function CompanyDashboard({ onNavigate, onRefresh }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {tab === "catering" && (
+          <CateringTab companyId={session.companyId} staffList={staffList} />
+        )}
+
+        {tab === "maxstay" && (
+          <MaxStayTab companyId={session.companyId} visitors={visitors} />
+        )}
+
+        {tab === "kioskautophoto" && (
+          <KioskAutoPhotoTab companyId={session.companyId} />
+        )}
+
+        {tab === "dualapproval" && (
+          <DualApprovalTab
+            companyId={session.companyId}
+            staffList={staffList}
+            currentStaffName={session.staffId ?? "Admin"}
+          />
+        )}
+
+        {tab === "cooldown" && (
+          <CooldownTab companyId={session.companyId} visitors={visitors} />
         )}
 
         {tab === "profile" && company && (
